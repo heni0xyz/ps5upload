@@ -2217,8 +2217,18 @@ static int runtime_write_shard_to_path(runtime_tx_entry_t *entry,
         return drain_shard_data(client_fd, data_len);
     }
     if (truncate && preallocate_bytes > 0) {
-        /* Pre-allocate to reduce filesystem fragmentation on large files. */
-        (void)ftruncate(fd, (off_t)preallocate_bytes);
+        /* Pre-allocate REAL blocks via posix_fallocate to avoid the
+         * sustained-write throughput collapse pattern (60 MiB/s → 2-3
+         * MiB/s a few minutes into a multi-GB upload) that plain
+         * ftruncate causes on PS5 UFS by leaving the file sparse and
+         * forcing per-write block-allocation + journal churn. Falls
+         * back to ftruncate on filesystems where fallocate isn't
+         * supported (exfat, fuse). Same migration as
+         * runtime_write_shard_persistent below. */
+        int prealloc_rc = posix_fallocate(fd, 0, (off_t)preallocate_bytes);
+        if (prealloc_rc != 0) {
+            (void)ftruncate(fd, (off_t)preallocate_bytes);
+        }
     }
     t_open_us = now_us() - t_open_start;
 
@@ -2460,7 +2470,29 @@ static int runtime_write_shard_persistent(runtime_tx_entry_t *entry,
             return drain_shard_data(client_fd, data_len);
         }
         if (!is_resume_open && preallocate_bytes > 0) {
-            (void)ftruncate(fd, (off_t)preallocate_bytes);
+            /* Pre-allocate the destination's blocks UP FRONT via
+             * posix_fallocate. The pre-2.2.29 path used ftruncate
+             * which on PS5 UFS creates a sparse file — every write
+             * to a previously-unallocated block has to bring in a
+             * fresh block, journal the bitmap update, and dirty an
+             * indirect block. For multi-GB uploads (game images,
+             * 30+ GB UFS .ffpkgs) the dirty-buffer pressure
+             * eventually trips the kernel's throttle and per-shard
+             * throughput collapses from ~60 MiB/s to ~2-3 MiB/s
+             * a few minutes into the transfer. posix_fallocate
+             * pre-allocates all blocks in one batch — subsequent
+             * shard writes only update content, no metadata churn.
+             *
+             * Falls back to ftruncate if fallocate isn't supported
+             * by the destination filesystem (exfat / fuse / NFS),
+             * matching the pattern cp_rf already uses. The fallback
+             * preserves the file-size semantic even on exfat where
+             * sparse-file cost is lower (FAT-family doesn't journal
+             * metadata block-by-block). */
+            int prealloc_rc = posix_fallocate(fd, 0, (off_t)preallocate_bytes);
+            if (prealloc_rc != 0) {
+                (void)ftruncate(fd, (off_t)preallocate_bytes);
+            }
         }
         /* posix_fadvise(SEQUENTIAL) was experimented with here; measured
          * neutral-to-slightly-negative on the e1000 lab NIC and produced no
@@ -7277,6 +7309,56 @@ static int handle_binary_frame(runtime_state_t *state, int client_fd,
                 entry->manifest_index        = idx;
                 entry->manifest_index_count  = idx_count;
                 entry->direct_mode = 1;
+                /* Unlink any stale per-file .ps5up2-tmp files left by a
+                 * prior aborted/failed upload of the same destination.
+                 * The single-file path at line 7270 already does this for
+                 * its single tmp; multi-file mode was missing the
+                 * equivalent sweep, which produced a hard-to-spot silent
+                 * corruption pattern:
+                 *
+                 *   1. Prior upload of game G fails partway, some
+                 *      <file>.ps5up2-tmp files remain on disk.
+                 *   2. User retries upload of game G. Engine's pack
+                 *      decision for some files differs from last time
+                 *      (because pack threshold or size near boundary),
+                 *      OR the file is now packed where it was non-packed.
+                 *   3. Pack worker writes correct content to file_path
+                 *      directly. No new tmp created for that file.
+                 *   4. COMMIT rename loop iterates manifest entries,
+                 *      sees the STALE <file>.ps5up2-tmp from step 1,
+                 *      rename(stale_tmp, file_path) succeeds — and
+                 *      OVERWRITES the just-written-correct packed content
+                 *      with the stale tmp. Client sees commit success,
+                 *      destination has stale content, game won't launch.
+                 *
+                 * Sweeping at fresh BEGIN_TX time eliminates the
+                 * stale-tmp source. The is_resume branch above
+                 * intentionally skips this sweep — a true resume needs
+                 * the partial tmps preserved. */
+                {
+                    const manifest_index_entry_t *idx_entries =
+                        (const manifest_index_entry_t *)idx;
+                    for (uint64_t i = 0; i < idx_count; i++) {
+                        char file_path[512];
+                        char stale_tmp[512 + 16];
+                        size_t plen = idx_entries[i].path_len;
+                        uint32_t poff = idx_entries[i].path_offset;
+                        if (plen == 0 || plen >= sizeof(file_path)) continue;
+                        /* Defense-in-depth bounds check matching
+                         * lookup_manifest_index — build_manifest_index
+                         * already validates these, but the cost is one
+                         * comparison and it makes this loop safe under
+                         * any future manifest-builder change. */
+                        if ((uint64_t)poff + (uint64_t)plen > bextra_len) {
+                            continue;
+                        }
+                        memcpy(file_path, blob + poff, plen);
+                        file_path[plen] = '\0';
+                        snprintf(stale_tmp, sizeof(stale_tmp),
+                                 "%s.ps5up2-tmp", file_path);
+                        (void)unlink(stale_tmp);
+                    }
+                }
             }
         }
         (void)runtime_save_tx_state(state);

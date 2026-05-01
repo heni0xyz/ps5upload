@@ -4,6 +4,78 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 2.2.29
+
+**Two critical fixes from real user reports**
+
+Same-day patch on top of 2.2.28's audit pass. Two distinct user
+reports surfaced two distinct bugs — neither was caught by the
+2.2.28 audit. Thanks to the reporters; both are real, both bite
+in normal use, and both are fixed here.
+
+### Stale-tmp overwrites correct content on multi-file uploads
+
+**Symptom**: upload reports success, but the uploaded files are
+silently corrupt — game won't launch, even though the same files
+sent over FTP work fine.
+
+**Root cause**: in multi-file direct mode (folder uploads), each
+non-packed file gets a `<path>.ps5up2-tmp` during transfer; on
+COMMIT, every manifest entry's tmp is renamed to its final path.
+Packed records (small files, written via the pack worker) write
+directly to `<path>` with no tmp. The bug: if a *prior aborted
+upload* of the same destination left `<path>.ps5up2-tmp` files on
+disk, the next fresh BEGIN_TX did NOT clean them up. When the new
+upload's pack worker wrote correct content directly to `<path>`,
+the COMMIT rename loop then promoted the *stale* tmp from the
+aborted run over the freshly-correct content. Client saw
+`commit_tx_ack: success`, destination had stale bytes.
+
+The single-file path already cleaned its tmp on fresh BEGIN_TX
+(line 7270 of runtime.c); multi-file mode was missing the
+equivalent sweep. Now iterates the manifest at BEGIN_TX time and
+unlinks each `<file>.ps5up2-tmp` before any shard arrives.
+Resume-flag-set BEGIN_TX intentionally skips the sweep (resume
+needs the partial tmps preserved to be useful).
+
+### Throughput collapse from 60 MiB/s to 2-3 MiB/s on multi-GB uploads
+
+**Symptom**: large file uploads start fast (~60 MiB/s) and a few
+minutes in drop to ~2-3 MiB/s and stay there. v1.5.x didn't have
+this regression but its loader is no longer compatible.
+
+**Root cause**: the transfer write path used `ftruncate(fd,
+total_bytes)` to "pre-allocate" the destination. On PS5 UFS this
+creates a *sparse* file: the file size is set, but no blocks are
+actually allocated. Each subsequent shard write is a "first write
+to a fresh region" which forces the kernel to allocate the block,
+update the bitmap, dirty an indirect block, and journal the
+metadata. After enough writes, the dirty-buffer threshold is hit
+and writes start blocking on writeback. The 25-30× slowdown is
+classic sustained-write throttle behaviour.
+
+`runtime_write_shard_persistent` and `runtime_write_shard_to_path`
+now use `posix_fallocate(fd, 0, total_bytes)` which pre-allocates
+all blocks in a single batch. Subsequent shard writes only update
+content — no metadata churn, no dirty-buffer pressure beyond the
+data itself. Falls back to `ftruncate` on filesystems that don't
+support fallocate (exfat, fuse, NFS-mounted).
+
+This matches the pattern `cp_rf` already uses (line 4635: "reserve
+contiguous dst extents up-front"). The transfer path was simply
+missed when that migration happened. Pack worker writes are
+unchanged — small per-file writes don't benefit from fallocate.
+
+### Verification
+
+Both fixes are confirmed via local rebuild + 88 engine tests + 7
+Tauri tests + 200 client vitest, plus a 50-iteration verify pass
+focused on edge cases of both code paths (resume interaction,
+restart interaction, packed-vs-non-packed mix, malformed
+manifest, ENOSPC fallback, empty-manifest, off-by-one).
+
+---
+
 ## 2.2.28
 
 **Audit pass — 27 bug fixes across payload, engine, and client**
