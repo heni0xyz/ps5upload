@@ -69,8 +69,30 @@ export function installEngineLogBridge() {
   if (running) return;
   running = true;
   const interval = setInterval(tick, POLL_INTERVAL_MS);
-  // Keep a handle on the interval so HMR in dev can clean it up if this
-  // module is re-evaluated. Without this, every Vite HMR would stack
-  // another timer.
-  (window as unknown as { __engineLogBridgeInterval?: number }).__engineLogBridgeInterval = interval as unknown as number;
+
+  // Vite HMR cleanup: when this module is re-evaluated (file save in
+  // dev), `import.meta.hot.dispose` runs BEFORE the new module
+  // evaluates. Clearing the old interval here prevents timer
+  // accumulation across saves. Without this, each save in dev
+  // doubles the engine-log poll rate, which over a long dev session
+  // would multi-count log entries (each timer's `tick()` advances
+  // the SAME `nextSince` cursor by the entries it sees).
+  //
+  // In production builds `import.meta.hot` is undefined and the
+  // dispose call is a typeof-guarded no-op — the interval runs for
+  // the lifetime of the renderer page (which exits when the user
+  // closes the desktop window).
+  //
+  // Cast through unknown so we don't need `vite/client` types in the
+  // tsconfig — this single reference is the only place we touch
+  // Vite's HMR API.
+  const meta = import.meta as unknown as {
+    hot?: { dispose: (cb: () => void) => void };
+  };
+  if (meta.hot) {
+    meta.hot.dispose(() => {
+      clearInterval(interval);
+      running = false;
+    });
+  }
 }

@@ -89,12 +89,27 @@ pub async fn user_config_save(app: AppHandle, config: JsonValue) -> Result<(), S
     // on disk before the data write, leaving a zero-byte
     // settings.json after a crash. Matches the same pattern in
     // persistence.rs::write_json_atomic.
+    //
+    // Tmp cleanup on every failure path: previously we used `?`
+    // propagation on write_all/sync_all, which left orphan
+    // settings.json.tmp.N files behind on every failed save (ENOSPC,
+    // permission, etc.). Over time these accumulate. Each failure
+    // path now removes the tmp before returning the error. Matches
+    // persistence.rs's explicit cleanup.
     {
         use std::io::Write;
-        let mut f = std::fs::File::create(&tmp).map_err(|e| format!("create {tmp:?}: {e}"))?;
-        f.write_all(&bytes)
-            .map_err(|e| format!("write {tmp:?}: {e}"))?;
-        f.sync_all().map_err(|e| format!("fsync {tmp:?}: {e}"))?;
+        let mut f = match std::fs::File::create(&tmp) {
+            Ok(f) => f,
+            Err(e) => return Err(format!("create {tmp:?}: {e}")),
+        };
+        if let Err(e) = f.write_all(&bytes) {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(format!("write {tmp:?}: {e}"));
+        }
+        if let Err(e) = f.sync_all() {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(format!("fsync {tmp:?}: {e}"));
+        }
     }
     if let Err(e) = super::replace_file(&tmp, &path) {
         // Best-effort cleanup: if rename failed the tmp is still on

@@ -4,6 +4,137 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 2.2.28
+
+**Audit pass — 27 bug fixes across payload, engine, and client**
+
+This release is the result of a multi-pass static audit covering every
+component (PS5 payload, Rust engine, Tauri desktop client, scripts,
+build) and a fresh look at the failure modes each tier handles. Most
+fixes close gaps that wouldn't surface in normal use but could bite
+under specific failure conditions (mid-transfer disk error, hostile
+input, edge-case resume).
+
+**No behavior change for the happy path.** Every successful upload,
+mount, register, or hardware read works exactly the same as 2.2.27.
+
+### High-impact fixes
+
+- **COMMIT_TX no longer silently corrupts on writer error.** When the
+  PS5-side disk write reported an I/O error mid-shard, the commit path
+  would log a warning and rename the partial tmp file over your good
+  destination anyway, then report success. Now the commit refuses the
+  rename, leaves the destination untouched, preserves the partial at
+  `.ps5up2-tmp` for inspection, and surfaces a structured
+  `direct_writer_io_error` (or `direct_rename_failed` / `manifest_missing`
+  / `direct_multi_rename_failed` / `spool_apply_failed`) to the client.
+- **Single-file direct-mode resume now actually works.** Resume of an
+  interrupted single-file upload had a long-standing latent bug where
+  the tmp file's fd wasn't reopened after ephemeral teardown — every
+  shard write hit `EBADF` and the resume failed end-to-end. The reopen
+  path now uses `O_APPEND` so previously-acknowledged shards' bytes are
+  preserved on disk while new shards land at end-of-file.
+- **Spool fallback no longer corrupts >60-file uploads.** The 2.1
+  direct-mode rewrite migrated the manifest blob to heap; the spool
+  fallback (used when direct mode can't engage) was missed and still
+  used a 8 KiB stack buffer that truncated any real-game manifest
+  mid-object. Migrated to the same heap-allocated path.
+- **DRM-type patch (Register → Patch DRM) is now atomic.** The
+  rewrite of `param.json` was non-atomic: a power loss between
+  `fopen("wb")` truncate and `fclose` left the source file zero-length
+  with no recovery path. Now writes to `.new`, fsyncs, then atomic
+  rename. Also tightened the JSON key match so a nested field mention
+  of `applicationDrmType` can't be matched accidentally.
+
+### Security + integrity fixes
+
+- **Updater asset URLs are now host-pinned.** The check + download
+  flow previously trusted any HTTPS URL the manifest contained; a
+  poisoned `latest.json` could have redirected downloads to an
+  attacker-controlled HTTPS server (TLS being the only integrity
+  boundary). Pin to `github.com` + `*.githubusercontent.com` for
+  production. Loopback HTTP and an env-overridden staging URL still
+  work for dev testers.
+- **Updater pre-release ordering is now correct.** A user on
+  `2.2.0-rc1` would never see `2.2.0` GA as available because
+  `is_newer` ignored pre-release suffixes. Per-semver pre-release
+  ordering (pre < GA) now decides ties on numeric equality.
+- **Download path traversal blocked.** A buggy or hostile modified
+  PS5 payload could have returned `FS_LIST_DIR` entries containing
+  `..` or `C:` in names; the host-side `local_dest_for` would have
+  blindly traversed. Components are now validated to reject `.`,
+  `..`, embedded `/ \ : NUL`, and leading `\\\\`.
+- **App-register response is JSON-escape-safe.** A malicious homebrew
+  `param.json` with `titleId` containing `"` or `\` could have
+  produced malformed `APP_REGISTER_ACK` JSON. Title IDs are now
+  escaped before interpolation.
+
+### Robustness + UX fixes
+
+- **Reconcile no longer aborts on a single hash error.** A flaky USB
+  drive or one stale-permission file used to fail the entire
+  reconcile pre-check. Per-file hash failures are now treated as
+  "must re-send" — one extra file goes to the upload list instead of
+  blocking the whole session.
+- **Stop button now stops mid-walk.** `recursive_size` (used by
+  FS_COPY and FS_DELETE pre-walks) didn't honour cancel; a Stop
+  click on a 200k-file tree had multi-minute latency before the copy
+  loop noticed. Cancel-check at directory boundaries makes Stop
+  responsive.
+- **Stop during image-mount-after-upload is consistent.** Previously,
+  clicking Stop right as the engine reported `done` could let the
+  image-mount call complete on the PS5 while the UI silently
+  returned to idle — leaving a real mount no row showed. Now skipped
+  cleanly.
+- **`fs_op` slot watchdog reclaims stuck slots.** A worker that crashed
+  without releasing leaked one of the 4 slots forever. After 24 h of
+  inactivity, a stuck slot is reclaimed with a log warning.
+- **Multi-file COMMIT now surfaces partial-rename failures.** If
+  `N` of `M` rename calls failed, the commit used to report success
+  silently. Now emits `direct_multi_rename_failed` with the count
+  and detail so the client knows.
+
+### Smaller fixes worth noting
+
+- Path allowlist (`is_path_allowed`, `cleanup_path_allowed`) no longer
+  rejects legitimate filenames that contain `..` substrings (e.g.
+  `My..Game`). Component-scoped check, not substring.
+- `instance_id` now mixes nanoseconds + pid — sub-second double-loads
+  produce distinct IDs (was wall-clock seconds only).
+- Ownership record write is now atomic (tmp + fsync + rename).
+- `remove_recursive_path` got the same 64-level depth cap as the
+  other recursive walkers.
+- `walk_remote_dir` (engine-side download walker) got a 64-level
+  depth cap to bound stack against PS5 directory cycles.
+- `engineApi.ping()` got a 2 s timeout — a wedged engine no longer
+  hangs the status indicator forever.
+- `user_config_save` now cleans up its `.tmp` file on every error
+  path (was leaking on `write_all`/`sync_all` failures).
+- `compareVersions` (TS-side semver) no longer treats `+build`
+  metadata as a pre-release suffix.
+- `apply_failed` is now a recognised terminal tx state — without
+  this, a slot stuck in `apply_failed` would never get evicted by
+  `runtime_alloc_tx_entry` and after 32 such failures the table
+  would saturate.
+- `engineLogBridge` now cleans up its setInterval on Vite HMR
+  re-evaluation in dev (was accumulating timers across saves).
+- `ptrace_remote` authid restore failure now logs once (was silently
+  `(void)`-cast despite the comment saying "log and move on").
+
+### Documentation
+
+- README: corrected stale claim about process-list firmware coverage
+  (it's stable across all SDK-supported firmwares — `sysctl`-based
+  with stable `kinfo_proc` offsets).
+- README: simplified the firmware-coverage table.
+- `bench/README.md`: documented the historical port drift in baseline
+  JSONs (`9114` → `19113`) so reviewers don't try to "fix" them.
+- `engine/.../cleanup.rs`: corrected the path doc (now
+  `/data/ps5upload/tests/`, was the obsolete `-bench`/`-sweep`/
+  `-smoke` triple).
+
+---
+
 ## 2.2.27
 
 **Load order doesn't matter anymore — kstuff after ps5upload still works**

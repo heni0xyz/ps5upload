@@ -653,8 +653,35 @@ static int patch_drm_type_to_standard(const char *src_path,
     }
     buf[len] = '\0';
 
+    /* Find the `"applicationDrmType"` key, but only if it appears as a
+     * top-level JSON object key — not nested inside another value or
+     * description field. We require the byte preceding the opening
+     * quote to be either `{`, `,`, whitespace, or beginning-of-buffer
+     * (i.e. the natural "after a `,` or after the `{`" separators in
+     * minified or pretty JSON). This rejects matches inside string
+     * values like `"description":"applicationDrmType field is...".
+     *
+     * Walk the buffer rather than using a single strstr so we can
+     * skip false-positive matches and resume searching past them. */
     static const char KEY[] = "\"applicationDrmType\"";
-    char *key_pos = strstr(buf, KEY);
+    static const size_t KEY_LEN = sizeof(KEY) - 1;
+    char *key_pos = NULL;
+    {
+        char *scan = buf;
+        for (;;) {
+            char *hit = strstr(scan, KEY);
+            if (!hit) break;
+            /* Check the byte immediately before the opening quote. */
+            char prev = (hit == buf) ? '{' : *(hit - 1);
+            if (prev == '{' || prev == ',' || prev == ' ' ||
+                prev == '\t' || prev == '\n' || prev == '\r') {
+                key_pos = hit;
+                break;
+            }
+            /* False positive — keep scanning past this match. */
+            scan = hit + KEY_LEN;
+        }
+    }
     if (!key_pos) {
         /* No applicationDrmType field at all — nothing to patch.
          * Some homebrew dumps omit it entirely; the launcher
@@ -663,7 +690,7 @@ static int patch_drm_type_to_standard(const char *src_path,
         if (err_out) *err_out = NULL;
         return 0;
     }
-    char *colon = strchr(key_pos + sizeof(KEY) - 1, ':');
+    char *colon = strchr(key_pos + KEY_LEN, ':');
     char *q1 = colon ? strchr(colon, '"') : NULL;
     char *q2 = q1 ? strchr(q1 + 1, '"') : NULL;
     if (!q1 || !q2) {
@@ -697,7 +724,26 @@ static int patch_drm_type_to_standard(const char *src_path,
     out[new_len] = '\0';
     free(buf);
 
-    f = fopen(param_json_path, "wb");
+    /* Atomic rewrite: write to <param.json>.new, fsync, rename onto the
+     * original path. The pre-2.2.28 path used fopen("wb") + fwrite +
+     * fclose directly on the destination, which truncated the file
+     * before the new bytes were durable. A power loss or panic mid-
+     * write left the user with a zero-length param.json and no way
+     * to recover. The atomic-rename pattern preserves the original on
+     * any failure short of rename itself, and rename(2) on POSIX is
+     * guaranteed to be atomic across a crash on the same filesystem. */
+    char tmp_path[REG_MAX_PATH];
+    int tn = snprintf(tmp_path, sizeof(tmp_path), "%s.new", param_json_path);
+    if (tn < 0 || (size_t)tn >= sizeof(tmp_path)) {
+        free(out);
+        if (err_out) *err_out = "register_drm_patch_path_too_long";
+        return -1;
+    }
+    /* Best-effort cleanup of any leftover .new from a prior crashed
+     * attempt. unlink failure is non-fatal — the open below will
+     * truncate it anyway. */
+    (void)unlink(tmp_path);
+    f = fopen(tmp_path, "wb");
     if (!f) {
         free(out);
         /* Likely a read-only mount (RO image, system partition).
@@ -706,11 +752,42 @@ static int patch_drm_type_to_standard(const char *src_path,
         if (err_out) *err_out = "register_drm_patch_write_open_failed";
         return -1;
     }
-    size_t written = fwrite(out, 1, new_len, f);
+    /* Single-pass durability check: fwrite, fflush stdio buffers,
+     * fsync to disk. `durable = 1` only if all three pass. fclose
+     * runs unconditionally (we own the FILE*) and its result is
+     * combined with the durable flag to gate the rename.
+     *
+     * The previous post-self-audit version used `written = 0` as a
+     * sentinel to coerce the failure path, but a bug-bait corner —
+     * an unreachable-on-stdio `fileno() < 0` — would skip the
+     * coercion AND skip fsync, falling through to a rename of un-
+     * fsynced bytes. The explicit boolean closes that hole. */
+    int durable = 0;
+    if (fwrite(out, 1, new_len, f) == new_len) {
+        if (fflush(f) == 0) {
+            int file_fd = fileno(f);
+            if (file_fd >= 0 && fsync(file_fd) == 0) {
+                durable = 1;
+            } else if (file_fd >= 0) {
+                /* fsync failure (most likely ENOSPC or EIO) — log
+                 * for diagnostics; the !durable branch will unlink. */
+                fprintf(stderr, "[register] fsync(%s) failed: %s\n",
+                        tmp_path, strerror(errno));
+            }
+        }
+    }
     int close_rc = fclose(f);
     free(out);
-    if (written != new_len || close_rc != 0) {
+    if (!durable || close_rc != 0) {
+        (void)unlink(tmp_path);
         if (err_out) *err_out = "register_drm_patch_write_failed";
+        return -1;
+    }
+    if (rename(tmp_path, param_json_path) != 0) {
+        fprintf(stderr, "[register] rename %s -> %s failed: %s\n",
+                tmp_path, param_json_path, strerror(errno));
+        (void)unlink(tmp_path);
+        if (err_out) *err_out = "register_drm_patch_rename_failed";
         return -1;
     }
     if (err_out) *err_out = NULL;

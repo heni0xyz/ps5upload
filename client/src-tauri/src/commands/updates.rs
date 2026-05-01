@@ -123,21 +123,34 @@ fn current_platform_key() -> &'static str {
     }
 }
 
-/// Minimal semver-ish comparison: split on '.', compare numeric
-/// components, ignore pre-release suffixes. Good enough for the
-/// version shape we actually publish (MAJOR.MINOR.PATCH). Returns
-/// true iff `latest` is strictly greater than `current`.
+/// Minimal semver-ish comparison. Splits MAJOR.MINOR.PATCH numerics and
+/// honours pre-release suffix order per semver: a pre-release version
+/// (`2.2.0-rc1`) is LESS THAN the GA of the same numeric (`2.2.0`).
+/// Without that, a user on `2.2.0-rc1` would never see `2.2.0` GA as
+/// "available", which silently strands them on the rc.
+///
+/// Build metadata after `+` is ignored entirely (semver rule).
+/// Returns true iff `latest` is strictly greater than `current`.
 fn is_newer(current: &str, latest: &str) -> bool {
-    fn parts(s: &str) -> Vec<u64> {
-        // Drop pre-release tail at '-' or '+' before splitting so
-        // "2.2.0-rc1" parses as [2, 2, 0].
-        let core = s.split(['-', '+']).next().unwrap_or(s);
-        core.split('.')
+    /// Returns (numeric_parts, has_prerelease). `2.2.0-rc1` →
+    /// (`[2,2,0]`, true). `2.2.0+sha.abc` → (`[2,2,0]`, false).
+    /// `2.2.0-rc1+sha.abc` → (`[2,2,0]`, true).
+    fn parts(s: &str) -> (Vec<u64>, bool) {
+        // Strip build-metadata first (`+...`), THEN check for `-`
+        // pre-release. Order matters: `2.2.0+rc1` is build-metadata
+        // (no pre-release) while `2.2.0-rc1` is a pre-release.
+        let no_build = s.split('+').next().unwrap_or(s);
+        let mut split = no_build.splitn(2, '-');
+        let core = split.next().unwrap_or("");
+        let has_pre = split.next().is_some();
+        let nums: Vec<u64> = core
+            .split('.')
             .map(|p| p.parse::<u64>().unwrap_or(0))
-            .collect()
+            .collect();
+        (nums, has_pre)
     }
-    let c = parts(current);
-    let l = parts(latest);
+    let (c, c_pre) = parts(current);
+    let (l, l_pre) = parts(latest);
     let len = c.len().max(l.len());
     for i in 0..len {
         let cv = c.get(i).copied().unwrap_or(0);
@@ -149,7 +162,62 @@ fn is_newer(current: &str, latest: &str) -> bool {
             return false;
         }
     }
-    false
+    // Numerics equal — pre-release ordering decides:
+    //   current GA, latest GA   → equal, return false
+    //   current GA, latest pre  → latest is OLDER (pre < GA), return false
+    //   current pre, latest GA  → latest is NEWER, return true
+    //   current pre, latest pre → equal-ish (we don't compare suffix
+    //                              text), return false
+    c_pre && !l_pre
+}
+
+#[cfg(test)]
+mod is_newer_tests {
+    use super::is_newer;
+
+    #[test]
+    fn higher_numeric_is_newer() {
+        assert!(is_newer("2.2.0", "2.2.1"));
+        assert!(is_newer("2.2.0", "2.3.0"));
+        assert!(is_newer("2.2.0", "3.0.0"));
+    }
+
+    #[test]
+    fn lower_numeric_is_not_newer() {
+        assert!(!is_newer("2.2.1", "2.2.0"));
+        assert!(!is_newer("3.0.0", "2.9.9"));
+    }
+
+    #[test]
+    fn equal_numeric_is_not_newer() {
+        assert!(!is_newer("2.2.0", "2.2.0"));
+    }
+
+    #[test]
+    fn rc_user_sees_ga_as_newer() {
+        // The Bug U fix: someone on the release candidate must see
+        // the GA as available.
+        assert!(is_newer("2.2.0-rc1", "2.2.0"));
+        // Two pre-release versions with the same numeric triple are
+        // treated as equal — we don't compare suffix text. Use `!`
+        // form rather than `== false` to satisfy `clippy::bool_comparison`.
+        assert!(!is_newer("2.2.0-rc1", "2.2.0-rc2"));
+        assert!(is_newer("2.2.0-beta", "2.2.0"));
+    }
+
+    #[test]
+    fn ga_user_does_not_see_rc_as_newer() {
+        // Conversely, GA users shouldn't be downgraded to a pre-release.
+        assert!(!is_newer("2.2.0", "2.2.0-rc1"));
+        assert!(!is_newer("2.2.0", "2.2.0-beta"));
+    }
+
+    #[test]
+    fn build_metadata_ignored() {
+        // Per semver, +build-metadata doesn't affect ordering.
+        assert!(!is_newer("2.2.0", "2.2.0+sha.abc"));
+        assert!(!is_newer("2.2.0+sha.def", "2.2.0+sha.abc"));
+    }
 }
 
 /// Hard cap on the manifest body size. A well-formed latest.json for
@@ -160,16 +228,24 @@ fn is_newer(current: &str, latest: &str) -> bool {
 const MANIFEST_MAX_BYTES: usize = 64 * 1024;
 
 async fn fetch_manifest() -> Result<Manifest, String> {
-    let url = std::env::var("PS5UPLOAD_UPDATE_MANIFEST_URL")
-        .unwrap_or_else(|_| DEFAULT_MANIFEST_URL.to_string());
-    // Require HTTPS for the manifest source — the update flow trusts
-    // the manifest's `assets` URLs to be safe (we eventually drop the
-    // download into the user's Downloads folder), so letting a plain
-    // `http://` origin poison those URLs is a real concern. The env
-    // override is still honored because a dev tester pointing at a
-    // local staging server is a reasonable use case; gate HTTPS only
-    // on the production default.
-    if !is_safe_update_url(&url) {
+    let env_override = std::env::var("PS5UPLOAD_UPDATE_MANIFEST_URL").ok();
+    let url = env_override
+        .clone()
+        .unwrap_or_else(|| DEFAULT_MANIFEST_URL.to_string());
+    // Production default URL requires HTTPS + a pinned GitHub host.
+    // Env-overridden URL (dev/staging) gets a relaxed check that only
+    // requires HTTPS or loopback HTTP — pinning would block a tester
+    // from pointing at https://staging-internal.example.com/latest.json,
+    // which the comment in this module's history has always promised
+    // would work. The relaxation is acceptable because the env var is
+    // set explicitly by the dev (not user input the way the manifest
+    // contents are), so the threat model is different.
+    let is_safe = if env_override.is_some() {
+        is_safe_dev_url(&url)
+    } else {
+        is_safe_update_url(&url)
+    };
+    if !is_safe {
         return Err(format!(
             "refusing to fetch update manifest over insecure URL: {url}"
         ));
@@ -275,8 +351,17 @@ pub async fn update_download(
     // comes from the remote manifest and we verify TLS via rustls, but
     // if a future misconfiguration ever let a plain-http URL slip into
     // `assets`, we'd happily download it over the clear. Refuse up
-    // front. (Same 127.0.0.1 escape hatch for local staging tests.)
-    if !is_safe_update_url(&url) {
+    // front. Honour the same env-override relaxation as fetch_manifest:
+    // when the dev set PS5UPLOAD_UPDATE_MANIFEST_URL, asset URLs in the
+    // resulting manifest may legitimately point at non-GitHub hosts
+    // (the staging-internal CDN, etc.); pinning would block the
+    // download even though the manifest fetch was allowed.
+    let download_is_safe = if std::env::var("PS5UPLOAD_UPDATE_MANIFEST_URL").is_ok() {
+        is_safe_dev_url(&url)
+    } else {
+        is_safe_update_url(&url)
+    };
+    if !download_is_safe {
         return Err(format!("refusing to download over insecure URL: {url}"));
     }
     // Tight basename validation. The filename comes from the update
@@ -433,12 +518,58 @@ async fn reveal(_app: &AppHandle, path: &std::path::Path) -> Result<(), String> 
     open::that_detached(parent).map_err(|e| format!("open downloads folder: {e}"))
 }
 
+/// Hosts allowed for production-grade update HTTPS URLs. We pin to
+/// GitHub-owned origins because all releases ship through
+/// `github.com/phantomptr/ps5upload/releases/` (manifest URL,
+/// `latest.json`) and `*.githubusercontent.com` (release-asset
+/// redirect target — `release-assets.githubusercontent.com` and
+/// `objects.githubusercontent.com` are the actual CDN hostnames the
+/// download follows). Without this pin, TLS alone is the integrity
+/// boundary: a poisoned manifest published via a compromised release
+/// pipeline could redirect downloads to attacker-controlled HTTPS
+/// without our shell noticing. Pinning closes that gap as long as
+/// the manifest itself is hosted on github.com.
+const PINNED_PRODUCTION_HOSTS: &[&str] = &[
+    "github.com",
+    "release-assets.githubusercontent.com",
+    "objects.githubusercontent.com",
+    "raw.githubusercontent.com",
+];
+
 fn is_safe_update_url(raw: &str) -> bool {
+    is_safe_update_url_for_host(raw, PINNED_PRODUCTION_HOSTS)
+}
+
+fn is_safe_update_url_for_host(raw: &str, allowed_hosts: &[&str]) -> bool {
     let Ok(url) = reqwest::Url::parse(raw) else {
         return false;
     };
     match url.scheme() {
-        "https" => true,
+        "https" => match url.host_str() {
+            Some(host) => allowed_hosts.contains(&host),
+            None => false,
+        },
+        "http" => matches!(
+            url.host_str(),
+            Some("127.0.0.1") | Some("localhost") | Some("::1") | Some("[::1]")
+        ),
+        _ => false,
+    }
+}
+
+/// Relaxed safety check for the dev/staging env-override path. Allows
+/// any HTTPS host (no pin) plus loopback HTTP. Used only when the
+/// `PS5UPLOAD_UPDATE_MANIFEST_URL` env var is set explicitly — the
+/// developer setting the variable is opting into a less-pinned
+/// origin. The threat model here is "dev points at internal staging
+/// server", which is fundamentally different from "user runs the
+/// shipped binary against the GitHub default".
+fn is_safe_dev_url(raw: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(raw) else {
+        return false;
+    };
+    match url.scheme() {
+        "https" => url.host_str().is_some(),
         "http" => matches!(
             url.host_str(),
             Some("127.0.0.1") | Some("localhost") | Some("::1") | Some("[::1]")
@@ -453,20 +584,40 @@ mod tests {
 
     #[test]
     fn update_urls_require_https_except_loopback_http() {
+        // Pinned production hosts pass.
         assert!(is_safe_update_url(
             "https://github.com/phantomptr/ps5upload/latest.json"
         ));
+        assert!(is_safe_update_url(
+            "https://release-assets.githubusercontent.com/foo/bar"
+        ));
+        assert!(is_safe_update_url(
+            "https://objects.githubusercontent.com/foo/bar"
+        ));
+        // Loopback http still passes (env-override staging tests).
         assert!(is_safe_update_url("http://127.0.0.1:8000/latest.json"));
         assert!(is_safe_update_url("http://localhost:8000/latest.json"));
         assert!(is_safe_update_url("http://[::1]:8000/latest.json"));
 
+        // Plain http on github is rejected (TLS required for prod).
         assert!(!is_safe_update_url(
             "http://github.com/phantomptr/ps5upload/latest.json"
         ));
+        // Hostnames that look-alike but aren't loopback are rejected.
         assert!(!is_safe_update_url(
             "http://127.0.0.1.evil.test/latest.json"
         ));
+        // Non-HTTP(S) schemes rejected.
         assert!(!is_safe_update_url("ftp://github.com/latest.json"));
         assert!(!is_safe_update_url("not a url"));
+        // HTTPS to a non-pinned host is rejected — this is the new
+        // host-pinning protection: a poisoned manifest can't redirect
+        // downloads to an attacker's HTTPS server.
+        assert!(!is_safe_update_url(
+            "https://attacker.example.com/PS5Upload-pwn.dmg"
+        ));
+        assert!(!is_safe_update_url(
+            "https://github-attacker.com/latest.json"
+        ));
     }
 }

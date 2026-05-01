@@ -125,11 +125,22 @@ pub fn enumerate_download_set(
             });
         }
         DownloadKind::Folder => {
-            walk_remote_dir(addr, src_path, &basename, &mut manifest, &mut skipped)?;
+            walk_remote_dir(addr, src_path, &basename, &mut manifest, &mut skipped, 0)?;
         }
     }
     Ok(DownloadPlan { manifest, skipped })
 }
+
+/// Maximum recursion depth for `walk_remote_dir`. Matches the payload-side
+/// `rm_rf_op` / `chmod_rf` cap of 64. Bounds stack usage against:
+///   - genuinely deeply-nested directories (Unreal asset trees, etc.);
+///   - PS5-side filesystem cycles (rare but possible with bind-mounts);
+///   - hostile or buggy modified payloads returning crafted FS_LIST_DIR
+///     entries that loop back on themselves.
+///
+/// Without this, recursion would stack-overflow the engine process
+/// before any of those cases produced a clean error.
+const WALK_REMOTE_MAX_DEPTH: u32 = 64;
 
 fn walk_remote_dir(
     addr: &str,
@@ -137,7 +148,16 @@ fn walk_remote_dir(
     rel_prefix: &str,
     out: &mut Vec<DownloadEntry>,
     skipped: &mut Vec<SkippedEntry>,
+    depth: u32,
 ) -> Result<()> {
+    if depth > WALK_REMOTE_MAX_DEPTH {
+        anyhow::bail!(
+            "remote walk depth cap {} exceeded at {}; refusing to recurse further \
+             (possible PS5 directory cycle or pathological nesting)",
+            WALK_REMOTE_MAX_DEPTH,
+            remote_dir
+        );
+    }
     let listing = list_dir(
         addr,
         remote_dir,
@@ -160,7 +180,7 @@ fn walk_remote_dir(
         };
         let child_remote = format!("{}/{}", remote_dir.trim_end_matches('/'), entry.name);
         match entry.kind.as_str() {
-            "dir" => walk_remote_dir(addr, &child_remote, &child_rel, out, skipped)?,
+            "dir" => walk_remote_dir(addr, &child_remote, &child_rel, out, skipped, depth + 1)?,
             "file" => out.push(DownloadEntry {
                 remote_path: child_remote,
                 rel_path: child_rel,
@@ -213,7 +233,12 @@ pub fn download_to_local(
 
     let mut total_written = 0u64;
     for entry in manifest {
-        let local_path = local_dest_for(dest_dir, &entry.rel_path);
+        let local_path = local_dest_for(dest_dir, &entry.rel_path).with_context(|| {
+            format!(
+                "rejecting download of {} — unsafe rel_path {:?}",
+                entry.remote_path, entry.rel_path
+            )
+        })?;
         if let Some(parent) = local_path.parent() {
             fs::create_dir_all(parent).with_context(|| format!("mkdir {}", parent.display()))?;
         }
@@ -387,16 +412,51 @@ fn remote_parent(path: &str) -> String {
     }
 }
 
-fn local_dest_for(dest_dir: &Path, rel_path: &str) -> PathBuf {
+/// Build a local destination path from `dest_dir` + a forward-slash-separated
+/// `rel_path` from the PS5. Each component is validated to ensure the
+/// returned path stays under `dest_dir` — a malicious or buggy modified
+/// payload could otherwise return `FS_LIST_DIR` entries with names like
+/// `..` or `C:` and write outside the user-chosen destination.
+///
+/// Rejected component shapes:
+///   - `.` or `..` — directory traversal
+///   - any `/` or `\\` — embedded separator (already split, but the
+///     backslash check defends against PS5-side names like
+///     `foo\\bar` slipping through)
+///   - any `:` (Windows) — drive-letter or NTFS alternate-data-stream
+///   - leading `\\\\` — UNC path on Windows
+///   - any embedded NUL — C-string terminator
+///
+/// Returns `Err` with the offending component on rejection so the caller
+/// can surface a clear "the PS5 sent us an invalid name" error rather than
+/// silently writing to a wrong path.
+fn local_dest_for(dest_dir: &Path, rel_path: &str) -> Result<PathBuf> {
     let mut out = PathBuf::from(dest_dir);
-    // Forward-slash relpaths from PS5; convert to host separators
-    // when pushing components so Windows produces `\` paths.
     for part in rel_path.split('/') {
-        if !part.is_empty() {
-            out.push(part);
+        if part.is_empty() {
+            continue;
         }
+        if part == "." || part == ".." {
+            anyhow::bail!(
+                "rejecting download path with '{}' component: rel_path={:?}",
+                part,
+                rel_path
+            );
+        }
+        if part.contains('\\')
+            || part.contains(':')
+            || part.contains('\0')
+            || part.starts_with('\\')
+        {
+            anyhow::bail!(
+                "rejecting download path with unsafe component {:?}: rel_path={:?}",
+                part,
+                rel_path
+            );
+        }
+        out.push(part);
     }
-    out
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -420,7 +480,7 @@ mod tests {
     #[test]
     fn local_dest_uses_host_separators() {
         let base = PathBuf::from("/host/dest");
-        let resolved = local_dest_for(&base, "sub/dir/file.bin");
+        let resolved = local_dest_for(&base, "sub/dir/file.bin").expect("clean rel_path");
         // Use components rather than string compare so this passes
         // identically on Windows + Unix.
         let parts: Vec<_> = resolved
@@ -433,5 +493,48 @@ mod tests {
         assert_eq!(parts.last().unwrap(), "file.bin");
         assert!(parts.contains(&"sub".to_string()));
         assert!(parts.contains(&"dir".to_string()));
+    }
+
+    #[test]
+    fn local_dest_rejects_dotdot_component() {
+        let base = PathBuf::from("/host/dest");
+        let err = local_dest_for(&base, "../escape").unwrap_err();
+        assert!(err.to_string().contains(".."));
+    }
+
+    #[test]
+    fn local_dest_rejects_dot_component() {
+        let base = PathBuf::from("/host/dest");
+        assert!(local_dest_for(&base, "./hidden").is_err());
+    }
+
+    #[test]
+    fn local_dest_rejects_backslash_component() {
+        let base = PathBuf::from("/host/dest");
+        // PS5 paths use forward slashes, but a malicious entry name
+        // containing a literal backslash should still be refused so
+        // it can't bypass the split-on-/ scoping on Windows.
+        assert!(local_dest_for(&base, r"sub/foo\bar").is_err());
+    }
+
+    #[test]
+    fn local_dest_rejects_drive_letter_component() {
+        let base = PathBuf::from("/host/dest");
+        // A `:` in a component would let a malicious name like `C:` or
+        // `foo:bar` either replace the path on Windows or land in an
+        // NTFS alternate data stream. Either is a traversal.
+        assert!(local_dest_for(&base, "sub/C:").is_err());
+    }
+
+    #[test]
+    fn local_dest_accepts_dotted_filename() {
+        // Defense against false positives: a filename that *contains*
+        // dots (e.g. `archive.tar.gz`) or starts with a dot (e.g.
+        // `.gitignore`) is legitimate. Only the exact `.` and `..`
+        // components should be rejected.
+        let base = PathBuf::from("/host/dest");
+        assert!(local_dest_for(&base, "archive.tar.gz").is_ok());
+        assert!(local_dest_for(&base, ".gitignore").is_ok());
+        assert!(local_dest_for(&base, "sub/..foo").is_ok()); // contains, not equals
     }
 }

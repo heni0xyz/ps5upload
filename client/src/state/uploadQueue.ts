@@ -246,7 +246,18 @@ export const useUploadQueueStore = create<QueueState>((set, get) => {
       }
       if (snap.status === "done") {
         let mountedAt: string | null = null;
-        if (item.sourceKind === "image" && item.mountAfterUpload) {
+        // Re-check liveness before initiating the mount. Without this,
+        // a Stop click between the engine's done-snapshot arrival and
+        // the fsMount call would let the mount happen on the PS5
+        // anyway — start() then sees `!isLive()` after the await and
+        // skips patching the item, leaving the row stuck at "pending"
+        // while a real mount sits on /mnt/ps5upload/. Skip-and-return
+        // here keeps the user's mental model consistent: Stop = stop.
+        if (
+          isLive() &&
+          item.sourceKind === "image" &&
+          item.mountAfterUpload
+        ) {
           try {
             const mounted = await fsMount(
               item.addr,

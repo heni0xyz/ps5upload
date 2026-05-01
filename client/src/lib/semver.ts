@@ -41,10 +41,21 @@ interface ParsedVersion {
 }
 
 function parseVersion(v: string): ParsedVersion | null {
-  const m = v.trim().match(/^v?(\d+)\.(\d+)\.(\d+)(?:[-+]([A-Za-z0-9._-]+))?$/);
+  // Per semver:
+  //   <major>.<minor>.<patch>[-<pre-release>][+<build-metadata>]
+  // Build metadata after `+` is IGNORED for ordering; pre-release
+  // after `-` orders LESS than the GA. Pre-2.2.28 the regex matched
+  // `[-+]` into a single group, which made `2.2.0+sha.abc` look like
+  // a pre-release ("2.2.0-build" semantics) and compare wrongly. The
+  // separate captures + ignored `m[5]` build group fixes that.
+  const m = v
+    .trim()
+    .match(/^v?(\d+)\.(\d+)\.(\d+)(?:-([A-Za-z0-9.-]+))?(?:\+([A-Za-z0-9.-]+))?$/);
   if (!m) return null;
   return {
     parts: [Number(m[1]), Number(m[2]), Number(m[3])],
     pre: m[4] ?? null,
+    // m[5] is build metadata; intentionally not stored — semver
+    // says it doesn't affect ordering.
   };
 }

@@ -320,6 +320,9 @@ typedef struct manifest_index_entry manifest_index_entry_t;
 
 /* Forward declarations */
 static uint32_t read_le32(const unsigned char *p);
+/* Component-scoped `..`/`.` rejection used by both is_path_allowed and
+ * cleanup_path_allowed. Defined further down near is_path_allowed. */
+static int path_has_dotdot_component(const char *p);
 /* Forward declarations — runtime_reconcile_mounts uses fs_mount and
  * mount_tracker helpers defined further down in the file. */
 static int fs_mount_try_unmount(const char *mount_point);
@@ -333,8 +336,8 @@ static int handle_stream_shard(runtime_state_t *state, int client_fd,
                                 uint64_t trace_id, uint64_t body_len);
 static int runtime_write_manifest(const runtime_tx_entry_t *entry,
                                    const char *manifest_json, size_t manifest_len);
-static int runtime_read_manifest(const runtime_tx_entry_t *entry,
-                                  char *buf, size_t buf_len);
+static int runtime_read_manifest_alloc(const runtime_tx_entry_t *entry,
+                                        char **out_buf, size_t *out_len);
 static int manifest_get_nth_file_path(const char *json, uint64_t n,
                                        manifest_file_entry_t *out);
 static void runtime_release_tx_resources(runtime_tx_entry_t *entry);
@@ -651,7 +654,15 @@ static int runtime_tx_state_is_terminal(const runtime_tx_entry_t *entry) {
     if (!entry || !entry->in_use) return 1;
     return strcmp(entry->state, "committed")   == 0 ||
            strcmp(entry->state, "aborted")     == 0 ||
-           strcmp(entry->state, "interrupted") == 0;
+           strcmp(entry->state, "interrupted") == 0 ||
+           /* "apply_failed" is the new terminal state for COMMIT_TX
+            * apply failures (writer I/O error, rename failure,
+            * spool-apply failure). Without it here, a slot in
+            * apply_failed would never be evicted, and after enough
+            * such failures the tx table would saturate at
+            * MAX_TX entries and reject all future BEGIN_TX with
+            * "tx_table_full". */
+           strcmp(entry->state, "apply_failed") == 0;
 }
 
 /* Caller must hold state_mtx. Returns an entry slot for `tx_id`,
@@ -1284,8 +1295,34 @@ static void mount_tracker_remove(const char *mount_point) {
 int runtime_init(runtime_state_t *state) {
     if (!state) return -1;
     memset(state, 0, sizeof(*state));
-    state->instance_id      = (uint64_t)time(NULL);
-    state->started_at_unix  = (uint64_t)time(NULL);
+    /* Instance ID needs to distinguish payloads loaded sub-second apart.
+     * The pre-2.2.28 `time(NULL)` had second resolution: two ELFs loaded
+     * within the same second produced identical IDs, so the engine's
+     * "different process now" detector silently missed the takeover.
+     * Mix nanoseconds + getpid() into the low 32 bits so the ID is
+     * monotone-distinct even on rapid-cycle reloads.
+     *
+     * Layout (64 bits, MSB → LSB):
+     *   bits 63..32: low 32 bits of unix-epoch seconds (`tv_sec`).
+     *                Wraps in 2106; fine for ps5upload's lifetime.
+     *   bits 31..16: low 16 bits of pid (Linux/FreeBSD PIDs typically
+     *                fit; high-pid systems lose discrimination here
+     *                but two consecutive payloads still differ via
+     *                tv_nsec entropy below).
+     *   bits 15..0:  low 16 bits of `tv_nsec`, XOR'd with the pid
+     *                bits when the shift overlaps. Provides sub-µs
+     *                resolution distinct between rapid restarts. */
+    {
+        struct timespec rts;
+        if (clock_gettime(CLOCK_REALTIME, &rts) != 0) {
+            rts.tv_sec = time(NULL);
+            rts.tv_nsec = 0;
+        }
+        uint64_t hi = ((uint64_t)rts.tv_sec & 0xFFFFFFFFu) << 32;
+        uint64_t lo = ((uint64_t)getpid() << 16) ^ ((uint64_t)rts.tv_nsec & 0xFFFFu);
+        state->instance_id = hi | (lo & 0xFFFFFFFFu);
+        state->started_at_unix = (uint64_t)rts.tv_sec;
+    }
     state->runtime_port     = PS5UPLOAD2_RUNTIME_PORT;
     state->mgmt_port        = PS5UPLOAD2_MGMT_PORT;
     state->listener_fd      = -1;
@@ -1329,11 +1366,26 @@ int runtime_init(runtime_state_t *state) {
 
 int runtime_write_ownership(const runtime_state_t *state) {
     FILE *fp = NULL;
+    int fd_for_sync;
+    char tmp_path[300];
     if (!state) return -1;
-    fp = fopen(state->ownership_path, "w");
-    if (!fp) {
-        fprintf(stderr, "[payload2] failed to open ownership record %s\n",
+    /* Atomic write via tmp + rename. Pre-2.2.28 used `fopen("w")`
+     * which truncates the destination immediately — a second payload
+     * starting during this call could observe an empty ownership
+     * file, and a power loss between truncate and fclose would leave
+     * a permanently-empty record. Rename(2) on POSIX is atomic, so a
+     * concurrent reader either sees the old file or the new one,
+     * never half-written. */
+    int n = snprintf(tmp_path, sizeof(tmp_path), "%s.tmp",
+                     state->ownership_path);
+    if (n < 0 || (size_t)n >= sizeof(tmp_path)) {
+        fprintf(stderr, "[payload2] ownership tmp path overflow for %s\n",
                 state->ownership_path);
+        return -1;
+    }
+    fp = fopen(tmp_path, "w");
+    if (!fp) {
+        fprintf(stderr, "[payload2] failed to open ownership tmp %s\n", tmp_path);
         return -1;
     }
     fprintf(fp,
@@ -1342,7 +1394,28 @@ int runtime_write_ownership(const runtime_state_t *state) {
             state->runtime_port,
             state->startup_reason,
             (unsigned long long)state->started_at_unix);
-    fclose(fp);
+    /* Flush + fsync before rename so the bytes are durable. Without
+     * fsync the rename can promote stale (or zero) content into the
+     * destination if a crash hits before writeback. */
+    if (fflush(fp) != 0) {
+        fclose(fp);
+        (void)unlink(tmp_path);
+        fprintf(stderr, "[payload2] fflush ownership tmp %s failed\n", tmp_path);
+        return -1;
+    }
+    fd_for_sync = fileno(fp);
+    if (fd_for_sync >= 0) (void)fsync(fd_for_sync);
+    if (fclose(fp) != 0) {
+        (void)unlink(tmp_path);
+        fprintf(stderr, "[payload2] fclose ownership tmp %s failed\n", tmp_path);
+        return -1;
+    }
+    if (rename(tmp_path, state->ownership_path) != 0) {
+        fprintf(stderr, "[payload2] rename %s -> %s failed: %s\n",
+                tmp_path, state->ownership_path, strerror(errno));
+        (void)unlink(tmp_path);
+        return -1;
+    }
     printf("[payload2] ownership record instance=%llu port=%d path=%s\n",
            (unsigned long long)state->instance_id,
            state->runtime_port,
@@ -2353,9 +2426,32 @@ static int runtime_write_shard_persistent(runtime_tx_entry_t *entry,
     if (out_digest) memset(out_digest, 0, BLAKE3_OUT_LEN);
     if (hash_enabled) blake3_hasher_init(&hasher);
 
-    /* First shard: open the tmp file and, if worth it, start the writer. */
-    if (is_first_shard && !entry->direct_fd_open) {
-        int flags = O_WRONLY | O_CREAT | O_TRUNC;
+    /* Open the tmp file when not already open. Two cases:
+     *
+     *   1. Fresh first shard (is_first_shard=1, direct_fd_open=0):
+     *      open with O_TRUNC + ftruncate-to-total_bytes, optionally
+     *      spawn the writer thread.
+     *
+     *   2. Resume scenario (is_first_shard=0, direct_fd_open=0):
+     *      pre-2.2.28 this case fell into the sync-write path with
+     *      direct_fd=-1 → write_full(-1, ...) failed EBADF and resume
+     *      of single-file direct uploads was broken end-to-end. Fix:
+     *      reopen with O_APPEND so every write lands at end-of-file,
+     *      preserving the bytes from shards 1..N already on disk
+     *      (ephemeral release intentionally keeps the tmp file). We
+     *      do NOT spawn the writer thread on resume — the producer/
+     *      consumer pattern reuses an in-memory state machine that
+     *      doesn't survive ephemeral teardown, and a one-shot resume
+     *      is rarely throughput-critical anyway (sync fd write is
+     *      enough to drain a few MB of pending data). */
+    if (!entry->direct_fd_open) {
+        int flags = O_WRONLY | O_CREAT;
+        int is_resume_open = !is_first_shard;
+        if (is_resume_open) {
+            flags |= O_APPEND;
+        } else {
+            flags |= O_TRUNC;
+        }
         uint64_t t_open_start = now_us();
         int fd = open(entry->tmp_path, flags, 0666);
         if (fd < 0) {
@@ -2363,7 +2459,7 @@ static int runtime_write_shard_persistent(runtime_tx_entry_t *entry,
                     entry->tmp_path, errno);
             return drain_shard_data(client_fd, data_len);
         }
-        if (preallocate_bytes > 0) {
+        if (!is_resume_open && preallocate_bytes > 0) {
             (void)ftruncate(fd, (off_t)preallocate_bytes);
         }
         /* posix_fadvise(SEQUENTIAL) was experimented with here; measured
@@ -2375,11 +2471,12 @@ static int runtime_write_shard_persistent(runtime_tx_entry_t *entry,
         entry->direct_fd_open = 1;
         t_open_us = now_us() - t_open_start;
 
-        /* Spawn the writer thread only if the tx is big enough to amortise
-         * pthread create/join cost. Threshold matches the per-shard threshold
-         * on the old path — same "big enough to benefit from overlap" idea,
-         * just applied once per tx instead of once per shard. */
-        if (entry->total_bytes >= PS5UPLOAD2_PIPED_THREAD_MIN_BYTES) {
+        /* Spawn the writer thread only on the fresh-first-shard path
+         * AND only if the tx is big enough to amortise pthread
+         * create/join cost. Resume-open uses sync writes (see comment
+         * above the open). */
+        if (!is_resume_open &&
+            entry->total_bytes >= PS5UPLOAD2_PIPED_THREAD_MIN_BYTES) {
             if (direct_writer_start(entry, fd) != 0) {
                 /* Fall back to sync writes on a persistent fd — slower but
                  * functionally correct. Don't close fd; entry owns it. */
@@ -2909,22 +3006,61 @@ static int manifest_get_nth_file_path(const char *json, uint64_t n,
 }
 
 /*
- * Read the persisted manifest JSON for a transaction.
- * Returns 0 and fills buf on success; -1 if the file is missing or unreadable.
+ * Read the persisted manifest JSON into a heap-allocated buffer sized to
+ * the on-disk file. Caller owns the returned pointer and must `free()` it.
+ *
+ * Returns 0 on success with `*out_buf` and `*out_len` populated, -1 on
+ * file-missing/unreadable/oversize/oom (in which case `*out_buf` is NULL).
+ *
+ * `PS5UPLOAD2_MAX_MANIFEST_BLOB` (128 MiB) caps the read — a manifest
+ * past that size is presumed corrupt or hostile.
+ *
+ * Why this exists: the spool fallback used to use a `char[8192]` stack
+ * buffer with `runtime_read_manifest`, which silently truncated any
+ * manifest larger than ~60 file entries — exactly the same bug 2.1
+ * fixed in the direct-mode path with a heap-allocated `manifest_blob`.
+ * Spool wasn't migrated; this function closes that gap.
  */
-static int runtime_read_manifest(const runtime_tx_entry_t *entry,
-                                  char *buf, size_t buf_len) {
+static int runtime_read_manifest_alloc(const runtime_tx_entry_t *entry,
+                                        char **out_buf, size_t *out_len) {
     char path[512];
     FILE *fp = NULL;
+    long fsize = 0;
+    char *buf = NULL;
     size_t got = 0;
-    if (!entry || !buf || buf_len == 0) return -1;
+    if (!entry || !out_buf || !out_len) return -1;
+    *out_buf = NULL;
+    *out_len = 0;
     snprintf(path, sizeof(path), "%s/manifest_%s.json",
              PS5UPLOAD2_TX_DIR, entry->tx_id_hex);
-    fp = fopen(path, "r");
+    fp = fopen(path, "rb");
     if (!fp) return -1;
-    got = fread(buf, 1, buf_len - 1, fp);
-    buf[got] = '\0';
+    if (fseek(fp, 0, SEEK_END) != 0) {
+        fclose(fp);
+        return -1;
+    }
+    fsize = ftell(fp);
+    if (fsize <= 0 || (uint64_t)fsize > PS5UPLOAD2_MAX_MANIFEST_BLOB) {
+        fprintf(stderr, "[payload2] manifest file size out of range: %ld bytes for tx %s\n",
+                fsize, entry->tx_id_hex);
+        fclose(fp);
+        return -1;
+    }
+    rewind(fp);
+    buf = (char *)malloc((size_t)fsize + 1);
+    if (!buf) {
+        fclose(fp);
+        return -1;
+    }
+    got = fread(buf, 1, (size_t)fsize, fp);
     fclose(fp);
+    if (got != (size_t)fsize) {
+        free(buf);
+        return -1;
+    }
+    buf[fsize] = '\0';
+    *out_buf = buf;
+    *out_len = (size_t)fsize;
     return 0;
 }
 
@@ -2971,9 +3107,18 @@ static int runtime_apply_spool(const runtime_tx_entry_t *entry) {
 
     /* ── Multi-file path ── */
     if (entry->file_count > 1) {
-        char manifest_buf[8192];
+        /* Heap-allocate the manifest sized to the on-disk file. The
+         * direct-mode path was migrated to a heap blob in 2.1 to fix
+         * silent corruption on >60-file transfers; this spool path
+         * was missed. Fixed here: a single 8 KiB stack buffer would
+         * truncate any real-game manifest mid-object and produce
+         * "manifest missing entry N" errors at apply time, OR walk
+         * into garbage. Caller owns the buffer; freed before returning. */
+        char *manifest_buf = NULL;
+        size_t manifest_len = 0;
         uint64_t fi = 0;
-        if (runtime_read_manifest(entry, manifest_buf, sizeof(manifest_buf)) != 0) {
+        int rc_apply = 0;
+        if (runtime_read_manifest_alloc(entry, &manifest_buf, &manifest_len) != 0) {
             fprintf(stderr, "[payload2] could not read manifest for tx %s\n",
                     entry->tx_id_hex);
             return -1;
@@ -2985,17 +3130,20 @@ static int runtime_apply_spool(const runtime_tx_entry_t *entry) {
             if (manifest_get_nth_file_path(manifest_buf, fi, &mf) != 0) {
                 fprintf(stderr, "[payload2] manifest missing entry %llu\n",
                         (unsigned long long)fi);
-                return -1;
+                rc_apply = -1;
+                break;
             }
             if (ensure_parent_dir(mf.path) != 0) {
                 fprintf(stderr, "[payload2] ensure_parent_dir failed: %s\n", mf.path);
-                return -1;
+                rc_apply = -1;
+                break;
             }
             out = fopen(mf.path, "wb");
             if (!out) {
                 fprintf(stderr, "[payload2] open dest failed: %s errno=%d\n",
                         mf.path, errno);
-                return -1;
+                rc_apply = -1;
+                break;
             }
             for (s = 0; s < mf.shard_count; s++) {
                 uint64_t this_seq = mf.shard_start + s;
@@ -3008,25 +3156,49 @@ static int runtime_apply_spool(const runtime_tx_entry_t *entry) {
                 if (!in) {
                     fprintf(stderr, "[payload2] open shard failed: %s errno=%d\n",
                             shard_path, errno);
-                    fclose(out);
-                    return -1;
+                    rc_apply = -1;
+                    break;
                 }
+                /* Stream this shard into `out`. On fwrite failure we
+                 * mark rc_apply and break the while; the unconditional
+                 * fclose(in) below closes `in` exactly once across
+                 * both success and fwrite-fail paths. The pre-self-
+                 * audit edit closed `in` inside the fwrite branch AND
+                 * after the while, which was a double-close UB. */
                 while ((got = fread(ibuf, 1, sizeof(ibuf), in)) > 0) {
                     if (fwrite(ibuf, 1, got, out) != got) {
-                        fclose(in);
-                        fclose(out);
-                        return -1;
+                        rc_apply = -1;
+                        break;
                     }
                 }
                 fclose(in);
+                if (rc_apply != 0) break;
             }
-            fclose(out);
+            /* Close `out` exactly once iff it was successfully opened.
+             * Three early-break paths above (manifest_get_nth_file_path
+             * failure, ensure_parent_dir failure, fopen-out failure)
+             * reach this point with `out == NULL` — `fclose(NULL)` is
+             * undefined behaviour in C and on PS5 libc typically
+             * crashes. The two break paths inside for(s) (open-shard
+             * failure, fwrite failure) reach here with `out` already
+             * opened, so the guarded close is correct.
+             *
+             * History: the previous edit pair (pre-self-audit + the
+             * post-self-audit "single fclose" rewrite) both had this
+             * gap — the rewrite traded a double-close on `in` for an
+             * fclose-NULL on `out`. Resolved here with the explicit
+             * non-null guard. */
+            if (out) fclose(out);
+            if (rc_apply != 0) break;
             printf("[payload2] applied %llu shards -> %s\n",
                    (unsigned long long)mf.shard_count, mf.path);
         }
-        printf("[payload2] multi-file apply done: %llu files\n",
-               (unsigned long long)entry->file_count);
-        return 0;
+        free(manifest_buf);
+        if (rc_apply == 0) {
+            printf("[payload2] multi-file apply done: %llu files\n",
+                   (unsigned long long)entry->file_count);
+        }
+        return rc_apply;
     }
 
     /* ── Single-file path: concatenate all shards to dest_root ── */
@@ -3591,8 +3763,10 @@ static int path_has_test_suffix(const char *p) {
 
 static int cleanup_path_allowed(const char *path) {
     if (!path || !*path) return 0;
-    /* Defence-in-depth: reject anything with '..' anywhere. */
-    if (strstr(path, "..") != NULL) return 0;
+    /* Defence-in-depth: reject any `..` or `.` path component.
+     * Component-scoped (matches is_path_allowed's semantics) so
+     * legitimate test-folder names like `My..Tests` aren't rejected. */
+    if (path_has_dotdot_component(path)) return 0;
 
     /* Case A: /data/ps5upload/tests[/...] */
     {
@@ -3622,14 +3796,28 @@ static int cleanup_path_allowed(const char *path) {
 
 /* Recursive removal of a single path. Counts files + dirs actually removed
  * so the ACK can report work done. Returns 0 on success, -1 on error. A
- * missing path (ENOENT) counts as success with zero removals. */
-static int remove_recursive_path(const char *path,
-                                  uint64_t *removed_files,
-                                  uint64_t *removed_dirs) {
+ * missing path (ENOENT) counts as success with zero removals.
+ *
+ * `depth` bounds the recursion to 64 levels — matches rm_rf_op /
+ * chmod_rf so a pathological symlink loop or hostile cleanup target
+ * can't blow the stack. Pre-2.2.28 was unbounded; the path is bench-
+ * test-only today so the risk was theoretical, but the inconsistency
+ * with the other recursive helpers was a footgun. */
+#define REMOVE_RECURSIVE_MAX_DEPTH 64
+static int remove_recursive_path_inner(const char *path,
+                                        uint64_t *removed_files,
+                                        uint64_t *removed_dirs,
+                                        int depth) {
     struct stat st;
     DIR *dir = NULL;
     struct dirent *ent = NULL;
     if (!path) return -1;
+    if (depth > REMOVE_RECURSIVE_MAX_DEPTH) {
+        fprintf(stderr,
+                "[payload2] remove_recursive: depth cap %d hit at %s\n",
+                REMOVE_RECURSIVE_MAX_DEPTH, path);
+        return -1;
+    }
     if (lstat(path, &st) != 0) {
         if (errno == ENOENT) return 0;
         return -1;
@@ -3648,7 +3836,8 @@ static int remove_recursive_path(const char *path,
             closedir(dir);
             return -1; /* path too long — refuse to truncate and leak state */
         }
-        if (remove_recursive_path(child, removed_files, removed_dirs) != 0) {
+        if (remove_recursive_path_inner(child, removed_files, removed_dirs,
+                                        depth + 1) != 0) {
             closedir(dir);
             return -1;
         }
@@ -3657,6 +3846,12 @@ static int remove_recursive_path(const char *path,
     if (rmdir(path) != 0 && errno != ENOENT) return -1;
     if (removed_dirs) *removed_dirs += 1;
     return 0;
+}
+
+static int remove_recursive_path(const char *path,
+                                  uint64_t *removed_files,
+                                  uint64_t *removed_dirs) {
+    return remove_recursive_path_inner(path, removed_files, removed_dirs, 0);
 }
 
 static int handle_cleanup(runtime_state_t *state, int client_fd,
@@ -4277,9 +4472,29 @@ static int handle_fs_hash(runtime_state_t *state, int client_fd,
  *
  * Intentionally excludes /system, / (root), /dev, /tmp. If a PS5 variant
  * exposes more writable roots, extend `is_path_allowed`. */
+/* Reject any path component equal to `..` or `.`. Component-scoped
+ * (not substring) so legitimate filenames like `My..Game` or `..rc1`
+ * are accepted. The substring-based `strstr(p, "..")` we used to do
+ * over-rejected those.
+ *
+ * Returns 1 if the path contains a forbidden component, 0 if clean. */
+static int path_has_dotdot_component(const char *p) {
+    const char *seg = p;
+    while (*seg) {
+        if (*seg == '/') { seg++; continue; }
+        const char *end = seg;
+        while (*end && *end != '/') end++;
+        size_t len = (size_t)(end - seg);
+        if (len == 1 && seg[0] == '.') return 1;
+        if (len == 2 && seg[0] == '.' && seg[1] == '.') return 1;
+        seg = end;
+    }
+    return 0;
+}
+
 static int is_path_allowed(const char *p) {
     if (!p || p[0] != '/') return 0;
-    if (strstr(p, "..") != NULL) return 0;
+    if (path_has_dotdot_component(p)) return 0;
     /* Accept exactly /data or /data/... */
     if (strcmp(p, "/data") == 0 || strncmp(p, "/data/", 6) == 0) return 1;
     if (strcmp(p, "/user") == 0 || strncmp(p, "/user/", 6) == 0) return 1;
@@ -4469,17 +4684,55 @@ static pthread_mutex_t g_fs_ops_mtx = PTHREAD_MUTEX_INITIALIZER;
  * -1 if all slots are full (caller should fail the FS_COPY frame
  * rather than block — a pathological 4-concurrent-fs_copy state
  * shouldn't happen in normal use; the cap prevents resource leaks
- * if it does). Caller must call fs_op_release when done. */
+ * if it does). Caller must call fs_op_release when done.
+ *
+ * Stuck-op watchdog: if all slots are in_use AND any are older than
+ * FS_OP_STUCK_THRESHOLD_US, reclaim the oldest-started one with a
+ * log warning. This handles the "worker thread crashed without
+ * calling fs_op_release" case which would otherwise permanently leak
+ * the slot. The threshold is intentionally generous (24h) — a
+ * legitimate copy of a 28 GiB folder over USB takes <30 minutes;
+ * legitimate delete of a 200k-file game takes <10 minutes. Any op
+ * still claiming a slot 24h after start is hung. */
+#define FS_OP_STUCK_THRESHOLD_US (24ULL * 60ULL * 60ULL * 1000000ULL)
 static int fs_op_register(uint64_t op_id, const char *kind,
                           const char *from, const char *to,
                           uint64_t total_bytes) {
     int i;
     int idx = -1;
+    uint64_t now = now_us();
     pthread_mutex_lock(&g_fs_ops_mtx);
     for (i = 0; i < MAX_FS_OPS; i++) {
         if (!g_fs_ops[i].in_use) {
             idx = i;
             break;
+        }
+    }
+    if (idx < 0) {
+        /* No free slot — try the watchdog reclaim. Pick the
+         * oldest-started in_use slot; if it's past threshold,
+         * reclaim. Don't reclaim a recently-started slot even if
+         * we're at full capacity — that's normal load, not a leak. */
+        int oldest_idx = -1;
+        uint64_t oldest_start = UINT64_MAX;
+        for (i = 0; i < MAX_FS_OPS; i++) {
+            if (g_fs_ops[i].in_use && g_fs_ops[i].started_at_us < oldest_start) {
+                oldest_start = g_fs_ops[i].started_at_us;
+                oldest_idx = i;
+            }
+        }
+        if (oldest_idx >= 0 && now > oldest_start &&
+            (now - oldest_start) > FS_OP_STUCK_THRESHOLD_US) {
+            fprintf(stderr,
+                    "[payload2] fs_op watchdog: reclaiming stuck slot %d "
+                    "(op_id=%llu kind=%s, age=%llu s) — likely a worker "
+                    "crashed without releasing\n",
+                    oldest_idx,
+                    (unsigned long long)g_fs_ops[oldest_idx].op_id,
+                    g_fs_ops[oldest_idx].kind,
+                    (unsigned long long)((now - oldest_start) / 1000000ULL));
+            idx = oldest_idx;
+            /* Fall through to the normal init below. */
         }
     }
     if (idx >= 0) {
@@ -4490,7 +4743,7 @@ static int fs_op_register(uint64_t op_id, const char *kind,
         snprintf(g_fs_ops[idx].from, sizeof(g_fs_ops[idx].from), "%s", from ? from : "");
         snprintf(g_fs_ops[idx].to,   sizeof(g_fs_ops[idx].to),   "%s", to   ? to   : "");
         g_fs_ops[idx].total_bytes = total_bytes;
-        g_fs_ops[idx].started_at_us = now_us();
+        g_fs_ops[idx].started_at_us = now;
     }
     pthread_mutex_unlock(&g_fs_ops_mtx);
     return idx;
@@ -4583,10 +4836,32 @@ static int fs_op_set_cancel(uint64_t op_id) {
  * percentage. Cheap relative to the copy itself (one stat per file).
  * Returns 0 and writes total to *out on success; -1 on any stat
  * failure (path missing, permission, etc.). */
-static int recursive_size(const char *path, uint64_t *out) {
+/* Depth cap matching rm_rf_op / chmod_rf / remove_recursive_path. Bounds
+ * stack usage against symlink loops or pathological nesting in the source
+ * tree we're sizing. Without it, a large stat-walk could stack-overflow
+ * the payload before producing a clean error.
+ *
+ * `op_idx` is the in-flight op slot (or -1 if untracked). When >= 0,
+ * the walker checks the cancel flag periodically so a Stop click
+ * during the pre-walk takes effect quickly, instead of waiting for
+ * the much longer cp_rf phase to finish first. Returns -2 on cancel
+ * (matches cp_rf_op's convention). */
+#define RECURSIVE_SIZE_MAX_DEPTH 64
+static int recursive_size_inner(const char *path, uint64_t *out,
+                                 int depth, int op_idx) {
     struct stat st;
     DIR *d;
     struct dirent *e;
+    if (depth > RECURSIVE_SIZE_MAX_DEPTH) {
+        fprintf(stderr,
+                "[payload2] recursive_size: depth cap %d hit at %s\n",
+                RECURSIVE_SIZE_MAX_DEPTH, path);
+        return -1;
+    }
+    /* Cancel check at directory boundaries — same cadence as
+     * rm_rf_op / cp_rf_op. Per-file granularity isn't worth it for
+     * stat walks (each stat is sub-microsecond on warm cache). */
+    if (op_idx >= 0 && fs_op_cancel_pending(op_idx)) return -2;
     if (lstat(path, &st) != 0) return -1;
     if (S_ISREG(st.st_mode)) {
         *out += (uint64_t)st.st_size;
@@ -4611,13 +4886,18 @@ static int recursive_size(const char *path, uint64_t *out) {
             rc = -1;
             break;
         }
-        if (recursive_size(sub, out) != 0) {
-            rc = -1;
+        int sub_rc = recursive_size_inner(sub, out, depth + 1, op_idx);
+        if (sub_rc != 0) {
+            rc = sub_rc; /* propagate -1 (error) or -2 (cancel) */
             break;
         }
     }
     closedir(d);
     return rc;
+}
+
+static int recursive_size_op(const char *path, uint64_t *out, int op_idx) {
+    return recursive_size_inner(path, out, 0, op_idx);
 }
 
 /* ── Async-write file copier (parallel read + write) ──────────────────────────
@@ -5078,12 +5358,18 @@ static int handle_fs_delete(runtime_state_t *state, int client_fd,
     }
     /* Pre-walk to compute total bytes so the engine's progress poll
      * can show a percentage; same one-stat-per-file cost pattern as
-     * fs_copy. recursive_size returns -1 on any stat failure —
-     * surface it now rather than letting the rm_rf hit the same file
-     * mid-walk. Release the slot on walk failure so a recoverable
-     * error doesn't burn one of the MAX_FS_OPS=4 slots. */
+     * fs_copy. `recursive_size_op` returns -1 on stat failure or -2
+     * on cancel — surface either now rather than letting rm_rf hit
+     * the same file mid-walk. Release the slot on walk failure so a
+     * recoverable error doesn't burn one of the MAX_FS_OPS=4 slots. */
     uint64_t total_bytes = 0;
-    if (recursive_size(path, &total_bytes) != 0) {
+    int walk_rc = recursive_size_op(path, &total_bytes, op_idx);
+    if (walk_rc == -2) {
+        fs_op_release(op_idx);
+        return send_frame(client_fd, FTX2_FRAME_ERROR, 0, trace_id,
+                          "fs_delete_cancelled", 19);
+    }
+    if (walk_rc != 0) {
         fs_op_release(op_idx);
         return send_frame(client_fd, FTX2_FRAME_ERROR, 0, trace_id,
                           "fs_delete_walk_failed", 21);
@@ -5375,9 +5661,21 @@ static int handle_fs_copy(runtime_state_t *state, int client_fd,
      * itself, and a stat error means the copy will fail at the same
      * file shortly anyway — surface the issue early. Release the slot
      * on walk failure so a recoverable error doesn't burn one of the
-     * MAX_FS_OPS=4 slots until process exit. */
+     * MAX_FS_OPS=4 slots until process exit.
+     *
+     * `recursive_size_op` checks the cancel flag at directory
+     * boundaries so a Stop click during the pre-walk takes effect
+     * promptly. On a 200k-file tree the pre-walk can take seconds;
+     * waiting for cp_rf to start before honoring cancel made the
+     * Stop button feel unresponsive. */
     uint64_t total_bytes = 0;
-    if (recursive_size(from, &total_bytes) != 0) {
+    int walk_rc = recursive_size_op(from, &total_bytes, op_idx);
+    if (walk_rc == -2) {
+        fs_op_release(op_idx);
+        return send_frame(client_fd, FTX2_FRAME_ERROR, 0, trace_id,
+                          "fs_copy_cancelled", 17);
+    }
+    if (walk_rc != 0) {
         fs_op_release(op_idx);
         return send_frame(client_fd, FTX2_FRAME_ERROR, 0, trace_id,
                           "fs_copy_walk_failed", 19);
@@ -6381,10 +6679,18 @@ static int handle_app_register(runtime_state_t *state, int client_fd,
                           reason, (uint64_t)strlen(reason));
     }
     json_escape_into(title_name, title_name_esc, sizeof(title_name_esc));
+    /* title_id was vetted by register.c::is_safe_component which
+     * blocks `.`, `..`, and `/` — but NOT `"` or `\`. A malicious
+     * homebrew param.json with a crafted titleId could otherwise
+     * produce a malformed JSON response (engine's serde_json would
+     * reject and surface a confusing parse error to the user
+     * instead of the actual register-success). Escape defensively. */
+    char title_id_esc[REGISTER_MAX_TITLE_ID * 2 + 2];
+    json_escape_into(title_id, title_id_esc, sizeof(title_id_esc));
     int n = snprintf(resp, sizeof(resp),
                      "{\"title_id\":\"%s\",\"title_name\":\"%s\","
                      "\"used_nullfs\":%s}",
-                     title_id, title_name_esc,
+                     title_id_esc, title_name_esc,
                      used_nullfs ? "true" : "false");
     if (n < 0 || (size_t)n >= sizeof(resp)) {
         return send_frame(client_fd, FTX2_FRAME_ERROR, 0, trace_id,
@@ -7236,7 +7542,21 @@ static int handle_binary_frame(runtime_state_t *state, int client_fd,
         (void)runtime_save_tx_state(state);
         (void)runtime_append_tx_event(state, "commit_tx");
         /* Apply: direct-write tx just renames its tmp file(s); spool tx copies
-         * shards into the destination as before. */
+         * shards into the destination as before.
+         *
+         * If apply fails (writer reported a disk I/O error mid-stream, or any
+         * rename failed), we DO NOT silently report COMMIT_TX_ACK. The
+         * pre-2.2.28 code logged a WARN and proceeded with the rename anyway,
+         * which destroyed the prior good dest_root and replaced it with a
+         * partial/corrupt file while telling the client "success". On
+         * apply failure we now emit FTX2_FRAME_ERROR with a structured body,
+         * mark the journal state "apply_failed", preserve the tmp file(s) for
+         * user inspection, and return early — the destination at dest_root
+         * is left untouched. */
+        int apply_failed = 0;
+        const char *apply_failure_reason = NULL;
+        char apply_failure_detail[256] = {0};
+        uint64_t failed_renames = 0;
         {
             uint64_t ta0 = now_us();
             if (entry->direct_mode && entry->file_count <= 1) {
@@ -7246,28 +7566,48 @@ static int handle_binary_frame(runtime_state_t *state, int client_fd,
                  * unlink our freshly-renamed dest_root. */
                 int finish_rc = direct_writer_finish(entry);
                 if (finish_rc != 0) {
-                    fprintf(stderr, "[payload2] WARN: direct writer finish reported I/O error for tx %s\n",
+                    /* Writer thread reported a write_full() failure during
+                     * streaming. The tmp file at entry->tmp_path is
+                     * partial/corrupt; refuse the rename and surface the
+                     * error to the client. */
+                    apply_failed = 1;
+                    apply_failure_reason = "direct_writer_io_error";
+                    snprintf(apply_failure_detail, sizeof(apply_failure_detail),
+                             "writer thread reported a disk write error mid-stream; "
+                             "destination preserved, partial at %s",
+                             entry->tmp_path);
+                    fprintf(stderr,
+                            "[payload2] direct writer reported I/O error for tx %s — "
+                            "refusing rename, destination unchanged\n",
                             entry->tx_id_hex);
-                }
-                (void)unlink(entry->dest_root);
-                if (rename(entry->tmp_path, entry->dest_root) != 0) {
-                    fprintf(stderr, "[payload2] WARN: rename %s -> %s failed errno=%d\n",
-                            entry->tmp_path, entry->dest_root, errno);
                 } else {
-                    /* Clear tmp_path so the upcoming release_tx_resources
-                     * doesn't re-unlink a path that no longer exists. */
-                    entry->tmp_path[0] = '\0';
-                    printf("[payload2] direct apply rename -> %s\n", entry->dest_root);
+                    (void)unlink(entry->dest_root);
+                    if (rename(entry->tmp_path, entry->dest_root) != 0) {
+                        apply_failed = 1;
+                        apply_failure_reason = "direct_rename_failed";
+                        snprintf(apply_failure_detail, sizeof(apply_failure_detail),
+                                 "rename %s -> %s failed: %s",
+                                 entry->tmp_path, entry->dest_root, strerror(errno));
+                        fprintf(stderr, "[payload2] %s (errno=%d)\n",
+                                apply_failure_detail, errno);
+                    } else {
+                        /* Clear tmp_path so the upcoming release_tx_resources
+                         * doesn't re-unlink a path that no longer exists. */
+                        entry->tmp_path[0] = '\0';
+                        printf("[payload2] direct apply rename -> %s\n", entry->dest_root);
+                    }
                 }
             } else if (entry->direct_mode && entry->file_count > 1) {
                 uint64_t fi = 0;
-                int rename_failed = 0;
                 const manifest_index_entry_t *idx =
                     (const manifest_index_entry_t *)entry->manifest_index;
                 if (!idx || !entry->manifest_blob) {
+                    apply_failed = 1;
+                    apply_failure_reason = "manifest_missing_at_commit";
+                    snprintf(apply_failure_detail, sizeof(apply_failure_detail),
+                             "manifest index/blob unavailable at commit time");
                     fprintf(stderr, "[payload2] direct multi commit: missing manifest index for tx %s\n",
                             entry->tx_id_hex);
-                    rename_failed = 1;
                 } else {
                     for (fi = 0; fi < entry->manifest_index_count; fi++) {
                         char file_path[512];
@@ -7289,21 +7629,80 @@ static int handle_binary_frame(runtime_state_t *state, int client_fd,
                         if (rename(tmp_path, file_path) != 0 && errno != ENOENT) {
                             fprintf(stderr, "[payload2] direct multi rename %s -> %s errno=%d\n",
                                     tmp_path, file_path, errno);
-                            rename_failed = 1;
+                            failed_renames += 1;
                         }
                     }
-                }
-                if (!rename_failed) {
-                    printf("[payload2] direct multi apply: %llu files renamed\n",
-                           (unsigned long long)entry->file_count);
+                    if (failed_renames > 0) {
+                        apply_failed = 1;
+                        apply_failure_reason = "direct_multi_rename_failed";
+                        snprintf(apply_failure_detail, sizeof(apply_failure_detail),
+                                 "%llu of %llu file rename(s) failed; partials preserved as .ps5up2-tmp",
+                                 (unsigned long long)failed_renames,
+                                 (unsigned long long)entry->manifest_index_count);
+                    } else {
+                        printf("[payload2] direct multi apply: %llu files renamed\n",
+                               (unsigned long long)entry->file_count);
+                    }
                 }
             } else if (runtime_apply_spool(entry) == 0) {
                 (void)runtime_cleanup_spool(entry);
             } else {
-                fprintf(stderr, "[payload2] WARN: apply failed for tx %s dest=%s — spool preserved\n",
-                    entry->tx_id_hex, entry->dest_root);
+                apply_failed = 1;
+                apply_failure_reason = "spool_apply_failed";
+                snprintf(apply_failure_detail, sizeof(apply_failure_detail),
+                         "spool-to-dest apply failed; spool preserved at %s/spool_%s",
+                         PS5UPLOAD2_SPOOL_DIR, entry->tx_id_hex);
+                fprintf(stderr, "[payload2] %s — tx %s dest=%s\n",
+                        apply_failure_detail, entry->tx_id_hex, entry->dest_root);
             }
             entry->apply_us += (now_us() - ta0);
+        }
+
+        /* Apply-failure exit path. Overwrite the journal state to reflect
+         * what actually happened on disk, append a distinct event, and
+         * surface a structured FTX2_FRAME_ERROR. We deliberately DO NOT
+         * call runtime_release_tx_resources(entry) here — keeping the
+         * heap state (manifest_blob/index, writer handle if any) lets a
+         * subsequent QUERY_TX or RESUME pick up where we left off, and
+         * skipping the unlink of tmp_path preserves the bytes we wrote
+         * for inspection or manual recovery. */
+        if (apply_failed) {
+            snprintf(entry->state, sizeof(entry->state), "apply_failed");
+            (void)runtime_flush_tx_record(state, entry);
+            (void)runtime_save_tx_state(state);
+            (void)runtime_append_tx_event(state, "commit_tx_apply_failed");
+            /* JSON-escape the detail before interpolating: it embeds
+             * strerror(errno) and PS5 paths. Normal PS5 paths don't
+             * contain `"` or `\`, but a hostile or buggy `entry->
+             * tmp_path` could, and an unescaped backslash or quote
+             * would produce malformed JSON the engine's serde_json
+             * rejects, masking the original error with a parse error.
+             * apply_failure_reason is a static-string code from this
+             * function (e.g. "direct_writer_io_error") so it's
+             * safe-ASCII; tx_id_hex is hex; only detail needs escape. */
+            char detail_esc[512];
+            json_escape_into(apply_failure_detail, detail_esc, sizeof(detail_esc));
+            len = snprintf(body, sizeof(body),
+                           "{\"error\":\"%s\",\"tx_id\":\"%s\","
+                           "\"failed_renames\":%llu,"
+                           "\"detail\":\"%s\"}",
+                           apply_failure_reason ? apply_failure_reason : "apply_failed",
+                           entry->tx_id_hex,
+                           (unsigned long long)failed_renames,
+                           detail_esc);
+            if (len < 0) { rc = -1; goto commit_done; }
+            if ((size_t)len >= sizeof(body)) len = (int)sizeof(body) - 1;
+            /* Commit attempt failed terminally — clear the connection's
+             * has-open-tx flag so a subsequent socket close doesn't
+             * mark this slot as "interrupted" (overwriting our
+             * apply_failed state). */
+            if (tx_ctx && tx_ctx->has_tx &&
+                memcmp(tx_ctx->tx_id, meta.tx_id, 16) == 0) {
+                tx_ctx->has_tx = 0;
+            }
+            rc = send_frame(client_fd, FTX2_FRAME_ERROR, 0, hdr.trace_id,
+                            body, (uint64_t)len);
+            goto commit_done;
         }
         /* Manifest blob + index are no longer needed — release the heap
          * immediately rather than waiting for the slot to be evicted. */

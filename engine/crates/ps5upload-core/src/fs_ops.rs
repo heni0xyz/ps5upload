@@ -1035,22 +1035,54 @@ pub fn reconcile(
             None => true,
             Some(rs) if rs != local_size => true,
             Some(_) if matches!(mode, ReconcileMode::Safe) => {
-                // Size matches; verify hashes match too.
-                let local_hash =
-                    blake3_file(&src.join(rel.replace('/', std::path::MAIN_SEPARATOR_STR)))?;
-                let remote_path = format!("{dest_root}/{rel}");
-                // 10 s per-file deadline so a single hung PS5 doesn't
-                // stall the whole reconcile linearly. The default 30 s
-                // socket timeout would multiply N files × 30 s on a
-                // crashed payload — at hundreds of files the user
-                // would think the app is dead.
-                let remote_hash = fs_hash_with_timeout(
-                    addr,
-                    &remote_path,
-                    Some(std::time::Duration::from_secs(10)),
-                )?
-                .hash;
-                local_hash != remote_hash
+                // Size matches; verify hashes match too. If either side
+                // fails to hash (unreadable local file, PS5-side EACCES,
+                // mgmt-port timeout), treat the file as "unverified —
+                // must re-send" rather than failing the whole reconcile.
+                // The pre-2.2.28 behaviour `?`-propagated the error,
+                // which aborted reconciliation on a single problem file
+                // — a flaky USB or one stale permission would prevent
+                // the user from resuming a 200k-file upload at all. The
+                // worst case of treating-as-unverified is one extra
+                // file in the to-send list; the upload still progresses.
+                let local_path = src.join(rel.replace('/', std::path::MAIN_SEPARATOR_STR));
+                let local_hash_opt = match blake3_file(&local_path) {
+                    Ok(h) => Some(h),
+                    Err(e) => {
+                        crate::core_log!(
+                            "reconcile: blake3 failed for local {} ({}); treating as must-resend",
+                            local_path.display(),
+                            e,
+                        );
+                        None
+                    }
+                };
+                if let Some(local_hash) = local_hash_opt {
+                    let remote_path = format!("{dest_root}/{rel}");
+                    // 10 s per-file deadline so a single hung PS5 doesn't
+                    // stall the whole reconcile linearly. The default
+                    // 30 s socket timeout would multiply N files × 30 s
+                    // on a crashed payload — at hundreds of files the
+                    // user would think the app is dead.
+                    match fs_hash_with_timeout(
+                        addr,
+                        &remote_path,
+                        Some(std::time::Duration::from_secs(10)),
+                    ) {
+                        Ok(r) => local_hash != r.hash,
+                        Err(e) => {
+                            crate::core_log!(
+                                "reconcile: fs_hash failed for remote {} ({}); treating as must-resend",
+                                remote_path,
+                                e,
+                            );
+                            true
+                        }
+                    }
+                } else {
+                    // Local hash failed — must-resend, no remote round-trip.
+                    true
+                }
             }
             Some(_) => false,
         };

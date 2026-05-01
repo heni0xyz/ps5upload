@@ -207,17 +207,17 @@ runs on every supported firmware without per-release rebuilds.
 | Range | Feature coverage |
 |---|---|
 | **9.00 – 11.60** | All features validated on hardware |
-| **1.00 – 8.60** and **12.00 – 12.70** | All features run; one caveat below |
+| **1.00 – 8.60** and **12.00 – 12.70** | All features run |
 
-**One caveat outside 9–11**: the payload's process-list feature
-(Hardware tab's process snapshot) displays entries as `<pid:N>`
-placeholders instead of real command names. Why: the `p_comm` struct
-offset isn't in the SDK's runtime-resolved table, and our per-
-firmware fallback table only has a validated value for 9.x–11.x.
-Everything else — transfer, mount, file browse, hardware monitor
+The process-list feature (Hardware tab's process snapshot) reads
+`kinfo_proc` via `sysctl(KERN_PROC_PROC)` with field offsets that
+have been stable across every SDK-supported firmware — pid at
+byte 72, thread name at byte 447. No firmware-specific fallback
+table required; real command names appear across the full 1.00 –
+12.70 range. Transfer, mount, file browse, hardware monitor
 (except CPU/SoC temps, which Sony gates on a different credential
-check unrelated to firmware), FS ops — works identically across all
-supported firmwares.
+check unrelated to firmware), and FS ops work identically across
+all supported firmwares.
 
 **What actually gates users in practice is the ELF loader** on
 port 9021 (BD-JB, GoldHen, etaHEN, kstuff-lite, etc.) — a

@@ -1,10 +1,14 @@
 //! CLEANUP RPC — asks the payload to recursively remove a path under one of
-//! its allowlisted prefixes (see `payload2/src/runtime.c CLEANUP_ALLOWED_PREFIXES`).
+//! its allowlisted prefixes (see `payload/src/runtime.c cleanup_path_allowed`).
 //!
 //! This is *not* a general-purpose delete primitive; the payload refuses
-//! anything outside `/data/ps5upload-bench/`, `/data/ps5upload-sweep/`, or
-//! `/data/ps5upload-smoke/`. Intended use: bench sweep + smoke harness
-//! reset-between-profiles so generated artifacts do not pile up on PS5.
+//! anything outside the unified test sandbox:
+//!
+//!   - `/data/ps5upload/tests[/...]`
+//!   - `/mnt/{ext,usb}<digits>/ps5upload/tests[/...]`
+//!
+//! Intended use: bench sweep + smoke harness reset-between-profiles so
+//! generated artifacts do not pile up on PS5.
 
 use anyhow::{bail, Context, Result};
 use ftx2_proto::FrameType;

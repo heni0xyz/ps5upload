@@ -68,8 +68,28 @@ static int sys_ptrace(int request, pid_t pid, caddr_t addr, int data) {
     /* Restore. If this fails the process keeps the elevated authid
      * which is bad for the rest of our code (we deliberately set
      * the debugger authid). Log and move on — the next pt_*
-     * call will swap again, papering over the gap. */
-    (void)kernel_set_ucred_authid(mypid, saved_authid);
+     * call will swap again, papering over the gap.
+     *
+     * Pre-2.2.28 the comment said "log and move on" but the actual
+     * code silently `(void)`-cast the return value. A persistent
+     * restore failure would leak elevated authid into between-RPC
+     * code paths with no diagnostic. Now we log loudly on the FIRST
+     * failure — subsequent failures within the same boot are
+     * suppressed so this hot path doesn't flood logs on a permanent
+     * kernel-RW outage. The user-visible signal "ptrace restore
+     * leaked once" is enough to debug; the actual gap is closed by
+     * the next pt_* call's elevation swap. */
+    if (kernel_set_ucred_authid(mypid, saved_authid) != 0) {
+        static int reported = 0;
+        if (!reported) {
+            reported = 1;
+            fprintf(stderr,
+                    "[ptrace_remote] WARN: failed to restore authid 0x%llx after "
+                    "ptrace request=%d (process retains PS5_PTRACE_ALLOWED_AUTHID "
+                    "until next pt_* call). Subsequent occurrences suppressed.\n",
+                    (unsigned long long)saved_authid, request);
+        }
+    }
 
     return ret;
 }

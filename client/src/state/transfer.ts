@@ -265,7 +265,12 @@ export const useTransferStore = create<TransferState>((set) => {
         if (snap.status === "done") {
           let mountedAt: string | undefined;
           const finalDest = snap.dest ?? dest;
-          if (sourceKind === "image" && mountAfterUpload) {
+          // Re-check liveness before initiating the mount. Same race
+          // fix as uploadQueue.ts: Stop / reset between done-snapshot
+          // and fsMount would otherwise leave a real mount on the
+          // PS5 with the UI showing nothing. Skip-and-return keeps
+          // user-visible state honest.
+          if (isLive() && sourceKind === "image" && mountAfterUpload) {
             try {
               const mounted = await fsMount(addr, finalDest);
               mountedAt = mounted.mount_point;
