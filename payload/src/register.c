@@ -1481,15 +1481,30 @@ int launch_title(const char *title_id, const char **err_reason_out) {
      *         report it directly rather than falling through to
      *         the in-process call which would just produce a
      *         less informative error.
-     *   -1  — the RPC machinery itself failed (couldn't attach
-     *         to ShellUI, symbol missing). Fall through to the
-     *         in-process direct calls below — those won't work
-     *         on firmwares enforcing the caller-pid check, but
-     *         they're the only fallback we have. */
+     *   -2  — soft-success: the call was DISPATCHED into ShellUI
+     *         (pt_continue returned cleanly, the function ran)
+     *         but the post-call cleanup hit a race because the
+     *         launcher's behaviour signalled ShellUI in a way
+     *         that broke our waitpid. The game most likely
+     *         launched. Treat as success — falling through to
+     *         in-process strategies would race a running launch
+     *         and produce a misleading "all strategies failed"
+     *         error to the user even though the game is on screen.
+     *   -1  — pre-dispatch machinery failure (couldn't attach to
+     *         ShellUI, mmap scratch failed). Function never ran.
+     *         Fall through to the in-process direct calls — those
+     *         won't work on firmwares enforcing the caller-pid
+     *         check, but they're the only fallback we have. */
     (void)shellui_rpc_init();
     if (shellui_rpc_ready()) {
         int rc = shellui_rpc_launch_app(title_id);
         if (rc == 0) return 0;
+        if (rc == -2) {
+            /* Soft-success: launch was dispatched, result uncertain
+             * but game likely on screen. Don't fall through to
+             * in-process which would race the running launch. */
+            return 0;
+        }
         if (rc > 0) {
             static __thread char reason_buf[64];
             snprintf(reason_buf, sizeof(reason_buf),
@@ -1497,7 +1512,7 @@ int launch_title(const char *title_id, const char **err_reason_out) {
             if (err_reason_out) *err_reason_out = reason_buf;
             return -1;
         }
-        /* rc == -1: machinery failed, fall through. */
+        /* rc == -1: pre-dispatch machinery failure; fall through. */
     }
 
     if (!g_reg.launch_app && !g_reg.launch_app_sys) {

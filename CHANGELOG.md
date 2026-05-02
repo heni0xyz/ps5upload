@@ -4,6 +4,60 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 2.2.30
+
+**Misleading "all strategies failed" error after a successful launch**
+
+User report: clicking Launch on a registered title actually starts
+the game (you can see it on screen) but the UI surfaces:
+
+> engine HTTP 502 Bad Gateway: payload rejected APP_LAUNCH:
+> launch_all_strategies_failed: param=1 null=1 sys=1
+
+This is now fixed.
+
+**Root cause**: the launch path tries `sceLncUtilLaunchApp` via a
+ptrace remote-call into ShellUI (the canonical FW-9.60 path). When
+the launcher accepts the call, it signals ShellUI in a way that
+races our `waitpid` cleanup — `pt_call` sees a non-stopped wait
+state and returns `-1`, which the caller couldn't distinguish from
+"couldn't even attach to ShellUI." The launch fallback chain then
+ran the in-process direct calls (param / null / sys), all three of
+which failed because the game was already in the middle of
+launching. Result: misleading error, even though the launch
+succeeded.
+
+**Fix**: `pt_call` now sets a thread-local "dispatched" flag the
+moment `pt_continue` returns cleanly (i.e. the remote function was
+actually invoked). `shellui_rpc_launch_app` reads the flag after
+`pt_call` returns -1 and distinguishes:
+
+- **dispatched=0**: pre-call failure (couldn't attach / mmap /
+  setregs). Function never ran. Returns -1; caller falls through
+  to in-process strategies.
+- **dispatched=1**: function was invoked but post-call cleanup hit
+  the race. Returns a new -2 sentinel meaning "soft success — game
+  most likely launched, result uncertain."
+
+`launch_title` treats -2 as success and **stops trying the
+in-process fallback** in that case. The fallback would only race a
+running launch and produce the misleading error. Pre-dispatch
+failures still fall through to in-process as before, so the
+no-kstuff / missing-symbol cases still get the best-effort try.
+
+**No false-positive risk for the dispatched=1 case**: if the launch
+genuinely failed Sony-side after dispatch, the error is visible on
+the PS5 screen anyway (no game appears) — preferring an honest
+soft-success message over a confidently-wrong "all strategies
+failed" matches what users expect.
+
+This complements the audit-pass discipline: real user reports
+surface bugs that static auditing misses. The pt_call return-code
+ambiguity wasn't visible from local code review — it took a hardware
+reproduction with the launcher's actual signalling pattern.
+
+---
+
 ## 2.2.29
 
 **Two critical fixes from real user reports**

@@ -66,6 +66,26 @@ intptr_t pt_resolve(pid_t pid, const char *nid);
  * Caller must already be attached + waitpid'd via `pt_attach`. */
 long pt_call(pid_t pid, intptr_t addr, ...);
 
+/* Returns 1 if the most recent `pt_call` on this thread reached
+ * pt_continue successfully (i.e. the remote function call was
+ * actually dispatched into the target process), 0 otherwise.
+ *
+ * This distinguishes two failure modes that both surface as `-1`
+ * from `pt_call`:
+ *   - "didn't dispatch": pt_attach / pt_setregs / pt_continue failed,
+ *     remote function never ran. Safe to retry or fall back.
+ *   - "dispatched, post-call cleanup failed": pt_continue succeeded
+ *     (function was invoked) but waitpid/getregs returned an
+ *     unexpected state — common when invoking sceLncUtilLaunchApp
+ *     because the launcher signals ShellUI in a way that races our
+ *     waitpid. The remote function probably DID succeed; falling
+ *     back to a parallel in-process call would race a running launch
+ *     and produce a misleading "all strategies failed" error.
+ *
+ * Thread-local — each ptrace caller has its own state, no shared
+ * variable to race over. Read this immediately after `pt_call`. */
+int pt_call_was_dispatched(void);
+
 /* Issue a syscall in the target process. The trampoline is the
  * `syscall` instruction inside libkernel.sprx, located via the
  * known-NID `HoLVWNanBBc` plus a 0xa byte offset to land on the

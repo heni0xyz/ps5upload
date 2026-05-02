@@ -387,9 +387,28 @@ int shellui_rpc_launch_app(const char *title_id) {
     /* Call sceLncUtilLaunchApp(title_id, NULL, &param) inside ShellUI. */
     long rc = pt_call(g_shellui_pid, g_addr_lnc_launch,
                        (uint64_t)scratch, 0, (uint64_t)param_addr, 0, 0, 0);
+    int dispatched = pt_call_was_dispatched();
     (void)pt_munmap(g_shellui_pid, scratch, 0x1000);
     (void)pt_detach_tracked(g_shellui_pid, 0);
     pthread_mutex_unlock(&g_rpc_mtx);
+    /* Three return shapes:
+     *   rc == 0           — Sony's launcher accepted the call. Game launched.
+     *   rc > 0            — Sony returned an error code (title not found, no
+     *                       foreground user, etc.). Surface the code.
+     *   rc == -1          — pt_call hit a failure. Two sub-cases:
+     *     dispatched == 0 — pre-call failure (couldn't attach / mmap / setregs).
+     *                       Function never ran; caller may retry or fall back.
+     *     dispatched == 1 — function WAS invoked but post-call cleanup hit a
+     *                       race (waitpid returned non-stopped because the
+     *                       launcher signalled ShellUI's process). The launch
+     *                       most likely succeeded — return -2 so the caller
+     *                       can treat this as a soft success rather than
+     *                       falling through to in-process strategies which
+     *                       would race the running launch and produce a
+     *                       misleading "all strategies failed" error. */
+    if (rc == -1 && dispatched) {
+        return -2;
+    }
     return (int)rc;
 }
 

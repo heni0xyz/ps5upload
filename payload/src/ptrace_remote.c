@@ -188,11 +188,23 @@ int pt_copyout(pid_t pid, intptr_t addr, void *buf, size_t len) {
  * memory at bak_rsp-8 is below the function's pre-call rsp;
  * writing it doesn't disturb anything live, and after we restore
  * regs to bak_reg the slot becomes "below rsp" again. */
+/* Thread-local flag set by pt_call. 1 means "remote function was
+ * actually dispatched (pt_continue returned 0)" — even if a later
+ * cleanup step (waitpid / getregs) failed and pt_call returned -1,
+ * the call itself made it into the target. Read via
+ * pt_call_was_dispatched(). */
+static __thread int g_pt_call_dispatched = 0;
+
+int pt_call_was_dispatched(void) {
+    return g_pt_call_dispatched;
+}
+
 long pt_call(pid_t pid, intptr_t addr, ...) {
     struct reg jmp_reg;
     struct reg bak_reg;
     va_list ap;
 
+    g_pt_call_dispatched = 0;
     if (pt_getregs(pid, &bak_reg) != 0) return -1;
 
     memcpy(&jmp_reg, &bak_reg, sizeof(jmp_reg));
@@ -223,6 +235,11 @@ long pt_call(pid_t pid, intptr_t addr, ...) {
         (void)pt_setregs(pid, &bak_reg);
         return -1;
     }
+    /* Past this point the remote function call has been dispatched
+     * into the target. Even if waitpid / getregs below fail (e.g.
+     * sceLncUtilLaunchApp causes ShellUI to be signalled in a way
+     * that races our waitpid), the call itself ran. */
+    g_pt_call_dispatched = 1;
     int wstatus = 0;
     if (waitpid(pid, &wstatus, 0) < 0) {
         (void)pt_setregs(pid, &bak_reg);
