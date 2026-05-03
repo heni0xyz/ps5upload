@@ -932,10 +932,23 @@ function LibraryRow({
         res.layout_valid === false
           ? " ⚠ Image is missing sce_sys/param.json at root — Register/Launch will fail. Re-build the image with files at root (no extra folder)."
           : "";
+      // Mount-point mismatch warning. Triggered when the user
+      // picked a mountPoint via the modal but the payload landed
+      // the mount somewhere different — the most common cause is
+      // running an older payload that ignored the `mount_point`
+      // field and silently fell back to /mnt/ps5upload/<name>.
+      // Surfacing the mismatch (rather than just showing the
+      // landed path) makes the cause obvious so the user knows
+      // why their /mnt/usb0 pick didn't take effect, and what to
+      // do (update the payload).
+      const mismatch =
+        opts.mountPoint && res.mount_point !== opts.mountPoint
+          ? ` ⚠ Note: payload landed the mount at ${res.mount_point} instead of the path you picked (${opts.mountPoint}). This usually means the running payload predates 2.2.25 and silently ignored the mount-point. Push the bundled payload from Connection → Refresh to update.`
+          : "";
       setMountNote(
         res.reused
-          ? `Already mounted at ${res.mount_point}${roSuffix} — reused the existing mount.${layoutWarning}`
-          : `Mounted at ${res.mount_point}${roSuffix}. Games inside the image will appear in the Library shortly.${layoutWarning}`,
+          ? `Already mounted at ${res.mount_point}${roSuffix} — reused the existing mount.${layoutWarning}${mismatch}`
+          : `Mounted at ${res.mount_point}${roSuffix}. Games inside the image will appear in the Library shortly.${layoutWarning}${mismatch}`,
       );
       // Delay the rescan briefly so the new mount has time to
       // populate getmntinfo + the new directory entries become
@@ -2540,28 +2553,17 @@ function MountModal({
   const supportsMountPoint = payloadSupportsMountPoint(payloadVersion);
   const liveVolumePaths = useMemo(() => volumes.map((v) => v.path), [volumes]);
   const dropdownPaths = useMemo(() => {
-    // Pre-2.2.38 the dropdown was either live volumes OR fallback,
-    // never both — so if the live probe returned only `/data` (USB
-    // not surfaced for whatever reason), the user couldn't pick
-    // /mnt/usb0 even though the payload's `is_path_allowed` accepts
-    // it. Now we union live + fallback so the user always sees
-    // every well-known mount root, while live entries we've
-    // probed are still preferred and shown first.
-    const seen = new Set<string>();
-    const out: string[] = [];
-    for (const p of [...liveVolumePaths].sort()) {
-      if (!seen.has(p)) {
-        seen.add(p);
-        out.push(p);
-      }
-    }
-    for (const p of fallbackMountVolumes()) {
-      if (!seen.has(p)) {
-        seen.add(p);
-        out.push(p);
-      }
-    }
-    return out;
+    // Trust the live probe when it has anything to say — those are
+    // the volumes the PS5 actually has writable mounts for right
+    // now. Only fall back to the hardcoded list during cold start
+    // (probe hasn't returned yet). Pre-2.2.40 we *unioned* live +
+    // fallback to be defensive about a probe that might miss USB,
+    // but the union surfaced ghost slots (e.g. /mnt/usb1 with no
+    // hardware behind it), and a user picking a ghost slot results
+    // in a mount that lands somewhere unexpected. Live-only is the
+    // honest UX. */
+    if (liveVolumePaths.length > 0) return [...liveVolumePaths].sort();
+    return fallbackMountVolumes();
   }, [liveVolumePaths]);
   const freeBytesByPath = useMemo(() => {
     const m = new Map<string, number>();

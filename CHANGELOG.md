@@ -4,6 +4,54 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 2.2.40
+
+**Mount picker no longer surfaces ghost USB slots, mismatch warning
+when payload ignores the picked mount-point**
+
+User report:
+
+  - "Even though I select /mnt/usb0 to mount, it still mounts to
+     /data/."
+  - "I see /mnt/usb1 / /mnt/usb2 in the dropdown but those aren't
+     real volumes."
+
+Two interlocking bugs from the 2.2.38 dropdown union.
+
+### Mount picker now trusts the live volume probe
+
+2.2.38 unioned the live probe with a (newly expanded) fallback list
+that included `/mnt/ext1` and `/mnt/usb1..3`, so users saw USB
+slots in the picker that had no hardware behind them. Picking a
+ghost slot resulted in a mount that landed at an unexpected path
+(the payload mkdir'd into a regular directory on the root
+partition since /mnt/usb1 wasn't a real mount).
+
+Reverted: dropdown is now live-probe-only when live has anything
+to say, fallback only on cold start. FALLBACK_VOLUMES shrunk back
+to `/data /mnt/ext0 /mnt/usb0` (the three slots that are nearly
+always present-as-stubs at minimum). The honest UX: if /mnt/usb0
+isn't in the dropdown, plug in the USB and click Refresh — don't
+pick a ghost.
+
+### Mount-point mismatch warning
+
+When the payload's returned `mount_point` doesn't match the
+`mount_point` the modal sent (most common cause: running an
+older payload that predates 2.2.25 and silently ignored the
+field, falling back to `/mnt/ps5upload/<name>`), the post-mount
+note now surfaces:
+
+    ⚠ Note: payload landed the mount at <X> instead of the path
+    you picked (<Y>). This usually means the running payload
+    predates 2.2.25 and silently ignored the mount-point. Push
+    the bundled payload from Connection → Refresh to update.
+
+Pre-2.2.40 the user just saw "Mounted at <X>" with no clue why
+their pick wasn't honored.
+
+---
+
 ## 2.2.39
 
 **Mount-after-upload no longer blocked by source-stability gate**

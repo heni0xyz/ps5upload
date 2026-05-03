@@ -50,15 +50,14 @@ export const MOUNT_PRESETS: { label: string; subpath: string; hint: string }[] =
  *  Mount. The default `ps5upload` subpath under any real volume
  *  (`/mnt/ext1/ps5upload/<name>`) gives the same effect without the
  *  rejection. */
-const FALLBACK_VOLUMES = [
-  "/data",
-  "/mnt/ext0",
-  "/mnt/ext1",
-  "/mnt/usb0",
-  "/mnt/usb1",
-  "/mnt/usb2",
-  "/mnt/usb3",
-];
+/** Cold-start fallback volume list used only when the live probe
+ *  has returned nothing yet. Kept short on purpose — earlier 2.2.38
+ *  expanded this to also include /mnt/ext1 and /mnt/usb1..3, but
+ *  that surfaced ghost volumes (USB slots not actually attached)
+ *  in the picker, confusing users who picked a slot that didn't
+ *  have hardware behind it. The right answer is to trust the live
+ *  probe; only fall back here when we have nothing else to show. */
+const FALLBACK_VOLUMES = ["/data", "/mnt/ext0", "/mnt/usb0"];
 
 export interface MountDest {
   volume: string;
