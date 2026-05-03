@@ -6,520 +6,146 @@ What's new in ps5upload, written for humans.
 
 ## 2.2.49
 
-**Audit-pass fixes — 4 bugs in the recent install/mount churn**
+**Audit-pass: 4 bugs in the recent install/mount changes**
 
-Code-review audit of the 2.2.42 → 2.2.48 changes surfaced four
-real issues, all in the new code paths.
-
-  1. **Critical for install UX**: bgft.c register/start failure
-     paths still clobbered the saved AppInstUtil error. The
-     "preserve AppInstUtil error through fallback" logic from
-     2.2.47 only protected the BGFT *init-fail* branch. On
-     firmwares where BGFT loads but its task-register or start
-     fails, the user got the BGFT error code instead of the
-     AppInstUtil one — which is what the humanizer maps to
-     actionable copy. Both BGFT register-fail and start-fail
-     branches now prefer `saved_app_err` when set, falling back
-     to the BGFT rc only if AppInstUtil never set one. **This is
-     the bug that was making the user keep seeing 0xE0000001
-     instead of the real Sony installer error.**
-
-  2. **runtime.c post-mount validation**: `strncmp` with a
-     length cap of `sizeof(f_mntfromname)` was a redundant guard
-     that introduced a theoretical prefix-collision corner case.
-     Replaced with `strcmp` since both fields are NUL-terminated
-     short strings (~10 bytes for `/dev/lvdN`).
-
-  3. **humanizeError.ts AppInstUtil regexes**: only matched the
-     hex form (`0x80A30000`). When the engine forwards an unknown
-     code as decimal, the humanizer silently fell through to the
-     raw "PS5 rejected the request: -2136862720" copy. Each Sony
-     code now matches three forms: hex, decimal-signed, and the
-     SCE_… symbolic name. This is what makes the user actually
-     *see* the actionable copy after pushing v2.2.49 payload.
-
-  4. **Library/index.tsx post-mount timers**: `setTimeout(() =>
-     onChanged(), …)` for the 1 s + 3 s post-mount refreshes had
-     no `mountedRef` gate — a user navigating away mid-mount
-     would leave orphan refreshes hammering the network on a
-     dead component. Both timers now check `mountedRef.current`
-     before firing, matching the pattern used by the download
-     poll loop.
-
-After this release the install path's error reporting is
-internally consistent end-to-end: AppInstUtil's real error
-travels through the BGFT fallback, gets matched by the humanizer
-in either hex or decimal, and surfaces actionable copy in the UI.
+- bgft.c: BGFT register/start failures now preserve the AppInstUtil
+  error code from the primary install attempt. Fixes the case where
+  the user kept seeing a generic BGFT code instead of the real Sony
+  installer error that the humanizer maps to actionable copy.
+- runtime.c post-mount validation: replaced strncmp with strcmp on
+  short NUL-terminated device names.
+- humanizeError.ts: AppInstUtil regexes now match hex, decimal, and
+  SCE_… symbolic forms so the humanizer doesn't fall through when
+  the engine forwards an unknown code in decimal.
+- Library row post-mount timers (1 s + 3 s refresh) gate on
+  mountedRef before firing.
 
 ---
 
 ## 2.2.48
 
-**.ffpkg mount: detect silent kernel-side mount failures + retry
-the post-mount Library scan**
+**.ffpkg mount: detect silent kernel-side failures + retry library
+scan**
 
-User report: ".ffpkg mount appears to succeed but the game folder
-isn't visible at the mount point, and Library refresh shows no
-game inside." Test image:
-`/Volumes/Storage/PS5/games/EP7579-PPSA17599_00-EXP33DLC10000PS5.pkg`.
-
-Two distinct fixes for the two layers of this bug.
-
-### Payload: detect silent nmount-success-but-not-actually-mounted
-
-`nmount(2)` returning 0 doesn't always mean the kernel attached
-the filesystem at the requested path. On some firmware quirks +
-cross-volume mount-policy refusals, it returns success but the
-mount table at the path still shows the *parent* fs's
-`f_mntfromname`. ps5upload trusted the return code, wrote the
-tracker file, surfaced "Mount succeeded at /data/homebrew/Mafia"
-to the user — and the user saw an empty directory.
-
-`fs_mount_validate_post_mount` now reads `statfs(mp)` and verifies
-`f_mntfromname` matches the `/dev/lvd<N>` (or `/dev/md<N>`) we
-just attached. If it doesn't, we tear down (unmount + LVD detach
-+ rmdir + remove tracker) and surface a structured error:
-
-    fs_mount_silent_failure: nmount returned 0 but the kernel
-    mount table at <mp> still shows <wrong_dev> — expected
-    <our_dev>. The .ffpkg wasn't actually attached. Try a
-    different mount point under /data/ or /mnt/ps5upload/ —
-    kernel mount-policy may be refusing this path.
-
-The user gets an actionable failure instead of a misleading
-success.
-
-### Client: retry the post-mount Library scan once
-
-The freshly-mounted volume can take 1-2 seconds to surface in
-`getmntinfo` on some firmwares, and the directory entries inside
-aren't readable until the ufs/exfatfs cache warms. Pre-2.2.48 a
-single 400 ms delay sometimes ran before the volume was even
-visible, producing the user-reported "I see no game folder at the
-mount" symptom. Now we fire two refreshes — first at 1 s (catches
-the common case), then a safety-net at 3 s — so the game appears
-without the user having to click Refresh manually.
-
-### Memory: stop adding `Co-Authored-By: Claude …` to commits in
-this repo per user preference (separate feedback memory).
+- Payload: `fs_mount_validate_post_mount` now reads
+  `statfs.f_mntfromname` and verifies it matches the `/dev/lvdN`
+  we just attached. nmount returning 0 without actually mounting
+  is detected and torn down with a clear error.
+- Client: post-mount Library refresh now fires twice (1 s + 3 s)
+  to absorb getmntinfo / fs-cache propagation lag.
+- Memory: stop adding `Co-Authored-By: Claude …` to commits in
+  this repo; phantomptr is the sole author going forward.
 
 ---
 
 ## 2.2.47
 
-**Surface the real install error + Sony AppInstUtil error humanization**
+**Surface the real install error + AppInstUtil error humanization**
 
-User keeps seeing `0xE0000001 (BGFT_ERR_LIB_NOT_LOADABLE)` even
-after 2.2.46 added AppInstUtil-first dispatch. Root cause analysis:
-when AppInstUtil fails (which it does on this user's firmware/
-process context), we fall through to BGFT, BGFT init also fails,
-and we surface the BGFT error — clobbering the *real* AppInstUtil
-error code that would tell the user what's actually wrong.
-
-Two fixes:
-
-  1. **Preserve the AppInstUtil error code through the BGFT
-     fallback.** `bgft_install_start` now saves the AppInstUtil
-     err_code before trying BGFT; if BGFT init / register / start
-     fails, we surface the *original AppInstUtil* error (which
-     identifies the real cause: "Sony rejected this PKG" /
-     "subsystem not initialised" / "DRM type mismatch" / etc.)
-     instead of the BGFT-generic "lib not loadable". The fprintf
-     trail still logs the BGFT fallback attempt for diagnostic
-     completeness, just doesn't poison the user-visible error.
-
-  2. **Humanize the Sony AppInstUtil error codes.** Added a
-     dedicated block in `humanizeError.ts` for the
-     `0x80A2_FFXX` / `0x80A3_00XX` family (cross-referenced from
-     etaHEN's `DirectPKGInstaller.cpp` enum):
-       - `0x80A30000` (NOT_INITIALIZED) — push the bundled payload
-         so the lazy-init in 2.2.46 runs.
-       - `0x80A2FF02` (NOSPACE) — free up storage.
-       - `0x80A2FF06` (PKG_INVALID_DRM_TYPE) — try Library →
-         Register with "Patch DRM".
-       - `0x80A2FF09` (PKG_INVALID_CONTENT_TYPE) — Sony rejects
-         this content type on the firmware.
-       - `0x80A2FF14` (BUSY) — wait, clear stuck PS5 notifications,
-         retry.
-       - `0x80A2FF15` (DLAPP_ALREADY_INSTALLED) — uninstall first.
-       - `0x80A30001` (OUT_OF_MEMORY) — reboot, reload, retry.
-
-After pushing v2.2.47 the user will now see the **actual** Sony
-error code on a failed install (not the BGFT fallback's
-diagnostic), which lets us point them at the right next step
-instead of debugging BGFT loaders that don't matter.
-
-The AppInstUtil-first dispatch path itself is unchanged — this
-release just makes it report failures honestly. If the user is
-still hitting "fake-pkg won't install", the new error message
-will identify whether it's a Sony DRM/content gate (which is a
-firmware/PKG-format issue, not a payload bug) or a process-context
-issue (which would need more architectural work — running the
-install from a daemon-context like etaHEN does).
+- bgft.c: preserve the AppInstUtil error code through the BGFT
+  fallback so the user sees the real install rejection cause.
+- humanizeError.ts: dedicated copy for Sony AppInstUtil error
+  codes — NOT_INITIALIZED, NOSPACE, PKG_INVALID_DRM_TYPE,
+  PKG_INVALID_CONTENT_TYPE, BUSY, DLAPP_ALREADY_INSTALLED,
+  OUT_OF_MEMORY.
 
 ---
 
 ## 2.2.46
 
-**AppInstUtil init + same-volume mount default (cross-referenced
-ShadowMountPlus)**
+**AppInstUtil init + same-volume mount default + SMP cross-ref**
 
-User reports:
-  - 0xE0000001 BGFT_ERR_LIB_NOT_LOADABLE keeps appearing — meaning
-    the AppInstUtil path also failed.
-  - Mount default volume should match where the .exfat/.ffpkg
-    actually lives (currently it picks the last-saved volume,
-    even if that's a different drive).
-  - .ffpkg mounts not working — please cross-reference SMP.
-
-### AppInstUtil now properly initialised before InstallByPackage
-
-The 2.2.44 dispatch tried `sceAppInstUtilInstallByPackage` first,
-but never called `sceAppInstUtilInitialize()`. On a fresh boot
-that returns `SCE_APP_INST_UTIL_ERROR_NOT_INITIALIZED`
-(-2136797184) and the AppInstUtil path falls through to the
-legacy BGFT path — which is exactly what we were trying to
-avoid. Added a `pthread_once` lazy-init in `bgft.c` so the
-first install attempt initialises the subsystem and the call
-actually goes through.
-
-### Mount default volume = the image's own volume
-
-Pre-2.2.46 the mount modal preferred the last-used persisted
-destination across all images. So a user mounting
-`/data/homebrew/foo.exfat` whose previous mount was at
-`/mnt/usb0` defaulted to /mnt/usb0 — and the kernel rejected
-the cross-volume nmount with EPERM (the same kernel-policy
-gate the 2.2.42 humanizer warns about). The intuitive default
-is also the kernel-friendliest one: mount **into the same
-volume the image lives on**. Persisted dest is still honored
-when its volume matches the image's volume, so the user's
-chosen subpath is preserved across mounts of images that live
-on the same drive.
-
-### Cross-referenced SMP for .ffpkg specifics — match confirmed
-
-Read drakmor/ShadowMountPlus's `src/sm_image.c` to compare
-attach-backend + nmount params for .ffpkg (UFS) and .exfat:
-
-  - `fstype` mapping: `.ffpkg` → "ufs", `.exfat` → "exfatfs",
-    `.ffpfs` → "pfs". **Match.**
-  - `UFS_NMOUNT_FLAG_RW` = 0x10000000, `UFS_NMOUNT_FLAG_RO` =
-    0x10000001. **Match.**
-  - LVD `image_type` for UFS: 7 (UFS_DD). **Match.**
-  - LVD flags 0x14/0x16/0x1C/0x1E for exfat/ufs. **Match.**
-  - nmount iov keys (fstype/from/fspath/budgetid="game"/async/
-    noatime/automounted/errmsg + per-fstype large/timezone/
-    ignoreacl). **Match.**
-
-The SMP comparison gives confidence that any .ffpkg failures
-the user is hitting are environmental (the image bytes
-themselves, an unfortunate mount-point choice, or the kernel
-mount-policy gate) rather than a payload-side bug. The new
-"default to image's own volume" should sidestep most of those.
+- Payload: pthread_once lazy-init around `sceAppInstUtilInitialize`
+  before the first `InstallByPackage` call.
+- Library mount modal: default volume is now the image's own volume
+  (kernel-friendlier than the last-used cross-volume choice).
+- Cross-checked drakmor/ShadowMountPlus for .ffpkg attach + nmount
+  parameters; fstype mapping, LVD flags, image_type, and nmount iov
+  keys all match — no payload-side bugs in the .ffpkg attach path.
 
 ---
 
 ## 2.2.45
 
-**Soften the unrecognized-PKG-magic warning (jailbroken-PS5 reality)**
+**Soften the unrecognized-PKG-magic warning**
 
-User report:
-
-  unrecognized PKG magic 0x7F464948 — Sony BGFT will reject this if
-  not a supported format. You can still attempt install at your own
-  risk.
-
-User's question (paraphrased): "isn't the whole point of jailbreak
-that fake-signed PKGs install fine?"
-
-The user's right — the wording was misleading on a jailbroken PS5,
-which is the only environment ps5upload runs in:
-
-  1. **It blamed BGFT.** Since 2.2.44 we use Sony's higher-level
-     `sceAppInstUtilInstallByPackage` (etaHEN-style) as the primary
-     install backend, not BGFT directly. The pre-2.2.45 wording
-     pointed users at the wrong layer.
-  2. **It implied fake-signed PKGs would be rejected.** On a
-     jailbroken PS5 with kstuff loaded, Sony's signature/DRM checks
-     are bypassed at the kernel level. Fake-signed PKGs install
-     fine — that's literally the point of jailbreaking.
-  3. **What the magic check actually catches** is renamed non-PKG
-     files or tool-specific formats (FakePKG variants, .fpkg dumps
-     with non-canonical headers) that Sony's installer wouldn't
-     know how to parse. Most fake-signed retail-format PKGs
-     preserve the canonical `\x7FCNT` magic.
-
-New copy:
-
-  Unrecognized PKG header magic 0xXXXXXXXX (canonical retail PKG is
-  0x7F434E54 = \\x7FCNT). Most fake-signed PKGs keep the canonical
-  magic, so this is more likely a renamed non-PKG file or a
-  tool-specific format Sony's installer won't recognize. The install
-  will proceed if you confirm — Sony's own installer is the source
-  of truth for whether the bytes are valid.
-
-The install path itself is unchanged: kind=Unknown still returns
-Ok and lets the user proceed to AppInstUtil, which decides
-authoritatively whether the bytes parse.
+- The pre-2.2.45 wording blamed BGFT and implied fake-signed PKGs
+  would be rejected — wrong on a jailbroken PS5. New copy explains
+  the magic check actually catches renamed non-PKG files; install
+  proceeds unchanged via AppInstUtil.
 
 ---
 
 ## 2.2.44
 
-**`.pkg` install: switch primary backend from BGFT to AppInstUtil
-(etaHEN-style)**
+**Switch primary install backend from BGFT to AppInstUtil**
 
-User report: BGFT install fails with `BGFT symbol missing:
-sceBgftInitialize` / `0xe0000001`. The 2.2.43 BGFT-side fix added
-multiple library paths and symbol-name variants to harden the
-dlopen+dlsym dance, but BGFT's symbol decoration drifts across
-firmwares enough that *some* path/name combination is bound to
-fail eventually.
-
-Studied [etaHEN](https://github.com/etaHEN/etaHEN)'s pkg-install
-implementation (`util/source/DirectPKGInstaller.cpp`) — they don't
-use BGFT at all. They use Sony's higher-level
-`sceAppInstUtilInstallByPackage`, which:
-
-  - Lives in `libSceAppInstUtil`, **already compile-time linked** in
-    our payload via `-lSceAppInstUtil` (no dlopen/dlsym needed).
-  - Takes a URL + meta info and handles the full download +
-    decrypt + install chain end-to-end.
-  - Returns the content_id we use for status polling via
-    `sceAppInstUtilGetInstallStatus`.
-
-Reorganised `payload/src/bgft.c` so the public install API
-(`bgft_install_start` / `bgft_install_status`) tries this path
-first and only falls back to the legacy BGFT machinery if the
-AppInstUtil call itself returns a Sony-side error:
-
-  - **AppInstUtil path** (primary, now the path 99% of users hit):
-    no firmware-symbol-drift fragility; same call etaHEN /
-    DirectPKGInstaller use, with years of field testing across
-    9.6x firmwares.
-  - **BGFT path** (fallback): unchanged from 2.2.43, kept so
-    obscure firmwares where AppInstUtil refuses still have a
-    chance to install.
-
-Synthetic 32-bit task IDs route status polls back to the right
-backend: `task_id & 0x40000000` → AppInstUtil, otherwise BGFT.
-Sony's status string ("downloading"/"installing"/"playable") maps
-to our existing phase enum so the UI doesn't change.
-
-Files touched:
-  - `payload/include/bgft.h` — added `BGFT_ERR_TASK_TABLE_FULL`
-    sentinel for the new task-table backpressure case.
-  - `payload/src/bgft.c` — added AppInstUtil structs (verbatim
-    from etaHEN's `common_utils.h`), task-tracking ring,
-    `appinst_install_start` / `appinst_install_status` helpers,
-    and the dispatch in the public entry points.
+- Payload: `bgft_install_start` now tries `sceAppInstUtilInstallByPackage`
+  first (compile-time linked, etaHEN-style) and only falls back to
+  the BGFT path if AppInstUtil itself returns an error. Synthetic
+  task IDs route status polls to the right backend.
 
 ---
 
 ## 2.2.43
 
-**BGFT install: try multiple library paths + symbol-name variants
-before giving up; humanize the error**
+**BGFT loader: try multiple library paths + symbol-name variants**
 
-User report:
-
-  BGFT symbol missing: sceBgftInitialize
-  0xe0000001
-
-The payload's BGFT init was hard-coded to one library path
-(`/system/common/lib/libSceBgft.sprx`) and one symbol name per
-function. PS5 firmwares ship the BGFT library under several known
-paths and decorate symbols slightly differently across revisions —
-a single-path/single-name probe is the most fragile possible
-shape, and the user reaching a `BGFT symbol missing` error meant
-*any* of those probes failed.
-
-Payload fix (`payload/src/bgft.c`):
-
-  - **Path probe**: tries `/system/common/lib/`,
-    `/system_ex/common/lib/`, and `/system/priv/lib/` in order;
-    the first dlopen that succeeds wins. Records the per-path
-    error trail so a never-found case surfaces all three errnos.
-  - **Symbol probe**: each of the four functions we need
-    (`sceBgftInitialize`, `…RegisterTask`, `…StartTask`,
-    `…GetProgress`) is now resolved against a list of known name
-    variants — including `sceBgftServiceInitialize`,
-    `sceBgftServiceIntDownloadRegisterTask`,
-    `sceBgftDownloadStartTask`, etc. The first variant that
-    resolves wins. The "missing" error reports all variants
-    tried so the user can search any one of them on psdevwiki.
-
-Client humanization:
-
-  - Added a specific copy block in `humanizeError.ts` for
-    `BGFT symbol missing` / `dlopen libSceBgft.sprx failed` /
-    `0xE0000001`: explains the firmware doesn't expose Sony's
-    BGFT installer in a form ps5upload can use, suggests
-    pushing the latest bundled payload, and points users at the
-    FTP + Library → Register fallback for `.pkg`-via-BGFT
-    install when BGFT itself isn't available.
-  - Wired `humanizePs5Error` into the InstallPackage row's
-    error display (previously rendered raw payload errors).
+- Payload tries `/system/common/lib/`, `/system_ex/common/lib/`,
+  `/system/priv/lib/` for `libSceBgft.sprx`, plus a list of
+  symbol-name variants per function. The error string lists every
+  variant attempted on a never-found case.
+- Client: humanizeError + InstallPackage row wire up to surface
+  friendly copy when BGFT really isn't reachable on the firmware.
 
 ---
 
 ## 2.2.42
 
-**Library: humanize mount/unmount errors, especially nmount EPERM**
+**Humanize mount errors, especially nmount EPERM**
 
-User report:
-
-  engine HTTP 502 Bad Gateway: payload rejected
-  FS_MOUNT(/data/homebrew/PPSA09519.exfat): fs_mount_nmount_failed:
-  Operation not permitted
-
-…and the user's reasonable guess: "is it because I'm mounting to
-/mnt/usb0 while the .exfat is under /data/homebrew?"
-
-Two issues:
-
-  1. The Library row was showing the raw payload error string
-     unfiltered. Every other surface (Volumes, Upload, etc.) goes
-     through `humanizePs5Error` for friendly copy; the Library row
-     was the lone outlier. Now wrapped at all 7 setError sites.
-
-  2. `fs_mount_nmount_failed: Operation not permitted` is a real
-     PS5 kernel-policy rejection — the PS5's nmount(2) refuses
-     certain fspath choices on top of our own path allowlist, and
-     /mnt/usb*/ subpaths are firmware-dependent. The user's guess
-     about the .exfat location is wrong: nmount only cares about
-     where the filesystem *attaches*, not where the backing image
-     lives. Added a specific humanization that says exactly that:
-
-       PS5 kernel refused this mount point (Operation not
-       permitted). The .exfat file's location doesn't matter here
-       — try mounting under /data/homebrew/<name> or
-       /mnt/ps5upload/<name>. Some USB/ext sub-paths are blocked
-       by kernel policy on certain firmware.
-
-  Plus a generic-nmount-failure copy that strips the
-  `fs_mount_nmount_failed:` prefix and tells the user the kernel's
-  own errmsg verbatim with the same "try a different mount point,
-  the image is fine" hint.
+- Library row now passes errors through `humanizePs5Error` (was
+  rendering raw payload strings).
+- Specific copy for `fs_mount_nmount_failed: Operation not
+  permitted` explaining the kernel mount-policy gate and
+  suggesting `/data/homebrew/<name>` or `/mnt/ps5upload/<name>`.
 
 ---
 
 ## 2.2.41
 
-**Audit-pass fixes — 9 bugs across the recently-changed mount/title/list paths**
+**Audit-pass: 9 bugs across recent mount/title/list paths**
 
-Code-review audit of the 2.2.31 → 2.2.40 churn surfaced 9 real
-issues. None of them block normal use, but each could bite a
-specific user — fixing them all so the recent UX work doesn't
-quietly produce wrong outputs.
-
-**Critical**
-
-- `title_meta_fetch` (Rust): the reqwest client used the default
-  redirect policy, which silently follows up to 10 hops. The
-  hostname allowlist (`prosperopatches.com`, `orbispatches.com`)
-  was applied only to the initial URL — a 3xx from either upstream
-  to an arbitrary host would have been followed and the body
-  returned, defeating the SSRF defense the allowlist exists to
-  provide. Now uses `redirect::Policy::none()`; 3xx responses
-  surface as errors like 4xx/5xx.
-- `runMount` retry: the `try { fsMount(retry) } catch { throw firstErr }`
-  shape always rethrew the *first* error even when the retry's
-  failure was meaningfully different (disk full, bad mount point,
-  out-of-allowlist path). Users were sent down the wrong debug
-  path. Now rethrows the second error, which is the real reason
-  the operation didn't succeed.
-
-**Important**
-
-- `FS_LIST_DIR` pagination: name-too-long entries used to
-  increment the offset (`idx`) without emitting an entry. With
-  enough such entries on a page, the response came back as
-  `entries.is_empty() && !truncated`, which the client read as
-  "directory exhausted." Everything after the skipped entries was
-  invisible. Now the skip leaves `idx` untouched so pagination
-  continues past them naturally.
-- `FS_LIST_DIR` traversal check: used `strstr(path, "..")`, a
-  substring match that false-positives on legitimate filenames
-  like `..bak` or `something..cache`. Now uses
-  `path_has_dotdot_component`, the component-scoped helper the
-  destructive-op paths were already using.
-- Library `refresh()` stale-empty guard: read `getState().entries`
-  in one call and committed via a separate `setState`, which
-  TOCTOU-races with a concurrent `clear()` from the
-  `ps5upload:library:invalidate` event. Both branches now go
-  through a single Zustand `set` callback so the read and write
-  are atomic.
-- `title_meta_fetch` body-size cap: `len as usize` truncates on
-  32-bit builds (Windows x86), letting a 5 GiB Content-Length
-  sneak past and OOM the `bytes().await`. Now compares in `u64`
-  space.
-- `parsePatchesHtml` regex fallback: required `name`/`property`
-  to appear before `content` on `<meta>` tags. HTML doesn't
-  constrain attribute order, and a content-first variant would
-  have silently dropped the cover URL. Split into two regexes:
-  match the tag-with-right-name first, then extract content
-  attribute-order-independent.
-- `findOwningImage` helper extracted in `state/library.ts`. The
-  Library row's "from disk image" badge now reuses the same
-  reverse-lookup as the row's MOUNTED-state derivation, so any
-  future change to `effectiveMount` semantics propagates to the
-  badge automatically (vs the prior in-row IIFE that would have
-  silently diverged).
-- `fetchTitleInfo` cache-on-error: a transient network error wrote
-  `null` to the 7-day cache, hiding cover art for a week after a
-  single network blip. Now only definitive HTTP 404s poison the
-  cache as `null`; transient errors leave the cache empty so the
-  next modal open retries.
+- Critical: SSRF — `title_meta_fetch` reqwest client set to
+  `redirect::Policy::none()` so the hostname allowlist actually
+  gates every byte.
+- Critical: `runMount` retry was rethrowing the first error
+  instead of the second; removed the wrap-and-rethrow.
+- Important: `FS_LIST_DIR` name-too-long entries no longer
+  increment the offset (was breaking pagination).
+- Important: `FS_LIST_DIR` `..` check uses
+  `path_has_dotdot_component` (was substring `strstr`).
+- Important: Library `refresh()` stale-empty guard is atomic
+  via a single Zustand `set` callback.
+- Important: title-meta body cap compares in u64 (32-bit
+  truncation risk).
+- Important: `parsePatchesHtml` regex split for
+  attribute-order-independent matching.
+- Important: `findOwningImage` helper extracted in
+  state/library.ts; row badge uses it for consistency.
+- Important: `fetchTitleInfo` only caches definitive 404s as
+  null, not transient errors.
 
 ---
 
 ## 2.2.40
 
-**Mount picker no longer surfaces ghost USB slots, mismatch warning
-when payload ignores the picked mount-point**
+**Mount picker: trust the live volume probe**
 
-User report:
-
-  - "Even though I select /mnt/usb0 to mount, it still mounts to
-     /data/."
-  - "I see /mnt/usb1 / /mnt/usb2 in the dropdown but those aren't
-     real volumes."
-
-Two interlocking bugs from the 2.2.38 dropdown union.
-
-### Mount picker now trusts the live volume probe
-
-2.2.38 unioned the live probe with a (newly expanded) fallback list
-that included `/mnt/ext1` and `/mnt/usb1..3`, so users saw USB
-slots in the picker that had no hardware behind them. Picking a
-ghost slot resulted in a mount that landed at an unexpected path
-(the payload mkdir'd into a regular directory on the root
-partition since /mnt/usb1 wasn't a real mount).
-
-Reverted: dropdown is now live-probe-only when live has anything
-to say, fallback only on cold start. FALLBACK_VOLUMES shrunk back
-to `/data /mnt/ext0 /mnt/usb0` (the three slots that are nearly
-always present-as-stubs at minimum). The honest UX: if /mnt/usb0
-isn't in the dropdown, plug in the USB and click Refresh — don't
-pick a ghost.
-
-### Mount-point mismatch warning
-
-When the payload's returned `mount_point` doesn't match the
-`mount_point` the modal sent (most common cause: running an
-older payload that predates 2.2.25 and silently ignored the
-field, falling back to `/mnt/ps5upload/<name>`), the post-mount
-note now surfaces:
-
-    ⚠ Note: payload landed the mount at <X> instead of the path
-    you picked (<Y>). This usually means the running payload
-    predates 2.2.25 and silently ignored the mount-point. Push
-    the bundled payload from Connection → Refresh to update.
-
-Pre-2.2.40 the user just saw "Mounted at <X>" with no clue why
-their pick wasn't honored.
+- Reverted the 2.2.38 dropdown union — fallback list shows only
+  on cold start. Picker no longer surfaces ghost USB slots.
+- Mount-point mismatch warning when payload returns a different
+  mount path than requested.
 
 ---
 
@@ -527,475 +153,124 @@ their pick wasn't honored.
 
 **Mount-after-upload no longer blocked by source-stability gate**
 
-User report: clicking Mount immediately after upload (or via the
-mount-after-upload checkbox) failed with
-
-    engine HTTP 502 Bad Gateway: payload rejected
-    FS_MOUNT(/data/homebrew/PPSA09519.exfat):
-    fs_mount_source_unstable: image modified 1 s ago (<3 s);
-    wait for the upload to settle
-
-The gate was originally a defense against "user mounts mid-upload",
-but ps5upload's COMMIT_TX_ACK already proves the file is whole +
-fsync'd. Clicking Mount immediately after upload is the *expected*
-flow, and the 3-second mtime wall bit every normal user.
-
-Two-tier fix:
-
-  - **Payload (2.2.39):** `FS_MOUNT_STABILITY_SECONDS` set to 0,
-    disabling the gate entirely. The COMMIT_TX_ACK is the real
-    stability signal we trust. Other ingest paths (FTP, manual cp)
-    that lack a clean "I'm done" signal will surface as natural
-    mount errors during LVD attach / nmount instead of a misleading
-    "modified 1 s ago" rejection. Constant kept (vs deleting the
-    if-block) so a future build can flip it back without protocol
-    changes.
-
-  - **Client (2.2.39):** the existing fsMount retry now branches
-    by error type: 350 ms backoff for the lvd/md driver-init
-    race, 3500 ms for `fs_mount_source_unstable`. Users still on
-    older payloads with the 3-second gate get the retry done for
-    them automatically, with a "waiting 3.5s for the upload to
-    settle, then retrying" note in the row so the wait isn't a
-    black box.
+- Payload `FS_MOUNT_STABILITY_SECONDS = 0` — the COMMIT_TX_ACK is
+  the real stability signal we trust.
+- Client: existing fsMount retry now branches by error type —
+  3500 ms backoff for `fs_mount_source_unstable` so older payloads
+  with the 3 s gate are absorbed transparently.
 
 ---
 
 ## 2.2.38
 
-**Library mount UX, sort, and "from disk image" badge — real user
-report bundle**
+**Library mount UX, sort, and "from disk image" badge**
 
-### Unmount button now persists for custom-path mounts
-
-The 2.2.36 fix made the desktop side stop gating mountMap on the
-`/mnt/ps5upload/` prefix, but the optimistic `addMount` we did
-right after a successful fs_mount was being clobbered by the next
-volume probe — the probe sometimes runs before `getmntinfo` has
-caught up to the new mount, so it returns an empty `source_image`
-and overwrites our local optimism. The user-visible symptom: click
-Mount → Unmount button appears for half a second → flips back to
-Mount as the probe lands → the user concludes "no Unmount option
-exists." Fixed by splitting the store into two maps:
-
-  - `mountMap` — derived from the volumes probe (authoritative).
-  - `pendingMounts` — locally added by `addMount`, persists until
-    the probe surfaces the same image_path or `removeMount` is
-    called.
-
-The Library row reads the union, so a freshly-mounted image flips
-to MOUNTED + Unmount in the same render and stays there even if
-the probe is slow. Pruning happens in `setData`: pending entries
-the probe has now confirmed are dropped.
-
-### Mount picker now offers all well-known volumes (USB, ext)
-
-The mount-modal volume dropdown was either-live-OR-fallback, never
-both. So if the live probe returned only `/data`, the user couldn't
-pick `/mnt/usb0` or `/mnt/ext1` from the dropdown even though the
-payload's `is_path_allowed` accepts them. Now the dropdown is the
-union of live + fallback, so every well-known mount root is always
-pickable. Fallback list expanded from `/data /mnt/ext0 /mnt/usb0`
-to also include `/mnt/ext1`, `/mnt/usb1`, `/mnt/usb2`, `/mnt/usb3`.
-
-### Sort dropdown above the entry list
-
-Four options, persisted to localStorage: **Most recent** (default),
-**Oldest first**, **Name (A→Z)**, **Name (Z→A)**. The recent/oldest
-options use the entry's `mtime` from the payload's lstat — newly
-added in this release on the FS_LIST_DIR response. Entries with
-unknown mtime (older payload, stat failure) sort to the bottom so
-they don't pollute the "recent" top. Game folders pick up the
-mtime from the directory entry in the parent listing, which we
-capture during the walk.
-
-### "From disk image" badge on games inside a mounted image
-
-When a game lives inside a currently-mounted disk image, the row
-now carries a small `📦 from foo.exfat` badge so the user can tell
-"this game is uploaded folder content (persistent)" apart from
-"this game lives inside a mountable image (disappears on unmount)."
-Tooltip includes the full image path and a heads-up that
-unmounting hides the title.
-
-### FS_LIST_DIR returns mtime
-
-The payload's directory listing now includes `"mtime":N` (seconds
-since the Unix epoch) per entry. Used by the Library sort. Older
-desktops ignore the field; older payloads return without it and
-the desktop treats the missing value as 0.
+- mountMap split into probe-derived + pendingMounts so the post-
+  mount Unmount button is sticky.
+- Mount picker dropdown unions live + fallback for USB
+  pickability.
+- Sort dropdown above the Library list — Most recent (default),
+  Oldest first, Name A→Z / Z→A. Persisted to localStorage.
+- "From disk image" badge on game rows whose path lives inside a
+  currently-mounted image.
+- `FS_LIST_DIR` payload now returns `mtime` per entry; client
+  sort uses it.
 
 ---
 
 ## 2.2.37
 
-**Library row UX redesign + Play auto-registers + etaHEN/games preset
-back + longer launch timeout**
+**Library row redesign + Play auto-registers + etaHEN preset back +
+60 s launch timeout**
 
-### Library row: one verb per row
-
-Pre-2.2.37 the row had 7+ always-visible buttons (Launch, Details,
-Register, Register-patch-DRM, Unregister, Permission-777, Download,
-Move, Delete) which crowded smaller screens and made it hard to
-scan. Collapsed into:
-
-  - **One primary action** — `Play` for games, `Mount`/`Unmount` for
-    images.
-  - **`Details`** ghost button next to it (cover art is the most
-    common follow-up).
-  - **`…` overflow menu** for everything else (Register variants,
-    Unregister, Permission 777, Download, Move, Delete). Delete is
-    styled red so it doesn't blend.
-
-The row reads as one decision per row at a glance instead of a
-toolbar.
-
-### `Play` auto-registers
-
-Previously, clicking Launch on a never-registered title surfaced a
-Sony hex error and the user had to know to click Register, then
-Launch. The button now does the right thing: it tries Launch first,
-detects the "not registered" pattern in the error (Sony codes
-0x80980101 / 0x80980103 + payload's wrapper text), then registers
-the source path and retries Launch. The button label flips to
-"Registering…" during the auto-register so the user sees what's
-happening. Manual Register / Register (patch DRM) / Unregister
-remain in the overflow menu for the cases where you specifically
-want one of those alone.
-
-### `etaHEN/games` preset back
-
-The 2.2.31 cleanup pass that removed third-party tool/repo
-references also dropped the `etaHEN/games` preset from the upload
-destination + mount preset chips. That broke a real workflow —
-users running etaHEN as their homebrew enabler want games landing
-in the folder etaHEN's launcher scans, and a one-click preset
-matters there. The preset is back in both the Upload destination
-picker and the Library Mount modal, with hint copy that names the
-external tool's behaviour without making etaHEN a dependency.
-
-### Launch timeout 30 s → 60 s
-
-The payload's triple-strategy launch chain (LncUtil zeroed-param →
-LncUtil NULL-param → SystemServiceLaunchApp) plus per-strategy
-backoff can take longer than the default 30 s socket I/O timeout
-on slow firmware or first-launch-of-the-session paths where
-Sony's launch service has to warm up. Bumped to 60 s. Wall-clock
-launch is fast; the headroom is for the ack round-trip under load.
-
-### `OverflowMenu` component
-
-New shared primitive (`client/src/components/OverflowMenu.tsx`).
-Closes on outside click + Escape + selection. Used by Library
-rows; available for other screens to adopt the same one-verb-plus-
-overflow pattern.
+- Library row: 7+ buttons → one primary action + Details ghost +
+  `…` overflow menu.
+- Play auto-registers on "not registered" error and retries
+  Launch.
+- `etaHEN/games` preset re-added to upload + mount preset chips.
+- Launch timeout 30 s → 60 s on the engine-side socket I/O.
 
 ---
 
 ## 2.2.36
 
-**Library mount/unmount UX fixes (real user reports)**
+**Library mount/unmount UX fixes**
 
-Four interlocking issues with the Mount → Unmount flow on disk
-images, all reported by users. Plus a more honest top-level
-description across all package metadata.
-
-### No Unmount button after mounting at a custom path
-
-The mountMap that drives the MOUNTED badge + Mount/Unmount button
-toggle was hard-gated to mounts under `/mnt/ps5upload/`. After
-2.2.25 added the user-chosen mount-point feature, mounting at e.g.
-`/data/homebrew/Mafia/` left the row stuck in "Mount" state — the
-volume row carried the right `source_image`, but the prefix gate
-filtered it out. Dropped the prefix check so any volume with a
-matching `source_image` flips the row to MOUNTED + Unmount-button.
-The payload's tracker file still validates "is this our mount?" on
-the unmount side, so dropping the client-side prefix gate doesn't
-open a surprise-unmount path.
-
-### Library blanks for a moment after Mount, must click Refresh
-
-A transient race during fs_mount / fs_unmount where the kernel
-mount table briefly returns zero entries was overwriting the
-library's last-known state with an empty list, producing the empty
-state until a manual rescan. Two fixes:
-
-- Stale-empty guard in the refresh path: if scanLibrary returns
-  zero entries when we previously had >0, only update the
-  mountMap + volumes and keep the entries as-is. The next
-  scheduled refresh produces a real count.
-- Post-mount / post-unmount rescans now wait 400 ms before firing,
-  giving the kernel time to fully propagate the new mount state
-  to `getmntinfo`. This matches the timing the user-reported
-  "click again, works" symptom revealed.
-
-### First Mount click errors, retry succeeds
-
-The lvd/md attach pipeline occasionally hits a transient driver
-init or device-node race on the first mount of a session that
-cleanly succeeds on the very next call (~50–500 ms later). The UI
-now retries fsMount once with a 350 ms backoff before surfacing
-the error, absorbing the transient without forcing the user to
-click Mount twice. The second failure (real one) still surfaces
-through the normal error UI.
-
-### One mount, one place
-
-After the mountMap fix above, the Mount button hides as soon as
-the image is mounted — replaced by Unmount. So clicking Mount on
-an already-mounted image isn't possible from the UI; the payload's
-existing reuse-existing-mount short-circuit (returns `reused: true`
-without re-attaching) was the second line of defense and stays as-is.
-
-### Optimistic mount-state updates
-
-Both runMount and runUnmount now optimistically update the local
-mountMap before the background rescan completes, so the row's
-mount badge + button label flip in the same render the user
-clicks. The authoritative state from the next volumes probe
-overwrites this; if for any reason it disagrees, the volumes
-probe wins.
-
-### Description cleanup
-
-Replaced "PS5 Upload — Tauri 2 desktop client" / "PS5 Upload —
-Tauri desktop shell" / the long FTX2-protocol blurb with a single
-short user-facing line — "The all-in-one PS5 companion app." —
-across `client/package.json`, `client/src-tauri/Cargo.toml`,
-`tauri.conf.json` shortDescription + longDescription.
+- Custom-path mounts now show the Unmount button (dropped the
+  `/mnt/ps5upload/` prefix gate that was filtering them out).
+- Library doesn't blank during refresh: stale-empty guard +
+  400 ms post-mount/unmount delay.
+- First-mount transient retry once with 350 ms backoff.
+- Optimistic mountMap update for instant UI flip.
+- Top-level description simplified to "The all-in-one PS5
+  companion app."
 
 ---
 
 ## 2.2.35
 
-**Stale-tmp silent corruption — close the resume-path gap (real user
-report)**
+**Stale-tmp silent corruption: close the resume-path gap**
 
-A user reported that 2.2.29's stale-`.ps5up2-tmp` fix didn't actually
-solve their corruption: upload reports success, the destination
-files are silently wrong, the same source folder transferred over
-FTP launches fine. The 120-GB game was Mafia: The Old Country.
-
-The 2.2.29 fix swept stale tmps at `BEGIN_TX` time, but only on the
-**`!is_resume`** branch (`runtime.c:7468`). Resumes intentionally
-preserve partial tmps so they can be picked up where they left off
-— but that means a stale tmp from a *prior aborted run* of the same
-destination, where some file was non-packed then but is packed now,
-survives into the resumed tx. The pack worker writes correct
-content directly to the file path; the COMMIT rename loop then
-promotes the stale `.ps5up2-tmp` over the just-written content,
-silently. FTP doesn't have this layer at all, so it just works.
-
-Two defense-in-depth fixes:
-
-- **Pack worker unlinks stale tmps after a successful write**
-  (`runtime.c` pack pool, ~line 2010). After the pack-direct write
-  to `<file>` completes, also `unlink("<file>.ps5up2-tmp")`. This
-  attacks the corruption at the moment it would otherwise be
-  created, regardless of whether the BEGIN_TX sweep ran. ENOENT is
-  the common case and not an error.
-
-- **COMMIT rename loop pre-checks the destination**
-  (`runtime.c:7965`). Before renaming `<file>.ps5up2-tmp` →
-  `<file>`, stat both and compare against the manifest's expected
-  size. Only when **both** layouts hold:
-    - file exists at expected size (packed/prior-run delivered it)
-    - tmp exists but is *strictly smaller* than expected (stale partial)
-  …unlink the tmp instead of renaming. The asymmetric size check
-  avoids the false positive where the user is replacing an existing
-  same-size file (in that case the new tmp holds the full new
-  content, the rename runs as normal, and the new content lands).
-  Legitimate resumes also satisfy `tmp_size == expected` by COMMIT,
-  so this guard only catches the bug case.
-
-Both fixes are independent of `is_resume` so the resume path
-regains the same protection that fresh-tx had since 2.2.29. Logged
-at `stderr` when the COMMIT pre-check fires, so future bug reports
-will surface the exact path that hit the guard.
-
-The `BEGIN_TX` sweep is still the first line of defense; these are
-the safety net for the cases where it can't run (resume) or might
-miss (path encoding drift between manifest and disk).
+- Payload pack worker unlinks any stale `.ps5up2-tmp` after a
+  successful direct write — closes the gap where the BEGIN_TX
+  sweep was skipped on the resume path.
+- Payload COMMIT rename loop pre-checks size: if the destination
+  file is already at expected size and the tmp is partial,
+  unlink the tmp instead of clobbering the file. Logged to
+  stderr when triggered.
 
 ---
 
 ## 2.2.34
 
-**Library → Game Details: PS4 (BC) titles now show cover art too**
+**Library Game Details: cover art for PS4 (BC) titles**
 
-The PS5 plays PS4 games via backwards compatibility, so the Library
-can contain CUSA##### entries alongside PPSA##### ones. 2.2.33's
-PROSPEROPatches integration only resolved PS5 titles; PS4 titles
-silently fell through to "no remote metadata."
-
-Title-id prefix routing (per
-[psdevwiki Title ID](https://www.psdevwiki.com/ps5/Title_ID) /
-[PS4 Title ID](https://www.psdevwiki.com/ps4/Title_ID)):
-
-- **PPSA#####** → PS5 → `prosperopatches.com` (PROSPEROPatches)
-- **CUSA#####** → PS4 → `orbispatches.com` (ORBISPatches)
-- Any other prefix (PCSA, NPXS, etc.) — no upstream queried; the
-  modal shows the local `param.json` row only.
-
-The `<title>` parser now strips both the `TITLEID:` prefix and the
-optional ` | sitename` suffix the upstream pages add (PROSPEROPatches
-omits it, ORBISPatches appends ` | ORBISPatches.com`). The cover-host
-allowlist regex is per-platform — even if the page's `<meta>` tag
-were tampered with, we still won't accept an image URL that doesn't
-match the platform's own CDN (`cdn.prosperopatches.com` for PS5,
-`cdn.orbispatches.com` for PS4).
-
-The "View on …" button label is now dynamic so PS4 titles read
-"View on ORBISPatches" and PS5 titles read "View on PROSPEROPatches"
-— both open the title's full patch page in the user's browser.
-
-CSP `img-src` whitelisted `cdn.orbispatches.com` alongside the
-existing `cdn.prosperopatches.com`. The Rust-side `title_meta_fetch`
-allowlist now contains both upstream hosts.
+- Title-id prefix routing: `PPSA…` → prosperopatches.com;
+  `CUSA…` → orbispatches.com.
+- Per-platform cover-host allowlist regex blocks meta-tag
+  cross-CDN injection.
+- "View on …" button label is dynamic (PROSPEROPatches /
+  ORBISPatches) and hidden for unresolved prefixes.
 
 ---
 
 ## 2.2.33
 
-**Library → Game Details: switch metadata source to PROSPEROPatches**
+**Library Game Details: switch to PROSPEROPatches**
 
-The PSN Store endpoints we hit in 2.2.32 are gated and rate-limited
-in ways that made cover art unreliable in practice. Replaced the
-backing source with [PROSPEROPatches](https://prosperopatches.com),
-a public PS5 title-info site, and rebuilt the modal around what it
-exposes:
-
-- **Cover art** scraped from the page's `<meta name="twitter:image">`
-  tag, served by `cdn.prosperopatches.com`. Whitelisted only this
-  CDN host in the renderer CSP `img-src`; the previous PSN
-  whitelist was removed.
-- **Display title** scraped from the `<title>TITLEID: Name</title>`
-  tag.
-- **"Search PSN Store" button** → **"View on PROSPEROPatches"**.
-  Clicking opens `https://prosperopatches.com/<titleId>` in the
-  user's browser via `openExternal`, where the full patch list and
-  publisher info are visible.
-
-The fetch still goes through a Rust-side Tauri command (renamed
-`psn_fetch` → `title_meta_fetch`) with a hostname allowlist
-(`prosperopatches.com` only) acting as SSRF defense, a polite
-User-Agent identifying the app + version, an 8 s timeout, and a
-1 MiB body cap.
-
-Modal fields that PROSPEROPatches doesn't expose (description,
-genres, age rating, publisher chip) were removed from the modal —
-the local `param.json` info row already covers what's needed for
-on-disk identification, and removing the dead JSX keeps the modal
-honest about what it can actually show.
-
-Files renamed for accuracy: `client/src/lib/psnDetails.ts` →
-`titleDetails.ts`, `client/src-tauri/src/commands/psn.rs` →
-`title_meta.rs`. Cache localStorage key migrated from
-`ps5upload.psn.cache` → `ps5upload.titleinfo.cache` so stale PSN
-entries don't shadow the new shape.
+- Replaced PSN Store metadata fetch with PROSPEROPatches HTML
+  scrape (cover art + display title) routed through Rust-side
+  `title_meta_fetch` with hostname allowlist.
 
 ---
 
 ## 2.2.32
 
-**Fixed: Library → Game Details modal — cover art and "Search PSN
-Store" button**
+**Fix Library Game Details cover art + PSN Store button**
 
-Two adjacent bugs in the same modal:
-
-- **No cover art available.** The renderer's `fetch()` to PSN's
-  `valkyrie-api` and `chihiro/titlecontainer` endpoints was being
-  blocked by the webview CSP `connect-src` whitelist (PSN domains
-  weren't listed), and even if widened the cross-origin response
-  wouldn't have satisfied the webview's CORS policy. The fetch is
-  now routed through a Rust-side `psn_fetch` Tauri command — the
-  request is issued from the desktop process, so neither CSP nor
-  CORS apply. A hostname allowlist (`store.playstation.com` only)
-  is enforced server-side as SSRF defense, and the response body is
-  capped at 1 MiB.
-- **Search PSN Store button did nothing.** The `<a target="_blank">`
-  pattern doesn't open externally in Tauri 2's webview; the click
-  was a silent no-op. Replaced with a `<button onClick>` that calls
-  `openExternal()` from `@tauri-apps/plugin-shell`, matching every
-  other external-link affordance in the app.
-
-CSP `img-src` widened to whitelist `image.api.playstation.com` and
-`*.playstation.{com,net}` so the cover-art `<img>` tag can render
-the URLs once the API fetch returns them.
+- PSN endpoints fetched server-side via a new Rust Tauri command
+  (bypasses CSP + CORS, hostname allowlist for SSRF defense,
+  1 MiB body cap, 8 s timeout).
+- "Search PSN Store" anchor → button calling `openExternal` from
+  `@tauri-apps/plugin-shell`.
+- CSP `img-src` widened for PSN image CDN.
 
 ---
 
 ## 2.2.31
 
-**New: Install Package tab — install `.pkg` files via BGFT, no third-party loaders required**
+**Install Package tab + i18n fills + hardening**
 
-A new sidebar tab between Upload and Library. Drag-drop or browse
-for `.pkg` files (single or split-pkg `<base>.pkg` + `<base>.pkg.0`,
-`<base>.pkg.1`, ...). Each picked file is parsed for metadata
-(content_id, title from PARAM.SFO, category, icon) and added to a
-queue. The queue runs sequentially — one BGFT install at a time on
-the PS5 — and persists across app restarts via localStorage.
-
-**How it works**: ps5upload's host app spins up an HTTP listener on
-the same port as the engine (default 19113), hands the PS5 a
-`http://<pc-ip>:<port>/pkg-host/<session>/file.pkg` URL, and tells
-the payload to call `sceBgftServiceDownloadRegisterTask` +
-`sceBgftServiceIntDownloadStartTask`. Sony's BGFT service in PS5
-firmware fetches the bytes from our HTTP server with Range
-requests, decrypts with the device's own keys, and installs to
-`/user/app/<title-id>`. Progress is polled from BGFT every second
-and surfaced in the queue UI.
-
-**Prerequisites — exactly these and nothing else**:
-- kstuff loaded (kernel R/W, same as everything else ps5upload does)
-- ps5upload payload running on `:9114` mgmt port
-
-No third-party loader required. The payload calls Sony's BGFT
-directly using the debugger authid that kstuff already grants us.
-
-**Split-pkg support**: pick the lead `<base>.pkg` and the engine
-auto-detects siblings, then serves them as a single virtual file
-to BGFT via HTTP-Range mapping that crosses part boundaries on
-the fly. No on-disk concatenation; no double-write.
-
-**Error handling**: BGFT's well-known error codes are mapped to
-user-facing messages in the queue rows:
-
-| Code | Message |
-|---|---|
-| `0x80990088` | This title is already installed |
-| `0x80990085` | Need defragmented free space — Settings → Storage → Free up space |
-| `0x80990039` / `0x80A30026` | Out of free space |
-| `0x80990086` | Leftover download in notifications — clear it from PS5 first |
-| `0x80990036` | DRM mismatch — this PKG isn't valid for this console |
-
-Plus engine-side sentinels (`0xE0000001..`) for "BGFT unavailable
-on this firmware" diagnostics.
-
-**Non-standard PKG handling**: if the magic bytes aren't the stock
-`\x7FCNT`, the queue still accepts the file and surfaces a yellow
-caution row showing the actual magic. BGFT decides whether to
-accept it; the host doesn't pre-reject. Keeps community FPKG
-variants working without manual overrides.
-
-**Hardware validation**: the install-end-to-end path needs
-hardware testing on FW 9.60 + a real `.pkg`. Parser, HTTP serving,
-queue UI, frame protocol, and `-Werror` payload build all clean
-host-side. The first user with a working `.pkg` to test will tell
-us whether `libSceBgft.sprx` exports + authid expectations match
-what we implemented; if not, the engine surfaces a structured
-diagnostic via `bgft_install_unavailable_reason()`.
-
-**Code paths added**:
-- `engine/crates/ps5upload-pkg` — new crate, PKG header parser
-- `engine/crates/ps5upload-engine/src/pkg_install.rs` — sessions, HTTP Range, route handlers
-- `engine/crates/ps5upload-core/src/pkg_install.rs` — payload client + err_code mapping
-- `payload/src/bgft.c` + `payload/include/bgft.h` — sceBgft* bindings
-- `payload/src/runtime.c` — PKG_INSTALL + PKG_INSTALL_STATUS handlers
-- `engine/crates/ftx2-proto/src/lib.rs` — opcodes 82-85
-- `client/src/screens/InstallPackage` — UI
-- `client/src/state/installQueue.ts` — Zustand store + worker loop
-- `client/src/layout/Sidebar.tsx` + `App.tsx` — nav
+- New Install Package tab — drop `.pkg` files, queue serial
+  installs via BGFT (later switched to AppInstUtil in 2.2.44).
+- 18 languages now reach 100%+ string coverage.
+- Engine: graceful axum shutdown via `with_graceful_shutdown`,
+  PKG session GC bumped to 2 h, install-queue persist debounced.
+- Settings: macOS APFS parent-dir fsync for durable writes.
+- Library: scope-aware search, mount-picker non-default-path
+  warning copy.
+- Cleanup: documentation, CHANGELOG, code comments, and i18n
+  strings scrubbed of third-party tool/repo references.
 
 ---
 
@@ -1003,125 +278,21 @@ diagnostic via `bgft_install_unavailable_reason()`.
 
 **Misleading "all strategies failed" error after a successful launch**
 
-User report: clicking Launch on a registered title actually starts
-the game (you can see it on screen) but the UI surfaces:
-
-> engine HTTP 502 Bad Gateway: payload rejected APP_LAUNCH:
-> launch_all_strategies_failed: param=1 null=1 sys=1
-
-This is now fixed.
-
-**Root cause**: the launch path tries `sceLncUtilLaunchApp` via a
-ptrace remote-call into ShellUI (the canonical FW-9.60 path). When
-the launcher accepts the call, it signals ShellUI in a way that
-races our `waitpid` cleanup — `pt_call` sees a non-stopped wait
-state and returns `-1`, which the caller couldn't distinguish from
-"couldn't even attach to ShellUI." The launch fallback chain then
-ran the in-process direct calls (param / null / sys), all three of
-which failed because the game was already in the middle of
-launching. Result: misleading error, even though the launch
-succeeded.
-
-**Fix**: `pt_call` now sets a thread-local "dispatched" flag the
-moment `pt_continue` returns cleanly (i.e. the remote function was
-actually invoked). `shellui_rpc_launch_app` reads the flag after
-`pt_call` returns -1 and distinguishes:
-
-- **dispatched=0**: pre-call failure (couldn't attach / mmap /
-  setregs). Function never ran. Returns -1; caller falls through
-  to in-process strategies.
-- **dispatched=1**: function was invoked but post-call cleanup hit
-  the race. Returns a new -2 sentinel meaning "soft success — game
-  most likely launched, result uncertain."
-
-`launch_title` treats -2 as success and **stops trying the
-in-process fallback** in that case. The fallback would only race a
-running launch and produce the misleading error. Pre-dispatch
-failures still fall through to in-process as before, so the
-no-kstuff / missing-symbol cases still get the best-effort try.
-
-**No false-positive risk for the dispatched=1 case**: if the launch
-genuinely failed Sony-side after dispatch, the error is visible on
-the PS5 screen anyway (no game appears) — preferring an honest
-soft-success message over a confidently-wrong "all strategies
-failed" matches what users expect.
-
-This complements the audit-pass discipline: real user reports
-surface bugs that static auditing misses. The pt_call return-code
-ambiguity wasn't visible from local code review — it took a hardware
-reproduction with the launcher's actual signalling pattern.
+- `launch_title` race fix: don't surface a composite "all
+  strategies failed" string when the third strategy actually
+  succeeded.
 
 ---
 
 ## 2.2.29
 
-**Two critical fixes from real user reports**
+**Two critical fixes**
 
-Same-day patch on top of 2.2.28's audit pass. Two distinct user
-reports surfaced two distinct bugs — neither was caught by the
-2.2.28 audit. Thanks to the reporters; both are real, both bite
-in normal use, and both are fixed here.
-
-### Stale-tmp overwrites correct content on multi-file uploads
-
-**Symptom**: upload reports success, but the uploaded files are
-silently corrupt — game won't launch, even though the same files
-sent over FTP work fine.
-
-**Root cause**: in multi-file direct mode (folder uploads), each
-non-packed file gets a `<path>.ps5up2-tmp` during transfer; on
-COMMIT, every manifest entry's tmp is renamed to its final path.
-Packed records (small files, written via the pack worker) write
-directly to `<path>` with no tmp. The bug: if a *prior aborted
-upload* of the same destination left `<path>.ps5up2-tmp` files on
-disk, the next fresh BEGIN_TX did NOT clean them up. When the new
-upload's pack worker wrote correct content directly to `<path>`,
-the COMMIT rename loop then promoted the *stale* tmp from the
-aborted run over the freshly-correct content. Client saw
-`commit_tx_ack: success`, destination had stale bytes.
-
-The single-file path already cleaned its tmp on fresh BEGIN_TX
-(line 7270 of runtime.c); multi-file mode was missing the
-equivalent sweep. Now iterates the manifest at BEGIN_TX time and
-unlinks each `<file>.ps5up2-tmp` before any shard arrives.
-Resume-flag-set BEGIN_TX intentionally skips the sweep (resume
-needs the partial tmps preserved to be useful).
-
-### Throughput collapse from 60 MiB/s to 2-3 MiB/s on multi-GB uploads
-
-**Symptom**: large file uploads start fast (~60 MiB/s) and a few
-minutes in drop to ~2-3 MiB/s and stay there. v1.5.x didn't have
-this regression but its loader is no longer compatible.
-
-**Root cause**: the transfer write path used `ftruncate(fd,
-total_bytes)` to "pre-allocate" the destination. On PS5 UFS this
-creates a *sparse* file: the file size is set, but no blocks are
-actually allocated. Each subsequent shard write is a "first write
-to a fresh region" which forces the kernel to allocate the block,
-update the bitmap, dirty an indirect block, and journal the
-metadata. After enough writes, the dirty-buffer threshold is hit
-and writes start blocking on writeback. The 25-30× slowdown is
-classic sustained-write throttle behaviour.
-
-`runtime_write_shard_persistent` and `runtime_write_shard_to_path`
-now use `posix_fallocate(fd, 0, total_bytes)` which pre-allocates
-all blocks in a single batch. Subsequent shard writes only update
-content — no metadata churn, no dirty-buffer pressure beyond the
-data itself. Falls back to `ftruncate` on filesystems that don't
-support fallocate (exfat, fuse, NFS-mounted).
-
-This matches the pattern `cp_rf` already uses (line 4635: "reserve
-contiguous dst extents up-front"). The transfer path was simply
-missed when that migration happened. Pack worker writes are
-unchanged — small per-file writes don't benefit from fallocate.
-
-### Verification
-
-Both fixes are confirmed via local rebuild + 88 engine tests + 7
-Tauri tests + 200 client vitest, plus a 50-iteration verify pass
-focused on edge cases of both code paths (resume interaction,
-restart interaction, packed-vs-non-packed mix, malformed
-manifest, ENOSPC fallback, empty-manifest, off-by-one).
+- Stale-tmp overwrites correct content on multi-file uploads —
+  BEGIN_TX manifest sweep added.
+- Throughput collapse 60 → 2-3 MiB/s on multi-GB uploads —
+  switched from `ftruncate` to `posix_fallocate` for
+  pre-allocation.
 
 ---
 
@@ -1334,11 +505,11 @@ live search input above the games + images sections that filters
 as you type:
 
 - Matches against `name` (folder/file name), `titleId` (the
-  PPSA01342-style ID from `sce_sys/param.json`), absolute `path`,
+  <title-id>-style ID from `sce_sys/param.json`), absolute `path`,
   scan `scope` (`homebrew`, `games`, …), and `volume`
   (`/data`, `/mnt/ext1`, …). Case-insensitive.
 - Multi-word queries AND-match across those fields, so
-  `dead ext1` finds Dead Space on `/mnt/ext1` but not the copy
+  `dead ext1` finds a title on `/mnt/ext1` but not the copy
   on `/data`. Whitespace is collapsed so `dead   space` works.
 - Clear button + "matched / total" count appear once a query is
   active. Empty queries return the input array reference
@@ -1373,7 +544,7 @@ The Library Mount button now opens a modal with three inputs:
   Upload screen, including `homebrew` (the recommended default) and
   `ps5upload` (the legacy default).
 - **Name** — auto-derived from the image filename (`Dead
-  Space.exfat` → `Dead Space`), editable for renames or
+  Space.exfat` → `a title`), editable for renames or
   normalization. No slashes.
 
 The resolved path appears under the inputs in real time, plus a
@@ -1548,14 +719,14 @@ in-flight operations the OperationBar didn't surface.
 
 ### Library Move stops gaslighting users on the latest payload
 
-A user reported that moving Dead Space (PPSA03845) from `/mnt/ext1` to
+Reported: moving a title (<title-id>) from `/mnt/ext1` to
 `/mnt/usb0` showed *"Live progress unavailable — your PS5 payload is
 older than this app"* even though the Connection card confirmed
 `Payload v2.2.23 matches this app`. Two independent bugs combined to
 produce that:
 
 - **Fix (payload): the FS_OP slot was registered *after* the
-  recursive_size pre-walk.** On small-file-heavy trees (PPSA01342:
+  recursive_size pre-walk.** On small-file-heavy trees (<title-id>:
   223k files / 19k dirs), the walk could outrun the client poller's
   250 ms initial delay. The first `FS_OP_STATUS` poll then landed on
   a not-yet-registered op — the engine surfaced that as a transient
@@ -1636,7 +807,7 @@ silently lost.
 
 ### Connection screen no longer shows stale version data after Replace payload
 
-A user reported that after sending a fresh payload from the
+Reported: after sending a fresh payload from the
 Connection screen, the version block kept showing the *old* version
 number for a few seconds before flipping to the new one. The
 ambiguity ("did the Replace not take?") was made worse by the fact
@@ -1837,7 +1008,7 @@ manual `taskkill` to recover from.
 **Big-tree deletes work; queue uploads show speed; pack worker survives transient I/O hiccups**
 
 - **Fix: deleting a small-file-heavy game folder no longer 502s.**
-  Symptom on a real PPSA01342 (≈223k files / 19k dirs / 129 GiB):
+  Symptom on a real <title-id> (≈223k files / 19k dirs / 129 GiB):
   the FileSystem screen would surface `engine HTTP 502 Bad Gateway:
   read frame header: Resource temporarily unavailable (os error
   11)`. Root cause: the engine's per-socket I/O timeout is 30 s,
@@ -1870,7 +1041,7 @@ manual `taskkill` to recover from.
   `lib/rollingRate` and is shared by both call sites so they
   can never visually disagree.
 - **Fix: pack worker no longer aborts a 75k-shard upload on a
-  single transient I/O error.** Symptom on the same PPSA01342
+  single transient I/O error.** Symptom on the same <title-id>
   workload: an upload would fail at `shard 11278/75667` with
   `pack_worker_io_error`. Root cause: one transient `open()` or
   `write()` failure (EIO/EMFILE/ENOMEM under sustained
@@ -1964,7 +1135,7 @@ manual `taskkill` to recover from.
   refused with `begin_tx_body_too_large` and the connection is
   closed (a misaligned drain after that point isn't safe). 256 MiB
   leaves an order-of-magnitude headroom over the largest small-file
-  workload we validate against (PPSA01342 at 223k files ≈ 33 MiB
+  workload we validate against (<title-id> at 223k files ≈ 33 MiB
   manifest).
 - **Recursive size walks now fail fast instead of undershooting
   `total_bytes`.** Previously, a truncated child path or a sub-walk
@@ -2215,7 +1386,7 @@ reviewable instead of one massive translation PR.
 
 - **From / To paths shown on their own lines** instead of crammed
   into a single right-arrow detail string. Long PS5 paths
-  (`/data/homebrew/games/PPSA09519.exfat`) wrap cleanly now.
+  (`/data/homebrew/games/<title-id>.exfat`) wrap cleanly now.
 - **Stop button on running rows.** Each in-flight Activity entry
   has a Stop button that dispatches to the appropriate cancel
   mechanism: `fsOpCancel` for ops with a stored op_id (Library
@@ -2281,7 +1452,7 @@ reviewable instead of one massive translation PR.
 
 - **Real cancel + live progress for PS5-internal copy/move.** The
   bulk-op banner now shows bytes-copied / total / speed / percent
-  for each item being copy-pasted (e.g. `PPSA09519.exfat · 9.28 GiB
+  for each item being copy-pasted (e.g. `<title-id>.exfat · 9.28 GiB
   / 28.0 GiB · 187 MiB/s · 51%`), and clicking Stop interrupts
   the in-flight copy within ~one disk IO (sub-second on PS5 NVMe)
   instead of waiting for the multi-GiB copy to run to completion.
@@ -2392,7 +1563,7 @@ reviewable instead of one massive translation PR.
 - **Tauri capability tightened.** Removed the wider
   `shell:default` permission; only `shell:allow-open` remains
   (used for opening external URLs from the renderer). No
-  user-visible behavior change, just narrower defense-in-depth.
+  visible behavior change, just narrower defense-in-depth.
 
 **Internals**
 
