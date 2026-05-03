@@ -4,6 +4,71 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 2.2.37
+
+**Library row UX redesign + Play auto-registers + etaHEN/games preset
+back + longer launch timeout**
+
+### Library row: one verb per row
+
+Pre-2.2.37 the row had 7+ always-visible buttons (Launch, Details,
+Register, Register-patch-DRM, Unregister, Permission-777, Download,
+Move, Delete) which crowded smaller screens and made it hard to
+scan. Collapsed into:
+
+  - **One primary action** — `Play` for games, `Mount`/`Unmount` for
+    images.
+  - **`Details`** ghost button next to it (cover art is the most
+    common follow-up).
+  - **`…` overflow menu** for everything else (Register variants,
+    Unregister, Permission 777, Download, Move, Delete). Delete is
+    styled red so it doesn't blend.
+
+The row reads as one decision per row at a glance instead of a
+toolbar.
+
+### `Play` auto-registers
+
+Previously, clicking Launch on a never-registered title surfaced a
+Sony hex error and the user had to know to click Register, then
+Launch. The button now does the right thing: it tries Launch first,
+detects the "not registered" pattern in the error (Sony codes
+0x80980101 / 0x80980103 + payload's wrapper text), then registers
+the source path and retries Launch. The button label flips to
+"Registering…" during the auto-register so the user sees what's
+happening. Manual Register / Register (patch DRM) / Unregister
+remain in the overflow menu for the cases where you specifically
+want one of those alone.
+
+### `etaHEN/games` preset back
+
+The 2.2.31 cleanup pass that removed third-party tool/repo
+references also dropped the `etaHEN/games` preset from the upload
+destination + mount preset chips. That broke a real workflow —
+users running etaHEN as their homebrew enabler want games landing
+in the folder etaHEN's launcher scans, and a one-click preset
+matters there. The preset is back in both the Upload destination
+picker and the Library Mount modal, with hint copy that names the
+external tool's behaviour without making etaHEN a dependency.
+
+### Launch timeout 30 s → 60 s
+
+The payload's triple-strategy launch chain (LncUtil zeroed-param →
+LncUtil NULL-param → SystemServiceLaunchApp) plus per-strategy
+backoff can take longer than the default 30 s socket I/O timeout
+on slow firmware or first-launch-of-the-session paths where
+Sony's launch service has to warm up. Bumped to 60 s. Wall-clock
+launch is fast; the headroom is for the ack round-trip under load.
+
+### `OverflowMenu` component
+
+New shared primitive (`client/src/components/OverflowMenu.tsx`).
+Closes on outside click + Escape + selection. Used by Library
+rows; available for other screens to adopt the same one-verb-plus-
+overflow pattern.
+
+---
+
 ## 2.2.36
 
 **Library mount/unmount UX fixes (real user reports)**

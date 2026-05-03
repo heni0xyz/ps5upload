@@ -78,7 +78,14 @@ import {
   saveMountDest,
 } from "../../lib/mountDest";
 import { useActivityHistoryStore } from "../../state/activityHistory";
-import { PageHeader, EmptyState, ErrorCard, Button } from "../../components";
+import {
+  PageHeader,
+  EmptyState,
+  ErrorCard,
+  Button,
+  OverflowMenu,
+  type OverflowMenuItem,
+} from "../../components";
 import { useTr } from "../../state/lang";
 
 // Module-level limiter shared across every LibraryRow mounted at once.
@@ -1277,10 +1284,42 @@ function LibraryRow({
     let okOutcome = true;
     let errMsg: string | null = null;
     try {
-      await appLaunch(`${host}:${PS5_PAYLOAD_PORT}`, entry.titleId);
+      const addr = `${host}:${PS5_PAYLOAD_PORT}`;
+      try {
+        await appLaunch(addr, entry.titleId);
+      } catch (firstErr) {
+        // Auto-register-then-launch. Common case: the title was
+        // uploaded but never registered, so app.db doesn't know
+        // about it and sceLncUtilLaunchApp returns "not registered".
+        // The error string the payload surfaces uses Sony's hex
+        // codes (0x80980101 / 0x80980103) and/or the wrapper text
+        // "not registered" / "invalid title id" — match generously
+        // so a small drift in payload error wording doesn't break
+        // this flow. On match: register the source path, settle
+        // briefly so app.db propagates, retry launch.
+        const msg = firstErr instanceof Error ? firstErr.message : String(firstErr);
+        const looksUnregistered =
+          /not\s*registered|0x80980101|0x80980103|invalid\s*title\s*id|app\.db/i.test(
+            msg,
+          );
+        if (!looksUnregistered) throw firstErr;
+
+        setMountNote(
+          `${entry.name} isn't registered yet — registering it now, then launching…`,
+        );
+        await appRegister(addr, entry.path);
+        // Settle delay so the registration commit hits app.db
+        // before the launch query reads it.
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        await appLaunch(addr, entry.titleId);
+      }
       setMountNote(
         `Launching ${entry.titleId}. Check the PS5 — the title should appear in the foreground in a few seconds.`,
       );
+      // Refresh so the just-registered title surfaces correctly in
+      // any "registered" UI surfaces and stays consistent with
+      // app.db state.
+      onChanged();
     } catch (e) {
       okOutcome = false;
       errMsg = e instanceof Error ? e.message : String(e);
@@ -1462,16 +1501,14 @@ function LibraryRow({
               </Button>
             )
           ) : (
-            /* Game rows: Launch + Permission 777 + Delete. Launch is
-             * gated on `entry.titleId` (rows scanned from disk that
-             * couldn't read sce_sys/param.json have a null titleId
-             * and can't be launched). The payload-side launch_title
-             * runs the triple-strategy chain — LncUtil zeroed-param,
-             * LncUtil NULL-param, SystemServiceLaunchApp — and
-             * surfaces a composite error if all three fail. The
-             * title must already be registered in app.db; mounting
-             * an image then refreshing the Library should make its
-             * games appear with valid title_ids ready to launch. */
+            /* Game rows: one primary action (Play — runs the auto-
+             * register-then-launch flow), one Details ghost button
+             * for cover art, and an overflow (...) menu for the
+             * less-common actions. Pre-2.2.37 the row had 7+
+             * always-visible buttons that crowded smaller screens
+             * and made the row hard to scan; collapsing them into
+             * one verb + ... reads as one decision per row at a
+             * glance. */
             <>
               <Button
                 variant="primary"
@@ -1479,13 +1516,13 @@ function LibraryRow({
                 leftIcon={<Play size={12} />}
                 onClick={runLaunch}
                 disabled={busy !== null || !entry.titleId}
-                loading={busy === "launch"}
+                loading={busy === "launch" || busy === "register"}
                 title={
                   entry.titleId
                     ? tr(
                         "library_launch_tooltip",
                         undefined,
-                        "Launch this game on the PS5 (sceLncUtilLaunchApp)",
+                        "Launch this game (auto-registers if it isn't in app.db yet)",
                       )
                     : tr(
                         "library_launch_no_titleid_tooltip",
@@ -1494,7 +1531,9 @@ function LibraryRow({
                       )
                 }
               >
-                {tr("library_launch", undefined, "Launch")}
+                {busy === "register"
+                  ? tr("library_busy_register", undefined, "Registering…")
+                  : tr("library_play", undefined, "Play")}
               </Button>
               <Button
                 variant="ghost"
@@ -1518,126 +1557,135 @@ function LibraryRow({
               >
                 {tr("library_details", undefined, "Details")}
               </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                leftIcon={<Boxes size={12} />}
-                onClick={() => runRegister()}
-                disabled={busy !== null}
-                loading={busy === "register"}
-                title={tr(
+            </>
+          )}
+          {(() => {
+            // Overflow menu items, kind-specific. Order is the
+            // expected frequency-of-use: register actions first
+            // for game rows (most common when Launch reports a
+            // DRM mismatch), then file ops (Download, Move),
+            // then destructive actions (Delete) at the bottom
+            // and styled red so they don't blend.
+            const items: OverflowMenuItem[] = [];
+            if (entry.kind === "game") {
+              items.push({
+                label: tr("library_register", undefined, "Register"),
+                icon: <Boxes size={12} />,
+                onSelect: () => runRegister(),
+                disabled: busy !== null,
+                loading: busy === "register",
+                title: tr(
                   "library_register_tooltip",
                   undefined,
-                  "Stage sce_sys + nullfs-bind the source + register with Sony's installer so the title appears in the PS5 XMB",
-                )}
-              >
-                {tr("library_register", undefined, "Register")}
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                leftIcon={<Boxes size={12} />}
-                onClick={() => runRegister({ patchDrmType: true })}
-                disabled={busy !== null}
-                loading={busy === "register"}
-                /* DRM patch variant — same Register flow, but the
-                 * payload first rewrites the source param.json's
-                 * applicationDrmType to "standard". Useful for
-                 * PSN-extracted dumps that ship with "PSN" or
-                 * "disc" and the launcher rejects with a DRM
-                 * error. **Modifies the user's source file in
-                 * place** — make the destructive nature explicit
-                 * in the tooltip. */
-                title={tr(
-                  "library_register_drm_tooltip",
-                  undefined,
-                  "Same as Register, but first patch sce_sys/param.json's applicationDrmType to \"standard\" — modifies the source file. Use only when a normal Register fails with a DRM error.",
-                )}
-              >
-                {tr(
+                  "Stage sce_sys + register with Sony's installer so the title appears in the PS5 XMB",
+                ),
+              });
+              items.push({
+                label: tr(
                   "library_register_drm",
                   undefined,
                   "Register (patch DRM)",
-                )}
-              </Button>
-              {entry.titleId && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  leftIcon={<PackageOpen size={12} />}
-                  onClick={runUnregister}
-                  disabled={busy !== null}
-                  loading={busy === "unregister"}
-                  title={tr(
+                ),
+                icon: <Boxes size={12} />,
+                onSelect: () => runRegister({ patchDrmType: true }),
+                disabled: busy !== null,
+                loading: busy === "register",
+                title: tr(
+                  "library_register_drm_tooltip",
+                  undefined,
+                  "Same as Register, but first patch the source's applicationDrmType to \"standard\" — modifies the source file. Use only when a normal Register fails with a DRM error.",
+                ),
+              });
+              if (entry.titleId) {
+                items.push({
+                  label: tr("library_unregister", undefined, "Unregister"),
+                  icon: <PackageOpen size={12} />,
+                  onSelect: runUnregister,
+                  disabled: busy !== null,
+                  loading: busy === "unregister",
+                  title: tr(
                     "library_unregister_tooltip",
                     undefined,
-                    "Remove the XMB tile + tear down the nullfs bind. The source files on disk are not touched.",
-                  )}
-                >
-                  {tr("library_unregister", undefined, "Unregister")}
-                </Button>
-              )}
-              <Button
-                variant="secondary"
-                size="sm"
-                leftIcon={<Shield size={12} />}
-                onClick={() => setConfirm({ kind: "chmod", entry })}
-                disabled={busy !== null}
-                loading={busy === "chmod"}
-                title={tr("library_chmod_tooltip", undefined, "Open read/write/execute to every user on this PS5 (Permission 777)")}
-              >
-                {tr("library_permission_777", undefined, "Permission 777")}
-              </Button>
-            </>
-          )}
-          <Button
-            variant="secondary"
-            size="sm"
-            leftIcon={<Download size={12} />}
-            onClick={runDownload}
-            disabled={busy !== null}
-            loading={busy === "download"}
-            title={tr(
-              "library_download_tooltip",
-              undefined,
-              "Save a copy of this entry to a folder on this computer",
-            )}
-          >
-            {tr("library_download", undefined, "Download")}
-          </Button>
-          <Button
-            variant="secondary"
-            size="sm"
-            leftIcon={<FolderInput size={12} />}
-            onClick={() => setMoveOpen(true)}
-            disabled={busy !== null || volumes.length === 0}
-            title={
-              volumes.length === 0
-                ? tr(
-                    "library_move_no_volumes_tooltip",
-                    undefined,
-                    "Move needs at least one writable PS5 drive — none are attached right now.",
-                  )
-                : tr(
-                    "library_move_tooltip",
-                    undefined,
-                    "Copy this to another PS5 location, then delete the original",
-                  )
+                    "Remove the XMB tile. Source files on disk are not touched.",
+                  ),
+                });
+              }
+              items.push({
+                label: tr(
+                  "library_permission_777",
+                  undefined,
+                  "Permission 777",
+                ),
+                icon: <Shield size={12} />,
+                onSelect: () => setConfirm({ kind: "chmod", entry }),
+                disabled: busy !== null,
+                loading: busy === "chmod",
+                title: tr(
+                  "library_chmod_tooltip",
+                  undefined,
+                  "Open read/write/execute to every user on this PS5",
+                ),
+              });
             }
-          >
-            {tr("library_move", undefined, "Move")}
-          </Button>
-          <Button
-            variant="danger"
-            size="sm"
-            leftIcon={<Trash2 size={12} />}
-            onClick={() => setConfirm({ kind: "delete", entry })}
-            disabled={busy !== null}
-            loading={busy === "delete"}
-            title={tr("library_delete_tooltip", undefined, "Delete this path from the PS5")}
-          >
-            {tr("library_delete", undefined, "Delete")}
-          </Button>
+            items.push({
+              label: tr("library_download", undefined, "Download"),
+              icon: <Download size={12} />,
+              onSelect: runDownload,
+              disabled: busy !== null,
+              loading: busy === "download",
+              title: tr(
+                "library_download_tooltip",
+                undefined,
+                "Save a copy of this entry to a folder on this computer",
+              ),
+            });
+            items.push({
+              label: tr("library_move", undefined, "Move"),
+              icon: <FolderInput size={12} />,
+              onSelect: () => setMoveOpen(true),
+              disabled: busy !== null || volumes.length === 0,
+              title:
+                volumes.length === 0
+                  ? tr(
+                      "library_move_no_volumes_tooltip",
+                      undefined,
+                      "Move needs at least one writable PS5 drive — none are attached right now.",
+                    )
+                  : tr(
+                      "library_move_tooltip",
+                      undefined,
+                      "Copy this to another PS5 location, then delete the original",
+                    ),
+            });
+            items.push({
+              label: tr("library_delete", undefined, "Delete"),
+              icon: <Trash2 size={12} />,
+              onSelect: () => setConfirm({ kind: "delete", entry }),
+              disabled: busy !== null,
+              loading: busy === "delete",
+              destructive: true,
+              title: tr(
+                "library_delete_tooltip",
+                undefined,
+                "Delete this path from the PS5",
+              ),
+            });
+            return (
+              <OverflowMenu
+                items={items}
+                ariaLabel={tr(
+                  "library_more_actions",
+                  undefined,
+                  "More actions",
+                )}
+                buttonTitle={tr(
+                  "library_more_actions",
+                  undefined,
+                  "More actions",
+                )}
+              />
+            );
+          })()}
         </div>
       </div>
 

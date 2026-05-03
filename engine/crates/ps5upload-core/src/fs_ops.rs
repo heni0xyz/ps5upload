@@ -711,15 +711,23 @@ pub fn app_unregister(addr: &str, title_id: &str) -> Result<()> {
 
 /// Launch an already-registered title via `sceLncUtilLaunchApp`. The
 /// title must exist in `app.db` — call `app_register` first if needed.
+///
+/// Uses a 60 s I/O timeout (vs the default 30 s) because the payload's
+/// triple-strategy launch chain (LncUtil zeroed-param → LncUtil NULL
+/// → SystemServiceLaunchApp) plus per-strategy backoff can take longer
+/// than 30 s on slow firmware or first-launch-of-the-session paths
+/// where Sony's launch service has to warm up. The wall-clock launch
+/// itself is fast; the headroom is for the ack round-trip under load.
 pub fn app_launch(addr: &str, title_id: &str) -> Result<()> {
     let body = serde_json::to_vec(&serde_json::json!({ "title_id": title_id }))
         .context("serialize app_launch body")?;
-    send_empty_ack_op(
+    send_empty_ack_op_with_timeout(
         addr,
         FrameType::AppLaunch,
         &body,
         FrameType::AppLaunchAck,
         "APP_LAUNCH",
+        Some(std::time::Duration::from_secs(60)),
     )
 }
 
