@@ -99,7 +99,17 @@ export default function VolumesScreen() {
     const storage: Volume[] = [];
     const mounted: Volume[] = [];
     for (const v of volumes ?? []) {
-      if (v.path.startsWith(PS5UPLOAD_MOUNT_PREFIX)) {
+      // Pre-2.2.36 we split by `/mnt/ps5upload/` prefix, which broke
+      // categorization for user-chosen mount points (added 2.2.25).
+      // The truthful signal that a volume is one of our image
+      // mounts is `source_image` — the payload sets it for every
+      // image we attach via fs_mount, regardless of where it lands
+      // on the filesystem. Falling back to the legacy prefix keeps
+      // older payload firmwares (which may not echo source_image)
+      // categorising correctly.
+      const isOurMount =
+        Boolean(v.source_image) || v.path.startsWith(PS5UPLOAD_MOUNT_PREFIX);
+      if (isOurMount) {
         mounted.push(v);
       } else {
         storage.push(v);
@@ -234,7 +244,19 @@ function MountedImageCard({
     v.total_bytes > 0
       ? Math.max(0, Math.min(100, 100 - (v.free_bytes / v.total_bytes) * 100))
       : 0;
-  const name = v.path.slice(PS5UPLOAD_MOUNT_PREFIX.length);
+  // Display name: legacy `/mnt/ps5upload/<leaf>` mounts strip the
+  // prefix so the card shows just `<leaf>`. Custom-path mounts (e.g.
+  // /data/homebrew/Mafia/) don't have that prefix — show the
+  // basename of the mount point instead, falling back to the full
+  // path if there's no basename to extract.
+  const name = (() => {
+    if (v.path.startsWith(PS5UPLOAD_MOUNT_PREFIX)) {
+      return v.path.slice(PS5UPLOAD_MOUNT_PREFIX.length) || v.path;
+    }
+    const trimmed = v.path.replace(/\/+$/, "");
+    const slash = trimmed.lastIndexOf("/");
+    return slash >= 0 ? trimmed.slice(slash + 1) || trimmed : trimmed;
+  })();
   return (
     <article className="flex flex-col gap-3 rounded-lg border border-[var(--color-accent)] bg-[var(--color-surface-2)] p-4">
       <div className="flex items-start justify-between gap-3">
