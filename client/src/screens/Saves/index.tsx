@@ -74,12 +74,25 @@ export default function SavesScreen() {
 
   const refresh = useCallback(async () => {
     if (!host?.trim() || payloadStatus !== "up") return;
+    // Host-stale guard (2.9.0). savesList against host A can take
+    // seconds on a console with many user accounts; if the user
+    // switches roster to host B before it returns, the OLD list would
+    // overwrite state and the UI would attribute A's saves to B —
+    // dangerous when combined with handleRestore (a Restore click on
+    // an entry shown under B would wipe B's actual save dir of the
+    // same title_id, then upload A's data there). Same canonical
+    // probedHost+isStale pattern Library uses.
+    const probedHost = host.trim();
+    const isStale = () =>
+      useConnectionStore.getState().host?.trim() !== probedHost;
     setLoading(true);
     setError(null);
     try {
-      const r = await savesList(`${host.trim()}:9114`);
+      const r = await savesList(`${probedHost}:9114`);
+      if (isStale()) return;
       setSaves(r.saves);
     } catch (e) {
+      if (isStale()) return;
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
@@ -166,6 +179,14 @@ export default function SavesScreen() {
   async function handleRestore(entry: SaveEntry) {
     if (!host?.trim()) return;
     if (isBusy(entry.path)) return;
+    // Snapshot the host AT click time. The restore flow is many
+    // seconds (confirm → file dialog → unzip → wipe → upload), and
+    // the user can switch PS5 in the roster sidebar at any point.
+    // Without this snapshot + re-check, the wipe-and-upload runs
+    // against whatever IP is current at `await` resolution — i.e.
+    // the WRONG console, recursively deleting somebody else's save
+    // dir and then overwriting it with the wrong title's bytes.
+    const restoreHost = host.trim();
     // Claim before any dialog — see comment in handleDownload.
     markBusy(entry.path, true);
     let tempDir: string | null = null;
@@ -212,7 +233,23 @@ export default function SavesScreen() {
       // payload/src/runtime.c:2877). By preserving the folder we side-
       // step that mkdir entirely — the upload's ensure_parent_dir hits
       // EEXIST and proceeds.
-      const addr = `${host.trim()}:${PS5_PAYLOAD_PORT}`;
+      //
+      // Host-stale guard (2.9.0): refuse to wipe if the user changed
+      // PS5 roster during the prior async steps (confirm/dialog/unzip
+      // can together run for ~30s on big saves). Without this check
+      // the recursive fsDelete fires against whatever IP is *current*
+      // at this point — possibly a different console than the one the
+      // user was looking at when they clicked Restore. Compare against
+      // the freshly-read store value, not our captured `host` ref,
+      // because `host` is a render-time closure and won't see writes.
+      const currentHost = useConnectionStore.getState().host?.trim();
+      if (currentHost !== restoreHost) {
+        throw new Error(
+          `Host changed during restore (was ${restoreHost}, now ${currentHost || "(none)"}). ` +
+            "Aborted before wipe — your other console's saves are untouched.",
+        );
+      }
+      const addr = `${restoreHost}:${PS5_PAYLOAD_PORT}`;
       const children = await fsListDir(addr, entry.path, { limit: 4096 });
       for (const child of children) {
         const childPath = entry.path.endsWith("/")

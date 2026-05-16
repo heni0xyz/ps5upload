@@ -4,6 +4,132 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 2.9.0
+
+A 4-agent self-audit (race conditions, security, silent failures,
+resource cleanup) surfaced ~30 issues. This release bundles the 4
+data-loss-class bugs, 7 medium-severity security findings, the
+6-screen host-stale-clobber family, and 5 standalone correctness
+fixes. Total: 13 real fixes, with a long list of patterns the agents
+investigated and verified clean.
+
+### Data-loss / silent-corruption fixes (4)
+
+- **Payload shard-write OOM no longer reports success.** Under PS5
+  RAM pressure (kstuff loaded + other payloads alive + ShellUI bloat),
+  `runtime_write_shard_persistent`'s malloc-fallback path was
+  returning `0` from `drain_shard_data`, which the dispatcher
+  interpreted as "shard persisted" — SHARD_ACK fired, the host
+  advanced its cursor, the missing bytes were never retried, and
+  the user saw "Upload complete" on a corrupt file. All 4 OOM /
+  open-failure paths now drain-then-return `-1` with a stderr log,
+  so the tx aborts cleanly and the user sees a real error. This
+  bug was silently corrupting uploads for unknown duration.
+- **Saves restore no longer wipes the wrong PS5 if the user
+  switches roster mid-flow.** Restore goes confirm → file dialog
+  → unzip → wipe → upload (often 30+ seconds for big saves). The
+  recursive `fsDelete` previously used whatever IP was current at
+  await-resolution time, so a roster swap during the dialog would
+  silently target a different console. Now snapshots the host at
+  click time and refuses with an explicit "Host changed during
+  restore" error if it's no longer the same.
+- **FileSystem screen no longer deletes the wrong file after fast
+  navigation.** A slow `ps5_list_dir` (1-3s on big `/data` trees)
+  resolving AFTER the user navigated to a deeper folder would
+  display the OLDER directory's contents under the NEWER URL. A
+  per-row Delete click joins the CURRENT path with the displayed
+  name — so the user thinking they're deleting `/data/foo`'s
+  "screenshots" could actually delete `/data/homebrew/screenshots`
+  if a coincidentally-named file existed there. The refresh now
+  drops stale results via probed-host + probed-path guards.
+- **`transfer.ts` mount no longer leaves RW when user picked RO.**
+  Starting a second image upload with a different `mountReadOnly`
+  flag while a previous `fsMount` was in flight produced a race
+  where the OLDER mount could win the same mount point. Now
+  best-effort unmounts the superseded mount before returning,
+  closing the silent RO/RW divergence window.
+
+### Security hardening (3 Medium → 0)
+
+- **`/pkg-host/*` URL is now bound to the PS5 it was issued for.**
+  Previously any host on the LAN that could observe the PS5↔engine
+  TCP stream (promiscuous WiFi, ARP-spoof, SOHO router admin) could
+  recover the session UUID from the first GET and hammer the URL
+  with Range requests to drive 16 MiB allocations per call, OOMing
+  the engine and potentially the Tauri shell. Now compared against
+  the session's recorded `ps5_mgmt_addr`; loopback callers still
+  allowed for dev workflows. Logs every reject with peer + expected.
+- **Payload `is_path_allowed` now blocks symlink-escape.** The
+  lexical check confirmed paths started with `/data`/`/mnt/...`,
+  but a symlink in a user-mounted `.ffpkg` (e.g.
+  `/mnt/ps5upload/usermount/evil → /system_ex`) escaped — the
+  subsequent open() followed the symlink and operated on the
+  forbidden target. Same CWE-59 class as CVE-2007-2374. Now calls
+  `realpath()` and re-validates the canonical form; symlinks
+  pointing outside the allowlist refuse with a stderr log.
+- **Engine planner's `spawn_blocking` cleanups now timeout at 10s.**
+  The 3 staging-file cleanup tasks in `pkg_install.rs` used bare
+  `fs_delete` with the default 30s socket timeout PLUS waiting for
+  ACK; a wedged PS5 (kernel hang, payload crashed, unreachable
+  LAN) parked a blocking-pool worker AND a TCP socket per call.
+  Repeated register-rejects could stack and exhaust the 512-thread
+  pool. Now uses `fs_delete_with_timeout(Some(10s))`.
+
+### Host-stale-clobber pattern across 6 screens
+
+Ported `Library`'s `probedHost` + `isStale()` guard to:
+**Saves, Volumes, Screenshots, Hardware (both `refresh` and
+`refreshPs5`), SendPayload (`probeFile`)**, and **InstallPackage
+(`addPkgPath`)**. Each had the same shape — slow async call
+resolves after the user switched PS5, OLD host's data lands in
+state attributed to NEW host. Most were P1 (misleading UI), but
+combined with the Saves restore P0 they enabled the
+"wipe-wrong-console" cascade above. Six bugs closed by adopting one
+proven template.
+
+### Other correctness + DX wins
+
+- **Payload `posix_fallocate` ENOSPC now aborts the tx immediately**
+  instead of silently falling back to sparse `ftruncate`. Front-of-
+  60GB-upload disk-full is information the user needs NOW, not 50
+  GB later via a piecewise "open failed" message.
+- **Save backup no longer produces empty zips on `file_type()`
+  failure.** `flatten_wrapper_subdirs`'s 4 `.unwrap_or(false)` sites
+  silently treated I/O errors as "not a match," sometimes descending
+  past real data layers and producing empty backups that the user
+  was told succeeded. Now propagates the error with path context.
+- **Engine planner skips + warns on metadata failure** instead of
+  defaulting to `size=0` (which corrupted the `total_bytes`
+  denominator and surfaced later as a misleading "open <path>: io
+  error" mid-transfer).
+- **`engineLogsTail` now escalates after 10s of failures.**
+  Previously retried silently forever — a permanently-broken
+  bridge (engine binary corrupt, wrong-arch, hung sidecar) hid the
+  very logs the user would need to diagnose it. Now emits one
+  `log.error` after 10 consecutive failures, with a recovery log
+  if it comes back.
+- **Payload binaries no longer git-tracked.** `payload/ps5upload.elf*`
+  are now `.gitignore`d. CI rebuilds them from C source on every
+  release (`make payload`), and the desktop build script errors
+  with a clear "Build it first: make -C payload all" if missing.
+  Closes the "binary churn after CI run" friction we hit twice in
+  2.8.0 development AND the risk of a contributor shipping a
+  desktop build that embeds a stale payload.
+
+### Things the audit verified clean (NOT bugs)
+
+For credit + future reference: agent findings that turned out to
+be false positives — `Hardware` tickers DO gate on
+`useDocumentVisible()` (just at the call site, not the deps),
+`extract_json_string_field` DOES handle JSON escape sequences
+correctly (via `json_string_end`/`json_copy_unescaped_string`
+helpers, just at a different layer), and the existing
+`payloads_release` stale-cache already handles network errors
+(but didn't handle HTTP 4xx/5xx, which 2.8.0 fixed). Two false
+positives out of ~30 findings — trust-but-verify rule paid off.
+
+---
+
 ## 2.8.0
 
 This release lifts a handful of ideas from sonicloader (sister

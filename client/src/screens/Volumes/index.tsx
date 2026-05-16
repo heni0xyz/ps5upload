@@ -38,12 +38,23 @@ export default function VolumesScreen() {
 
   const refresh = useCallback(async () => {
     if (!host?.trim()) return;
+    // Host-stale guard (2.9.0). fetchVolumes can take a few seconds
+    // on a PS5 with many mounts; if the user roster-switches before
+    // it returns, the OLD list would be attributed to the new host
+    // and a later Unmount click would either fail (wrong addr,
+    // wrong mount_point) OR succeed against an identically-named
+    // mount on the new console — unmounting the wrong volume.
+    const probedHost = host.trim();
+    const isStale = () =>
+      useConnectionStore.getState().host?.trim() !== probedHost;
     setLoading(true);
     setError(null);
     try {
-      const list = await fetchVolumes(`${host}:${PS5_PAYLOAD_PORT}`);
+      const list = await fetchVolumes(`${probedHost}:${PS5_PAYLOAD_PORT}`);
+      if (isStale()) return;
       setVolumes(list);
     } catch (e) {
+      if (isStale()) return;
       const raw = e instanceof Error ? e.message : String(e);
       // Run through the shared humanizer so transient
       // `fs_list_volumes_getmntinfo_failed` payload errors surface

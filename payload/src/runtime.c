@@ -2452,7 +2452,18 @@ static int runtime_write_shard_to_path(runtime_tx_entry_t *entry,
     if (!bufs[0] || !bufs[1]) {
         free(bufs[0]);
         free(bufs[1]);
-        return drain_shard_data(client_fd, data_len);
+        /* (2.9.0) Drain-then-FAIL — was return drain_shard_data(...) which
+         * returns 0 on successful drain. Dispatcher treats 0 as "shard
+         * persisted," ACKs the host, advances last_acked_shard, never
+         * retries — destination file ends up with missing bytes while
+         * the user sees "Upload complete." Silent corruption under PS5
+         * RAM pressure. Always return -1 here so the caller treats it
+         * as a hard write failure. */
+        fprintf(stderr,
+                "[payload2] shard buffer alloc failed (%zu B x2); draining + failing tx\n",
+                (size_t)PS5UPLOAD2_SHARD_IO_BUF);
+        (void)drain_shard_data(client_fd, data_len);
+        return -1;
     }
 
     t_open_start = now_us();
@@ -2461,7 +2472,14 @@ static int runtime_write_shard_to_path(runtime_tx_entry_t *entry,
     if (fd < 0) {
         free(bufs[0]);
         free(bufs[1]);
-        return drain_shard_data(client_fd, data_len);
+        /* Same drain-then-FAIL contract: open() failing while we still
+         * try to drain the wire keeps framing recoverable but the tx
+         * must abort, not silently succeed. */
+        fprintf(stderr,
+                "[payload2] shard open %s failed errno=%d; draining + failing tx\n",
+                path, errno);
+        (void)drain_shard_data(client_fd, data_len);
+        return -1;
     }
     if (truncate && preallocate_bytes > 0) {
         /* Pre-allocate REAL blocks via posix_fallocate to avoid the
@@ -2471,9 +2489,35 @@ static int runtime_write_shard_to_path(runtime_tx_entry_t *entry,
          * forcing per-write block-allocation + journal churn. Falls
          * back to ftruncate on filesystems where fallocate isn't
          * supported (exfat, fuse). Same migration as
-         * runtime_write_shard_persistent below. */
+         * runtime_write_shard_persistent below.
+         *
+         * (2.9.0) Differentiate fallback-on-unsupported from abort-on-
+         * disk-full. ENOSPC means the destination volume CANNOT hold
+         * the file — ftruncate would silently make it sparse, the
+         * shard writes would proceed for the in-cache range, then
+         * fail piecewise much later with no context. Abort the tx
+         * front-loaded so the user sees "destination disk full" now,
+         * not "open <random path>: ENOSPC" 50 GB into a 60 GB upload.
+         * EINVAL / EOPNOTSUPP / ENOTSUP are the legitimate "filesystem
+         * lacks fallocate" codes — those keep the ftruncate fallback.
+         * Other returns (EBADF, EFBIG, EINTR, EIO) are unexpected;
+         * log them and fall back too rather than bail, since the
+         * sparse-file path is functionally correct for most of them. */
         int prealloc_rc = posix_fallocate(fd, 0, (off_t)preallocate_bytes);
+        if (prealloc_rc == ENOSPC) {
+            fprintf(stderr,
+                    "[payload2] posix_fallocate %s: ENOSPC (need %lld B); aborting tx\n",
+                    path, (long long)preallocate_bytes);
+            close(fd);
+            free(bufs[0]);
+            free(bufs[1]);
+            (void)drain_shard_data(client_fd, data_len);
+            return -1;
+        }
         if (prealloc_rc != 0) {
+            fprintf(stderr,
+                    "[payload2] posix_fallocate %s rc=%d (%s); falling back to ftruncate\n",
+                    path, prealloc_rc, strerror(prealloc_rc));
             (void)ftruncate(fd, (off_t)preallocate_bytes);
         }
     }
@@ -2712,9 +2756,15 @@ static int runtime_write_shard_persistent(runtime_tx_entry_t *entry,
         uint64_t t_open_start = now_us();
         int fd = open(entry->tmp_path, flags, 0666);
         if (fd < 0) {
+            /* (2.9.0) Drain-then-FAIL — see runtime_write_shard_to_path
+             * for the silent-corruption-bug context. Was returning
+             * drain_shard_data() rc directly; on a 0 the caller thinks
+             * the shard persisted and ACKs the host. Always return -1
+             * so the tx aborts. */
             fprintf(stderr, "[payload2] direct persistent: open %s failed errno=%d\n",
                     entry->tmp_path, errno);
-            return drain_shard_data(client_fd, data_len);
+            (void)drain_shard_data(client_fd, data_len);
+            return -1;
         }
         if (!is_resume_open && preallocate_bytes > 0) {
             /* Pre-allocate the destination's blocks UP FRONT via
@@ -2735,9 +2785,28 @@ static int runtime_write_shard_persistent(runtime_tx_entry_t *entry,
              * matching the pattern cp_rf already uses. The fallback
              * preserves the file-size semantic even on exfat where
              * sparse-file cost is lower (FAT-family doesn't journal
-             * metadata block-by-block). */
+             * metadata block-by-block).
+             *
+             * (2.9.0) Differentiate ENOSPC from "unsupported." See
+             * runtime_write_shard_to_path for the same rationale —
+             * ENOSPC at the front of a 60 GB upload is information
+             * the user needs NOW, not 50 GB later via a misleading
+             * "open failed" message piecewise. */
             int prealloc_rc = posix_fallocate(fd, 0, (off_t)preallocate_bytes);
+            if (prealloc_rc == ENOSPC) {
+                fprintf(stderr,
+                        "[payload2] direct persistent posix_fallocate %s: ENOSPC "
+                        "(need %lld B); aborting tx\n",
+                        entry->tmp_path, (long long)preallocate_bytes);
+                close(fd);
+                (void)drain_shard_data(client_fd, data_len);
+                return -1;
+            }
             if (prealloc_rc != 0) {
+                fprintf(stderr,
+                        "[payload2] direct persistent posix_fallocate %s rc=%d (%s); "
+                        "falling back to ftruncate\n",
+                        entry->tmp_path, prealloc_rc, strerror(prealloc_rc));
                 (void)ftruncate(fd, (off_t)preallocate_bytes);
             }
         }
@@ -2781,7 +2850,17 @@ static int runtime_write_shard_persistent(runtime_tx_entry_t *entry,
     if (!use_writer_thread) {
         /* Sync write path — one reusable buffer, persistent fd. */
         sync_buf = (unsigned char *)malloc(PS5UPLOAD2_SHARD_IO_BUF);
-        if (!sync_buf) return drain_shard_data(client_fd, data_len);
+        if (!sync_buf) {
+            /* (2.9.0) Drain-then-FAIL — see runtime_write_shard_to_path
+             * for context. The pre-2.9.0 code path returned 0 to the
+             * dispatcher on a successful drain, leading to silent
+             * shard-loss corruption under PS5 RAM pressure. */
+            fprintf(stderr,
+                    "[payload2] direct persistent: sync_buf alloc failed (%zu B); failing tx\n",
+                    (size_t)PS5UPLOAD2_SHARD_IO_BUF);
+            (void)drain_shard_data(client_fd, data_len);
+            return -1;
+        }
         while (remaining > 0) {
             size_t take = remaining > PS5UPLOAD2_SHARD_IO_BUF
                             ? PS5UPLOAD2_SHARD_IO_BUF
@@ -4905,7 +4984,10 @@ static int path_has_dotdot_component(const char *p) {
     return 0;
 }
 
-static int is_path_allowed(const char *p) {
+/* The lexical half of is_path_allowed: pure string check, no I/O.
+ * Extracted so both the input path AND the realpath()-resolved
+ * canonical form can be re-validated against the same rules. */
+static int is_path_lexically_allowed(const char *p) {
     if (!p || p[0] != '/') return 0;
     if (path_has_dotdot_component(p)) return 0;
     /* Accept exactly /data or /data/... */
@@ -4929,6 +5011,43 @@ static int is_path_allowed(const char *p) {
      * callers should target a specific mount's subtree. */
     if (strncmp(p, "/mnt/ps5upload/", 15) == 0 && p[15] != '\0') return 1;
     return 0;
+}
+
+static int is_path_allowed(const char *p) {
+    if (!is_path_lexically_allowed(p)) return 0;
+    /* (2.9.0) Symlink-escape guard. The lexical check above confirms
+     * the path STARTS with an allowed root, but if any component
+     * along the path is a symlink that resolves OUTSIDE the allowlist
+     * (e.g. /mnt/ps5upload/usermount/evil → /system_ex), the
+     * subsequent open()/unlink()/etc. follows the symlink and
+     * operates on the forbidden target. Realistic when a user mounts
+     * a .ffpkg from an untrusted source — the image is the
+     * attacker's data and UFS supports symlinks. Same CWE-59 class
+     * as CVE-2007-2374.
+     *
+     * realpath() resolves all symlinks and collapses any embedded
+     * dotdots. If the canonical form fails the lexical check, the
+     * path was escaping via a symlink — refuse.
+     *
+     * realpath fails (returns NULL) when any component along the
+     * path doesn't exist yet — common for FS_WRITE / mkdir paths
+     * that are about to create the target. For those there's no
+     * symlink to follow yet, so accept based on the lexical decision
+     * we already passed. The first time a real file appears at this
+     * path, subsequent calls go through the realpath check above
+     * and reject any symlink the writer planted. */
+    char resolved[PATH_MAX];
+    if (realpath(p, resolved) == NULL) {
+        return 1;
+    }
+    if (!is_path_lexically_allowed(resolved)) {
+        fprintf(stderr,
+                "[payload2] is_path_allowed REJECTED: %s resolves to %s "
+                "(symlink escape)\n",
+                p, resolved);
+        return 0;
+    }
+    return 1;
 }
 
 /* Recursively remove `path`. Descends directories, unlinks regular files

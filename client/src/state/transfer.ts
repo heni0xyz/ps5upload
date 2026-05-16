@@ -5,6 +5,7 @@ import {
   startTransferDir,
   startTransferDirReconcile,
   fsMount,
+  fsUnmount,
   jobStatus,
   resumeTxidLookup,
   resumeTxidRemember,
@@ -332,14 +333,28 @@ export const useTransferStore = create<TransferState>((set) => {
                   "Kernel mounted this read-only despite the RW pick — common for UFS .ffpkg images on some firmwares. Reads work; writes through the mount will fail.",
                 );
               }
-              // Stop / reset can land between fsMount completing and
-              // the set({phase:"done"}) below. Without this re-check
-              // the mount is real on the PS5 but the UI flips to idle/
-              // failed via the stop handler — divergent state. Returning
-              // here keeps the user's "Stop = stop" mental model honest;
-              // the live mount stays on the PS5 and surfaces in the
-              // Library on next refresh.
-              if (!isLive()) return;
+              // Stop / reset / new-run can land between fsMount
+              // completing and the set({phase:"done"}) below. Two
+              // bad shapes if we just `return` here:
+              //   1) UI flips to idle/failed via stop handler but the
+              //      mount is real on the PS5 — divergent state.
+              //   2) (worse — 2.9.0 race-audit finding F2) a second
+              //      Upload kicked off with DIFFERENT mountReadOnly
+              //      races the first's in-flight fsMount; the older
+              //      mount may land second and silently win the same
+              //      mount point, leaving the user with RW when they
+              //      asked for RO (or vice versa) — irreversible save-
+              //      corruption window for the wrong-direction case.
+              // Mitigation: best-effort unmount the superseded mount
+              // before returning. Drop errors — the most common
+              // failure is "already gone" from the new run's own
+              // unmount-and-remount, which is exactly what we want.
+              if (!isLive()) {
+                if (mountedAt) {
+                  await fsUnmount(addr, mountedAt).catch(() => {});
+                }
+                return;
+              }
             } catch (e) {
               if (!isLive()) return;
               set({

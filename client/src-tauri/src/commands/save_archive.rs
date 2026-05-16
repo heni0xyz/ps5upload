@@ -372,6 +372,25 @@ fn backup_finalize(title_dir: &Path) -> Result<SaveArchiveBackupFinalizeResp> {
 /// can collide with the wrapper itself (which would otherwise share a
 /// name with the data-layer's own subdirectories — verified empirically
 /// against real CUSA03474 backups).
+/// (2.9.0) Helper: read a DirEntry's file_type and propagate the
+/// I/O error with path context. Replaces the `.file_type().map(|k|
+/// k.is_file()).unwrap_or(false)` pattern that silently treated
+/// I/O failures as "not a match" — when called inside the wrapper
+/// flattener, that swallowed metadata-read failures on legitimate
+/// save data files, causing the function to descend past them and
+/// produce empty backups. Now any file_type failure aborts the
+/// flatten with a clear `file_type <path>: <err>` message.
+fn entry_is_file(e: &std::fs::DirEntry) -> Result<bool> {
+    Ok(e.file_type()
+        .with_context(|| format!("file_type {}", e.path().display()))?
+        .is_file())
+}
+fn entry_is_dir(e: &std::fs::DirEntry) -> Result<bool> {
+    Ok(e.file_type()
+        .with_context(|| format!("file_type {}", e.path().display()))?
+        .is_dir())
+}
+
 fn flatten_wrapper_subdirs(title_dir: &Path) -> Result<()> {
     const MAX_DESCEND: u32 = 8;
     const STAGING_NAME: &str = ".ps5upload_extract_tmp";
@@ -382,20 +401,25 @@ fn flatten_wrapper_subdirs(title_dir: &Path) -> Result<()> {
     let top_entries: Vec<_> = std::fs::read_dir(title_dir)
         .with_context(|| format!("read_dir {}", title_dir.display()))?
         .collect::<std::io::Result<Vec<_>>>()?;
-    let has_top_files = top_entries
-        .iter()
-        .any(|e| e.file_type().map(|k| k.is_file()).unwrap_or(false));
+    let mut has_top_files = false;
+    for e in &top_entries {
+        if entry_is_file(e)? {
+            has_top_files = true;
+            break;
+        }
+    }
     if has_top_files {
         return Ok(());
     }
-    let top_non_sce: Vec<_> = top_entries
-        .iter()
-        .filter(|e| {
-            e.file_type().map(|k| k.is_dir()).unwrap_or(false)
-                && e.file_name() != std::ffi::OsStr::new("sce_sys")
-                && e.file_name() != std::ffi::OsStr::new(STAGING_NAME)
-        })
-        .collect();
+    let mut top_non_sce: Vec<&std::fs::DirEntry> = Vec::new();
+    for e in &top_entries {
+        if entry_is_dir(e)?
+            && e.file_name() != std::ffi::OsStr::new("sce_sys")
+            && e.file_name() != std::ffi::OsStr::new(STAGING_NAME)
+        {
+            top_non_sce.push(e);
+        }
+    }
     if top_non_sce.len() != 1 {
         return Ok(()); // already flat, empty, or ambiguous shape
     }
@@ -425,19 +449,22 @@ fn flatten_wrapper_subdirs(title_dir: &Path) -> Result<()> {
         let entries: Vec<_> = std::fs::read_dir(&cur)
             .with_context(|| format!("read_dir {}", cur.display()))?
             .collect::<std::io::Result<Vec<_>>>()?;
-        let has_files = entries
-            .iter()
-            .any(|e| e.file_type().map(|k| k.is_file()).unwrap_or(false));
+        let mut has_files = false;
+        for e in &entries {
+            if entry_is_file(e)? {
+                has_files = true;
+                break;
+            }
+        }
         if has_files {
             break;
         }
-        let non_sce_subdirs: Vec<_> = entries
-            .iter()
-            .filter(|e| {
-                e.file_type().map(|k| k.is_dir()).unwrap_or(false)
-                    && e.file_name() != std::ffi::OsStr::new("sce_sys")
-            })
-            .collect();
+        let mut non_sce_subdirs: Vec<&std::fs::DirEntry> = Vec::new();
+        for e in &entries {
+            if entry_is_dir(e)? && e.file_name() != std::ffi::OsStr::new("sce_sys") {
+                non_sce_subdirs.push(e);
+            }
+        }
         if non_sce_subdirs.len() != 1 {
             break;
         }

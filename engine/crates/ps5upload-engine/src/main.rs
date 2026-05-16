@@ -2245,21 +2245,46 @@ async fn transfer_file_list_handler(
         .collect();
     // Sum source sizes now + build the planned file list so Running
     // has a denominator + per-file progress from the first tick.
+    //
+    // (2.9.0) Metadata failures previously fell through to `size = 0`,
+    // which corrupted the `total_bytes` denominator — the user saw
+    // "47 of 100 GB" with wrong N. Worse, the file then hit the
+    // shard-emit phase where `File::open` failed for the same path,
+    // aborting the transfer with a misleading "open <path>: io error"
+    // and leaving the user guessing whether metadata or open was the
+    // problem. Skip-with-warn is strictly better: drop the entry from
+    // the plan (denominator is honest), log the path + reason so a
+    // user reading engine.log can diagnose, and let the transfer
+    // proceed on the files we can actually read. Metadata-but-not-
+    // open is rare (only Windows ACL + macOS sandboxed apps + raced
+    // delete), so the skipped set should be small or empty.
+    let mut planner_skipped: Vec<(String, String)> = Vec::new();
     let files: Vec<PlannedFile> = entries
         .iter()
-        .map(|e| {
-            let size = std::fs::metadata(&e.src).map(|m| m.len()).unwrap_or(0);
+        .filter_map(|e| {
+            let size = match std::fs::metadata(&e.src) {
+                Ok(m) => m.len(),
+                Err(err) => {
+                    planner_skipped.push((e.src.clone(), err.to_string()));
+                    return None;
+                }
+            };
             let rel = std::path::Path::new(&e.dest)
                 .strip_prefix(std::path::Path::new(&req.dest_root))
                 .map(|p| p.to_string_lossy().into_owned())
                 .unwrap_or_else(|_| e.dest.clone())
                 .replace(std::path::MAIN_SEPARATOR, "/");
-            PlannedFile {
+            Some(PlannedFile {
                 rel_path: rel,
                 size,
-            }
+            })
         })
         .collect();
+    if !planner_skipped.is_empty() {
+        for (src, err) in &planner_skipped {
+            log_warn!("planner: skipped {} (metadata failed: {})", src, err);
+        }
+    }
     let total_bytes: u64 = files.iter().map(|f| f.size).sum();
     let files_sent_count = files.len() as u64;
     let progress = Arc::new(AtomicU64::new(0));

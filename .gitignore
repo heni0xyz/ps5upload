@@ -165,6 +165,21 @@ ps5upload.elf.tmp
 ps5upload.elf.tmp.*
 ps5upload.elf.gz.blake3.tmp
 
+# ─── Built payload artifacts ────────────────────────────────────────────
+# CI rebuilds these from C source on every release (see
+# .github/workflows/release.yml: "make payload" step). Tracking them
+# caused two recurring problems:
+#   1. Binary churn: contributors who run `make payload` locally get a
+#      diff-noise commit they have to revert (hit twice in 2.8.0 dev).
+#   2. Stale-payload risk: a contributor changing payload C source
+#      could commit without rebuilding, shipping a desktop build that
+#      embeds the OLD .elf while CI release ships the NEW one.
+# The desktop build script (client/src-tauri/build.rs::require_file)
+# errors with "Build it first: make -C payload all" when missing, so
+# the dev experience for fresh clones is still clean.
+payload/ps5upload.elf
+payload/ps5upload.elf.gz
+
 # ─── Personal scratch + notes ───────────────────────────────────────────
 # Anything in /scratch or /notes-local that a dev wants to keep
 # locally without checking in.

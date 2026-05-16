@@ -89,12 +89,24 @@ export default function ScreenshotsScreen() {
 
   const refresh = useCallback(async () => {
     if (!host?.trim() || payloadStatus !== "up") return;
+    // Host-stale guard (2.9.0). screenshotsList can take seconds on
+    // a console with thousands of screenshots; if the user switches
+    // PS5 mid-list, OLD's screenshots would appear under NEW's name.
+    // Less destructive than Saves (downloadOne uses click-time host
+    // so the actual file fetch is consistent) but the displayed
+    // list / counts / sizes are wrong, which is enough to misdirect
+    // a user looking for a specific shot.
+    const probedHost = host.trim();
+    const isStale = () =>
+      useConnectionStore.getState().host?.trim() !== probedHost;
     setLoading(true);
     setError(null);
     try {
-      const r = await screenshotsList(`${host.trim()}:9114`);
+      const r = await screenshotsList(`${probedHost}:9114`);
+      if (isStale()) return;
       setItems(r.items);
     } catch (e) {
+      if (isStale()) return;
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);

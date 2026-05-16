@@ -443,7 +443,20 @@ async fn install_start_handler(
             let addr = req.ps5_addr.clone();
             let sid = session_id.clone();
             tokio::task::spawn_blocking(move || {
-                if let Err(e) = ps5upload_core::fs_ops::fs_delete(&addr, &path) {
+                // 10s cap (2.9.0). Bare fs_delete inherits Connection's
+                // 30s socket timeout and additionally waits for FS_DELETE_ACK
+                // — a wedged PS5 (kernel hang, payload crashed during cleanup,
+                // unreachable LAN) parks a blocking-pool worker AND a TCP
+                // socket for the full duration. Repeated register-rejects
+                // or cancels could stack against a wedged console and
+                // exhaust the default 512-thread blocking pool. A single-
+                // file staging .pkg cleanup completes in &lt;1s normally;
+                // 10s is generous enough that healthy paths never trip it.
+                if let Err(e) = ps5upload_core::fs_ops::fs_delete_with_timeout(
+                    &addr,
+                    &path,
+                    Some(std::time::Duration::from_secs(10)),
+                ) {
                     crate::log_warn!(
                         "register-reject staging cleanup failed: session={} addr={} path={} err={}",
                         sid,
@@ -615,7 +628,20 @@ async fn install_status_handler(
         if let Some(path) = path_to_clean {
             let addr = ps5_addr.clone();
             tokio::task::spawn_blocking(move || {
-                if let Err(e) = ps5upload_core::fs_ops::fs_delete(&addr, &path) {
+                // 10s cap (2.9.0). Bare fs_delete inherits Connection's
+                // 30s socket timeout and additionally waits for FS_DELETE_ACK
+                // — a wedged PS5 (kernel hang, payload crashed during cleanup,
+                // unreachable LAN) parks a blocking-pool worker AND a TCP
+                // socket for the full duration. Repeated register-rejects
+                // or cancels could stack against a wedged console and
+                // exhaust the default 512-thread blocking pool. A single-
+                // file staging .pkg cleanup completes in &lt;1s normally;
+                // 10s is generous enough that healthy paths never trip it.
+                if let Err(e) = ps5upload_core::fs_ops::fs_delete_with_timeout(
+                    &addr,
+                    &path,
+                    Some(std::time::Duration::from_secs(10)),
+                ) {
                     crate::log_warn!(
                         "staging cleanup failed: addr={} path={} err={}",
                         addr,
@@ -692,7 +718,12 @@ async fn install_cancel_handler(
     if let Some(path) = path_to_clean {
         let sid = req.session.clone();
         tokio::task::spawn_blocking(move || {
-            if let Err(e) = ps5upload_core::fs_ops::fs_delete(&ps5_addr, &path) {
+            // 10s cap — see staging cleanup comment above for rationale.
+            if let Err(e) = ps5upload_core::fs_ops::fs_delete_with_timeout(
+                &ps5_addr,
+                &path,
+                Some(std::time::Duration::from_secs(10)),
+            ) {
                 crate::log_warn!(
                     "cancel staging cleanup failed: session={} addr={} path={} err={}",
                     sid,
@@ -722,6 +753,7 @@ async fn install_cancel_handler(
 async fn serve_handler(
     State(state): State<PkgInstallStateHandle>,
     AxumPath(session): AxumPath<String>,
+    axum::extract::ConnectInfo(peer): axum::extract::ConnectInfo<std::net::SocketAddr>,
     headers: HeaderMap,
 ) -> Response<Body> {
     // Log every PS5-side fetch attempt. Critical for diagnosing the
@@ -748,9 +780,10 @@ async fn serve_handler(
     };
     let session_known = session_lookup.is_some();
     crate::log_info!(
-        "pkg-host fetch: session={} known={} range={:?} user-agent={:?}",
+        "pkg-host fetch: session={} known={} peer={} range={:?} user-agent={:?}",
         session,
         session_known,
+        peer.ip(),
         range,
         ua,
     );
@@ -759,6 +792,40 @@ async fn serve_handler(
         Some(_) => return plain_response(StatusCode::GONE, "install session was cancelled"),
         None => return plain_response(StatusCode::NOT_FOUND, "no such install session"),
     };
+
+    // Source-address gate (2.9.0). The session UUID is high-entropy and
+    // gated everywhere else, but the URL the engine emits to the PS5
+    // (`http://{lan-ip}:{port}/pkg-host/{uuid}/file.pkg`) flows over
+    // plaintext HTTP. Any host on the LAN that can passively observe
+    // the PS5↔engine TCP stream (promiscuous WiFi, ARP-spoof, SOHO
+    // router admin) recovers the UUID from the first GET and can then
+    // hammer the URL with Range requests to drive a 16 MiB allocation
+    // per call — DoS the engine, possibly OOM the whole Tauri shell.
+    //
+    // Defense: refuse any source IP that isn't the PS5 the session
+    // belongs to. The session records `ps5_mgmt_addr` as `ip:port` at
+    // install_start time; we compare the bare IP. Loopback callers are
+    // allowed because dev workflows (curl against localhost, MITM
+    // proxies running on the same box) need to work for debugging.
+    let expected_ip = session
+        .ps5_mgmt_addr
+        .split(':')
+        .next()
+        .unwrap_or("")
+        .to_string();
+    let peer_ip = peer.ip().to_string();
+    if !peer.ip().is_loopback() && !expected_ip.is_empty() && peer_ip != expected_ip {
+        crate::log_warn!(
+            "pkg-host fetch REJECTED: peer={} expected={} session={}",
+            peer_ip,
+            expected_ip,
+            session.id,
+        );
+        return plain_response(
+            StatusCode::FORBIDDEN,
+            "pkg-host URL is bound to the PS5 it was issued for",
+        );
+    }
 
     let total = session.total_size;
     let (start, end) = match parse_range_header(&headers, total) {

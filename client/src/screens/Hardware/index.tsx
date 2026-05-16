@@ -121,10 +121,20 @@ export default function HardwareScreen() {
     if (!host?.trim() || payloadStatus !== "up") return;
     if (busy.current) return;
     busy.current = true;
+    // Host-stale guard (2.9.0). `busy.current` prevents overlapping
+    // polls AGAINST THE SAME HOST, but doesn't catch host-switch
+    // mid-poll. Without this guard, the first tick after a switch
+    // shows the OLD console's temps/power/storage/info under the
+    // NEW host's identity (model/serial in the System card is
+    // especially misleading). Auto-poll resolves it in ≤5s but the
+    // first-after-switch render lies.
+    const probedHost = host;
+    const isStale = () =>
+      useConnectionStore.getState().host !== probedHost;
     setLoading(true);
     setError(null);
     try {
-      const addr = `${host}:${PS5_PAYLOAD_PORT}`;
+      const addr = `${probedHost}:${PS5_PAYLOAD_PORT}`;
       const [nextTemps, nextPower, nextStorage] = await Promise.all([
         fetchHwTemps(addr),
         fetchHwPower(addr),
@@ -136,15 +146,18 @@ export default function HardwareScreen() {
         // of the tab keep working.
         fetchHwStorage(addr).catch(() => null),
       ]);
+      if (isStale()) return;
       setTemps(nextTemps);
       setPower(nextPower);
       setStorage(nextStorage);
       // info is static; fetch once if we don't have it yet.
       if (info === null) {
         const nextInfo = await fetchHwInfo(addr).catch(() => null);
+        if (isStale()) return;
         if (nextInfo) setInfo(nextInfo);
       }
     } catch (e) {
+      if (isStale()) return;
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       busy.current = false;
@@ -705,12 +718,24 @@ function SystemTimeCard({
    * Date.now() on every second-tick so the drift number stays live. */
   const refreshPs5 = useCallback(async () => {
     if (!payloadUp || !host.trim()) return;
+    // Host-stale guard (2.9.0). Drift display is computed from
+    // PS5 time minus PC time — attributing host A's clock to host B
+    // produces a wildly-off "drift" the user might act on with the
+    // Sync button (which uses click-time host, so the sync itself
+    // hits the right console, but they'd be syncing based on bad
+    // data). Belt-and-suspenders since the 30s poll resolves it,
+    // but a 30s window of misleading drift is enough to mislead.
+    const probedHost = host;
+    const isStale = () =>
+      useConnectionStore.getState().host !== probedHost;
     try {
-      const addr = `${host}:${PS5_PAYLOAD_PORT}`;
+      const addr = `${probedHost}:${PS5_PAYLOAD_PORT}`;
       const r = (await invoke("ps5_time_get", { addr })) as PsTimeJson;
+      if (isStale()) return;
       setPs5Time(r);
       setError(null);
     } catch (e) {
+      if (isStale()) return;
       setError(e instanceof Error ? e.message : String(e));
     }
   }, [host, payloadUp]);

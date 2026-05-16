@@ -230,7 +230,6 @@ export default function InstallPackageScreen() {
   }
 
   async function addPkgPath(path: string) {
-    const addr = toMgmtAddr(host);
     let displayName = basename(path);
     let totalBytes = 0;
     let contentId = "";
@@ -253,6 +252,15 @@ export default function InstallPackageScreen() {
     } catch (e) {
       warnings = [`could not read header: ${e}`];
     }
+    // Re-read host AFTER the metadata parse (2.9.0). Split-pkg
+    // parsing sha256s the headers and can take seconds. Capturing
+    // `addr` BEFORE the await meant a roster switch during parse
+    // would queue the item with the OLD addr — subsequent install
+    // would silently target the wrong console. Reading after the
+    // parse means the queue item is stamped with whatever host the
+    // user is looking at when the row appears in the queue (the
+    // intuitive contract).
+    const addr = toMgmtAddr(useConnectionStore.getState().host || host);
     // 2.2.58: NPXS-prefix system pkgs were getting a noisy per-row
     // pre-flight warning here — replaced with a single page-level
     // note (see the InfoCard near the page header) plus the

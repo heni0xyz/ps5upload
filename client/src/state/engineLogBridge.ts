@@ -22,6 +22,20 @@ const POLL_INTERVAL_MS = 1000;
 let running = false;
 let nextSince = 0;
 
+// (2.9.0) Consecutive-failure escalation. Pure "silently retry
+// forever" is dangerous when the failure is permanent — engine
+// binary corrupt / wrong-arch / refusing to start / sidecar
+// crashed — because the user sees zero engine logs in the Log tab
+// with no breadcrumb. After this many consecutive failures (one
+// per tick = 10 s window) we emit a SINGLE error log so a user
+// reading the Log tab can see the bridge is broken. Resets on the
+// next successful poll. Counter sits at module level (one bridge
+// per app process) so HMR-restart doesn't reset it spuriously —
+// the bridge is reinstalled via installEngineLogBridge.
+const ESCALATE_AFTER_FAILURES = 10;
+let consecutiveFailures = 0;
+let escalationLogged = false;
+
 function routeToLogStore(entry: EngineLogEntry) {
   // Strip the `[engine:<level>]` prefix the sidecar's stderr tagging
   // adds — we're already rendering the level as a badge in the Log UI,
@@ -67,9 +81,36 @@ async function tick() {
       // accept it so we don't re-request the already-dropped range.
       nextSince = res.next_seq;
     }
-  } catch {
-    // Engine not up yet, Tauri command missing in dev, network blip —
-    // all fine, retry next tick.
+    // Success: reset escalation state. If we'd previously emitted
+    // the "bridge unreachable" warning, follow up with a recovery
+    // log so the user can see things came back online.
+    if (escalationLogged) {
+      log.info(
+        "engine-log-bridge",
+        "engine log bridge recovered — live logs resumed",
+      );
+    }
+    consecutiveFailures = 0;
+    escalationLogged = false;
+  } catch (e) {
+    // Transient at first — engine not up yet, Tauri command missing
+    // in dev, network blip. After ESCALATE_AFTER_FAILURES consecutive
+    // failures emit one error so a permanently-broken bridge (engine
+    // binary corrupt / wrong-arch / hung sidecar) doesn't silently
+    // hide the very logs that would diagnose it. Single emission per
+    // outage; reset above on the next success.
+    consecutiveFailures += 1;
+    if (
+      consecutiveFailures >= ESCALATE_AFTER_FAILURES &&
+      !escalationLogged
+    ) {
+      const reason = e instanceof Error ? e.message : String(e);
+      log.error(
+        "engine-log-bridge",
+        `engine logs unreachable after ${consecutiveFailures}s — check that the engine sidecar is running. Last error: ${reason}`,
+      );
+      escalationLogged = true;
+    }
   }
 }
 

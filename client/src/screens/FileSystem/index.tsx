@@ -256,14 +256,38 @@ export default function FileSystemScreen() {
 
   const refresh = useCallback(async () => {
     if (!host?.trim()) return;
-    const addr = toMgmtAddr(`${host}:${PS5_PAYLOAD_PORT}`);
+    // Stale-result guard (2.9.0). The user can navigate (changes
+    // `path`) or switch PS5 (changes `host`) faster than ps5_list_dir
+    // resolves on a deep `/data` tree — listings can take 1-3s. The
+    // OLDER request's response, arriving SECOND, would otherwise
+    // clobber state and the UI would display the old directory's
+    // contents under the new URL. Worse: the per-row Delete handler
+    // joins the CURRENT `path` with the displayed name, so the user
+    // clicking Delete on a name they think belongs to `/data/foo`
+    // would actually delete `/data/homebrew/foo` if a coincidentally-
+    // named file exists there. Capture inputs at the top, re-read
+    // store state after the await, drop the result if anything
+    // changed. `path` is captured directly because it's the closure
+    // value at refresh start; `host` we re-read because it lives in
+    // a global store.
+    const probedHost = host.trim();
+    const probedPath = path;
+    const addr = toMgmtAddr(`${probedHost}:${PS5_PAYLOAD_PORT}`);
     setLoading(true);
     setError(null);
     try {
       const listing = await invoke<{
         entries?: DirEntry[];
         truncated?: boolean;
-      }>("ps5_list_dir", { addr, path, offset: 0, limit: 256 });
+      }>("ps5_list_dir", { addr, path: probedPath, offset: 0, limit: 256 });
+      // Drop result if user navigated or switched host mid-request.
+      // Compares against `path` (the CURRENT closure value re-captured
+      // from the dep array — useCallback regenerates on path change)
+      // and the store's live host. If either differs, a newer refresh
+      // is already in flight and will populate state correctly.
+      if (path !== probedPath) return;
+      const liveHost = useConnectionStore.getState().host?.trim();
+      if (liveHost !== probedHost) return;
       const raw = listing.entries ?? [];
       raw.sort((a, b) => {
         if (a.kind !== b.kind) {
@@ -283,6 +307,12 @@ export default function FileSystemScreen() {
         return next;
       });
     } catch (e) {
+      // Same stale-guard on the error path: a failure for an
+      // abandoned listing shouldn't replace a valid one the user is
+      // currently looking at.
+      if (path !== probedPath) return;
+      const liveHost = useConnectionStore.getState().host?.trim();
+      if (liveHost !== probedHost) return;
       // Route through humanizePs5Error so payload-side errors like
       // `fs_unmount_busy`, `path_not_allowed`, etc. surface as
       // actionable copy instead of opaque snake_case codes.
@@ -290,6 +320,10 @@ export default function FileSystemScreen() {
       setError(humanizePs5Error(raw) || raw);
       setEntries(null);
     } finally {
+      // Always clear loading — even on stale-drop, since some other
+      // refresh has either already cleared it or will clear it next.
+      // Leaving it true on the stale path would create the
+      // "loading-spinner-stuck-forever" UX bug.
       setLoading(false);
     }
   }, [host, path]);

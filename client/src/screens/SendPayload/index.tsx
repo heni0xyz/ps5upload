@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
@@ -192,7 +192,30 @@ export default function SendPayloadScreen() {
   /** Probe an already-selected path. Extracted so both the file picker
    *  and history-replay can trigger it. History-replayed paths may no
    *  longer exist on disk — in that case the probe surfaces the
-   *  filesystem error and we skip setting a "good" state. */
+   *  filesystem error and we skip setting a "good" state.
+   *
+   *  Stale-result guard (2.9.0): payload_probe reads + parses the
+   *  ELF header, which can take meaningfully longer for big payloads
+   *  (1+ s for large statically-linked ELFs). If the user picks
+   *  payload A then quickly picks payload B, B's probe can finish
+   *  first; A's probe (slower) finishes second and clobbers status
+   *  with a verdict text about A while the picked file is B. User
+   *  sees a green "is_ps5upload: true" badge for a file that's
+   *  actually a third-party ELF, then sends the wrong-but-correctly-
+   *  labeled file. Compare the probed path against the *current*
+   *  elfPath via the latest-ref pattern and drop stale results. */
+  // Sync ref via useEffect, not direct assignment during render —
+  // react-hooks/refs forbids `ref.current = x` in the render body
+  // because it'd skip React's commit-time batching. The one-render
+  // lag this introduces (ref reflects PREVIOUS elfPath until effect
+  // runs) is fine for our use: the probe started AFTER the new
+  // elfPath was set, so by the time the await resolves the effect
+  // has long since fired and ref.current matches what the user
+  // currently sees.
+  const elfPathRef = useRef<string | null>(null);
+  useEffect(() => {
+    elfPathRef.current = elfPath;
+  }, [elfPath]);
   const probeFile = async (path: string) => {
     setStatus({ kind: "probing" });
     try {
@@ -200,12 +223,14 @@ export default function SendPayloadScreen() {
         "payload_probe",
         { path },
       );
+      if (elfPathRef.current !== path) return;
       setStatus({
         kind: "probed",
         isPs5upload: !!r.is_ps5upload,
         message: probeMessage(r.code, !!r.is_ps5upload),
       });
     } catch (e) {
+      if (elfPathRef.current !== path) return;
       setStatus({
         kind: "failed",
         error: e instanceof Error ? e.message : String(e),
