@@ -1126,6 +1126,10 @@ logs_tab_app: "Aplikasi",
 logs_tab_kernel: "Kernel",
 logs_description_app: "Log dalam aplikasi untuk kesalahan, peringatan, dan peristiwa penting di sisi desktop. Berguna untuk laporan bug — klik Salin untuk mendapatkan dump teks biasa.",
 logs_description_kernel: "Aliran langsung /dev/klog dari payload. Buka Filter untuk menyembunyikan obrolan subsistem rutin Sony saat berburu masalah tertentu.",
+payloads_tab_catalog: "Katalog",
+payloads_tab_send: "Kirim file",
+payloads_description_catalog: "Payload homebrew PS5 pihak ketiga yang dikurasi. Periksa rilis terbaru, unduh sekali, lalu kirim ke PS5 Anda dengan sekali klik. Versi di-cache secara lokal sehingga Anda juga dapat mem-bundle stik autoloader USB.",
+payloads_description_send: "Kirim file payload PS5 apa saja — .elf, .bin, .js, .lua, atau .jar (kstuff, loader homebrew kustom, eksploit tahap browser, skrip plugin, JAR BD-JB) — ke PS5 Anda. Alur yang sama seperti tab Koneksi, hanya diarahkan ke file yang Anda pilih. Catatan: payload .jar gaya BD-JB memerlukan loader yang sadar JAR pada port non-9021 — atur port ke apa pun yang didengarkan loader Anda.",
 };
 
 export default id;

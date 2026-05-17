@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
-  Rocket,
   Send,
   Loader2,
   CheckCircle2,
@@ -19,16 +18,17 @@ import {
   PS5_LOADER_PORT,
 } from "../../state/connection";
 import { sendPayload } from "../../api/ps5";
-import { PageHeader } from "../../components";
 import { useTr } from "../../state/lang";
 import { PlaylistsPanel } from "./PlaylistsPanel";
 
 /**
- * Send a custom ELF to your PS5's payload loader.
+ * Send tab of the Payloads screen — send any custom ELF (or BIN/JS/
+ * LUA/JAR) to your PS5's payload loader.
  *
- * Mirrors the Connection screen's send step, but unbound from ps5upload's
- * own ELF. Meant for anything else you'd normally `nc` at :9021 —
- * any PS5 homebrew loader or kernel payload.
+ * Mirrors the Connection screen's send step, but unbound from
+ * ps5upload's own ELF. Meant for anything else you'd normally `nc`
+ * at :9021 — any PS5 homebrew loader or kernel payload, plus
+ * browser-stage JS, Lua plugins, BD-JB JARs.
  *
  * Probe-then-send pattern: we run the file through the existing
  * `payload_probe` command before sending so the user sees a clear
@@ -36,11 +36,15 @@ import { PlaylistsPanel } from "./PlaylistsPanel";
  * if you trust this" banner. It's not a security gate (you can send
  * anyway), just an informed-consent prompt.
  *
- * Recent-sends history is persisted via Tauri (`send_payload_history.json`
- * in the app data dir) — includes successful AND failed sends, each with
- * a status badge so the user can see "I tried foo.elf three times and it
- * failed" at a glance. Clicking a history row fills the form with that
- * record's path + port; the user can then re-send as-is or tweak.
+ * Recent-sends history is persisted via Tauri
+ * (`send_payload_history.json` in the app data dir) — includes
+ * successful AND failed sends, each with a status badge. Clicking a
+ * history row fills the form with that record's path + port; the
+ * user can then re-send as-is or tweak.
+ *
+ * Pre-2.12.0 this lived at /send-payload as a standalone screen. The
+ * Payloads shell now owns the page header + tab strip; this panel
+ * just renders content.
  */
 
 type Status =
@@ -102,7 +106,7 @@ function fileNameFrom(path: string): string {
   return path.split(/[\\/]/).pop() ?? path;
 }
 
-export default function SendPayloadScreen() {
+export default function SendPanel() {
   const tr = useTr();
   const host = useConnectionStore((s) => s.host);
   const setHost = useConnectionStore((s) => s.setHost);
@@ -277,17 +281,7 @@ export default function SendPayloadScreen() {
   };
 
   return (
-    <div className="p-6">
-      <PageHeader
-        icon={Rocket}
-        title={tr("send_payload", undefined, "Send payload")}
-        description={tr(
-          "send_payload_description",
-          undefined,
-          "Send any PS5 payload file — .elf, .bin, .js, .lua, or .jar (kstuff, custom homebrew loaders, browser-stage exploits, plugin scripts, BD-JB JARs) — to your PS5. Same flow as the Connection tab, just pointed at a file you choose. Note: BD-JB-style .jar payloads need a JAR-aware loader on a non-9021 port — set the port to whatever your loader listens on.",
-        )}
-      />
-
+    <div>
       {/* Two-column layout on wide screens: form on the left, history
           on the right. Stacks to single-column below lg (~1024px).
           History panel grows more generously on xl to hold longer

@@ -31,7 +31,6 @@ const SearchScreen = lazy(() => import("./screens/Search"));
 const VolumesScreen = lazy(() => import("./screens/Volumes"));
 const FileSystemScreen = lazy(() => import("./screens/FileSystem"));
 const HardwareScreen = lazy(() => import("./screens/Hardware"));
-const SendPayloadScreen = lazy(() => import("./screens/SendPayload"));
 const PayloadsScreen = lazy(() => import("./screens/Payloads"));
 const FirstRunScreen = lazy(() => import("./screens/FirstRun"));
 const SavesScreen = lazy(() => import("./screens/Saves"));
@@ -122,13 +121,11 @@ export default function App() {
             </Suspense>
           }
         />
+        {/* 2.12.0: send-payload merged into /payloads?tab=send. Keep
+            the old route alive as a redirect so bookmarks survive. */}
         <Route
           path="/send-payload"
-          element={
-            <Suspense fallback={<ScreenLoader />}>
-              <SendPayloadScreen />
-            </Suspense>
-          }
+          element={<Navigate to="/payloads?tab=send" replace />}
         />
         <Route
           path="/payloads"

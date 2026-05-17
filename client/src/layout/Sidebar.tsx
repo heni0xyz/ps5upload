@@ -10,7 +10,6 @@ import {
   HardDrive,
   FolderTree,
   Cpu,
-  Rocket,
   Boxes,
   Save,
   Image as ImageIcon,
@@ -105,8 +104,7 @@ const items: NavItem[] = [
   // ─ System: observe + manage the PS5 itself ─
   { to: "/dashboard", key: "dashboard", fallback: "Dashboard", icon: LayoutDashboard, section: { key: "nav_section_system", fallback: "System" } },
   { to: "/hardware", key: "hardware", fallback: "Hardware", icon: Cpu },
-  { to: "/payloads", key: "payloads", fallback: "Homebrew catalog", icon: Boxes },
-  { to: "/send-payload", key: "send_payload", fallback: "Send payload", icon: Rocket },
+  { to: "/payloads", key: "payloads", fallback: "Payloads", icon: Boxes },
   { to: "/shell", key: "shell", fallback: "Shell", icon: TerminalSquare },
 
   // ─ Diagnostics: history, logs, debugging ─
