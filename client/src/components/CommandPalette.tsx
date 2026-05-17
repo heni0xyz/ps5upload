@@ -35,11 +35,22 @@ function useCommands(close: () => void): Command[] {
   const navigate = useNavigate();
   const toggleTheme = useThemeStore((s) => s.toggleTheme);
   const setHost = useConnectionStore((s) => s.setHost);
+  const tr = useTr();
 
   return useMemo<Command[]>(() => {
-    const nav = (to: string, label: string, keywords?: string[]): Command => ({
+    // Nav labels reuse the same i18n keys as Sidebar (which already
+    // has the {key, fallback} data-table pattern), so there are no
+    // new translations to ship. The english fallback also doubles
+    // as a keyword for substring matching since toLowerCase().match
+    // covers both the rendered label and the underlying fallback.
+    const nav = (
+      to: string,
+      key: string,
+      fallback: string,
+      keywords?: string[],
+    ): Command => ({
       id: `nav:${to}`,
-      label,
+      label: tr(key, undefined, fallback),
       keywords,
       group: "Navigation",
       hint: to,
@@ -50,40 +61,45 @@ function useCommands(close: () => void): Command[] {
     });
 
     return [
-      nav("/dashboard", "Dashboard", ["home", "overview"]),
-      nav("/connection", "Connection", ["host", "ip", "connect"]),
-      nav("/upload", "Upload"),
-      nav("/install-package", "Install Package", ["pkg"]),
-      nav("/library", "Library", ["games", "apps"]),
-      nav("/saves", "Save data"),
-      nav("/screenshots", "Screenshots"),
-      nav("/search", "Search"),
-      nav("/volumes", "Volumes", ["disk", "drives"]),
-      nav("/disk-usage", "Disk usage"),
-      nav("/file-system", "File System", ["browse", "files"]),
-      nav("/hardware", "Hardware", ["temps", "power"]),
+      nav("/dashboard", "dashboard", "Dashboard", ["home", "overview"]),
+      nav("/connection", "connect", "Connection", ["host", "ip", "connect"]),
+      nav("/upload", "upload", "Upload"),
+      nav("/install-package", "install_package", "Install Package", ["pkg"]),
+      nav("/library", "library", "Library", ["games", "apps"]),
+      nav("/saves", "saves", "Save data"),
+      nav("/screenshots", "screenshots", "Screenshots"),
+      nav("/search", "search", "Search"),
+      nav("/volumes", "volumes", "Volumes", ["disk", "drives"]),
+      nav("/disk-usage", "disk_usage", "Disk usage"),
+      nav("/file-system", "file_system", "File System", ["browse", "files"]),
+      nav("/hardware", "hardware", "Hardware", ["temps", "power"]),
       // 2.12.0 merged the SendPayload + KernelLog screens into tabs.
       // Keep old labels as keyword aliases for muscle memory; the
       // canonical entries are now /payloads and /logs with tabs.
-      nav("/payloads", "Payloads", [
+      nav("/payloads", "payloads", "Payloads", [
         "homebrew catalog",
         "payload library",
         "kstuff",
         "shadowmount",
         "etahen",
       ]),
-      nav("/payloads?tab=send", "Send file (Payloads)", ["send payload"]),
-      nav("/activity", "Activity"),
-      nav("/stats", "Stats"),
-      nav("/logs", "Logs"),
-      nav("/logs?tab=kernel", "Kernel log (Logs)", ["dmesg", "klog"]),
-      nav("/shell", "Shell", ["terminal"]),
-      nav("/settings", "Settings"),
-      nav("/about", "About"),
-      nav("/faq", "FAQ", ["help"]),
+      nav("/payloads?tab=send", "payloads_tab_send", "Send file", [
+        "send payload",
+      ]),
+      nav("/activity", "activity", "Activity"),
+      nav("/stats", "stats", "Stats"),
+      nav("/logs", "logs", "Logs"),
+      nav("/logs?tab=kernel", "logs_tab_kernel", "Kernel log", [
+        "dmesg",
+        "klog",
+      ]),
+      nav("/shell", "shell", "Shell", ["terminal"]),
+      nav("/settings", "settings", "Settings"),
+      nav("/about", "about", "About"),
+      nav("/faq", "faq", "FAQ", ["help"]),
       {
         id: "theme:toggle",
-        label: "Toggle theme",
+        label: tr("cmdpalette_toggle_theme", undefined, "Toggle theme"),
         keywords: ["dark", "light", "oled"],
         group: "Theme",
         run: () => {
@@ -93,34 +109,70 @@ function useCommands(close: () => void): Command[] {
       },
       {
         id: "conn:paste-host",
-        label: "Paste host from clipboard",
+        label: tr(
+          "cmdpalette_paste_host",
+          undefined,
+          "Paste host from clipboard",
+        ),
         keywords: ["ip", "address", "connect"],
         group: "Connection",
-        hint: "Reads navigator.clipboard for an IPv4 address",
+        hint: tr(
+          "cmdpalette_paste_host_hint",
+          undefined,
+          "Reads navigator.clipboard for an IPv4 address",
+        ),
         run: async () => {
           try {
             const text = await navigator.clipboard.readText();
             const match = text.match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/);
             if (match) {
               setHost(match[1]);
-              pushNotification("info", "Host updated", {
-                body: `Set to ${match[1]} from clipboard.`,
-              });
+              pushNotification(
+                "info",
+                tr("cmdpalette_host_updated", undefined, "Host updated"),
+                {
+                  body: tr(
+                    "cmdpalette_host_updated_body",
+                    { ip: match[1] },
+                    `Set to ${match[1]} from clipboard.`,
+                  ),
+                },
+              );
             } else {
-              pushNotification("warning", "No IP found", {
-                body: "Clipboard didn't contain an IPv4 address.",
-              });
+              pushNotification(
+                "warning",
+                tr("cmdpalette_no_ip_found", undefined, "No IP found"),
+                {
+                  body: tr(
+                    "cmdpalette_no_ip_body",
+                    undefined,
+                    "Clipboard didn't contain an IPv4 address.",
+                  ),
+                },
+              );
             }
           } catch {
-            pushNotification("warning", "Clipboard read failed", {
-              body: "Permission denied or unavailable.",
-            });
+            pushNotification(
+              "warning",
+              tr(
+                "cmdpalette_clipboard_failed",
+                undefined,
+                "Clipboard read failed",
+              ),
+              {
+                body: tr(
+                  "cmdpalette_clipboard_failed_body",
+                  undefined,
+                  "Permission denied or unavailable.",
+                ),
+              },
+            );
           }
           close();
         },
       },
     ];
-  }, [navigate, toggleTheme, setHost, close]);
+  }, [navigate, toggleTheme, setHost, close, tr]);
 }
 
 export function CommandPalette() {

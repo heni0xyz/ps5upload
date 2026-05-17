@@ -1126,6 +1126,15 @@ payloads_tab_send: "ส่งไฟล์",
 payloads_description_catalog: "เพย์โหลด homebrew PS5 ของบุคคลที่สามที่คัดสรร ตรวจสอบรีลีสล่าสุด ดาวน์โหลดครั้งเดียว จากนั้นส่งไปยัง PS5 ของคุณด้วยคลิกเดียว เวอร์ชันถูกแคชไว้ในเครื่อง คุณจึงรวมแฟลชไดรฟ์ USB autoloader ได้ด้วย",
 payloads_description_send: "ส่งไฟล์เพย์โหลด PS5 ใดก็ได้ — .elf, .bin, .js, .lua, หรือ .jar (kstuff, ตัวโหลด homebrew แบบกำหนดเอง, exploit ขั้นเบราว์เซอร์, สคริปต์ปลั๊กอิน, BD-JB JARs) — ไปยัง PS5 ของคุณ การไหลเหมือนกับแท็บการเชื่อมต่อ เพียงแค่ชี้ไปที่ไฟล์ที่คุณเลือก หมายเหตุ: เพย์โหลด .jar สไตล์ BD-JB ต้องการตัวโหลดที่รองรับ JAR บนพอร์ตที่ไม่ใช่ 9021 — ตั้งพอร์ตเป็นพอร์ตที่ตัวโหลดของคุณฟัง",
 payloads_inventory_failed: "ไม่สามารถอ่านแคชเพย์โหลดในเครื่องได้",
+cmdpalette_toggle_theme: "สลับธีม",
+cmdpalette_paste_host: "วางโฮสต์จากคลิปบอร์ด",
+cmdpalette_paste_host_hint: "อ่าน navigator.clipboard เพื่อหาที่อยู่ IPv4",
+cmdpalette_host_updated: "อัปเดตโฮสต์แล้ว",
+cmdpalette_host_updated_body: "ตั้งเป็น {ip} จากคลิปบอร์ด",
+cmdpalette_no_ip_found: "ไม่พบ IP",
+cmdpalette_no_ip_body: "คลิปบอร์ดไม่มีที่อยู่ IPv4",
+cmdpalette_clipboard_failed: "อ่านคลิปบอร์ดล้มเหลว",
+cmdpalette_clipboard_failed_body: "ปฏิเสธสิทธิ์หรือไม่พร้อมใช้งาน",
 };
 
 export default th;

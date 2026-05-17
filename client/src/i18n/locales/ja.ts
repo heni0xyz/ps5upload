@@ -1127,6 +1127,15 @@ payloads_tab_send: "ファイル送信",
 payloads_description_catalog: "厳選されたサードパーティ PS5 ホームブリュー ペイロード。最新リリースを確認し、一度ダウンロードしてから、ワンクリックで PS5 に送信。バージョンはローカルにキャッシュされるため、USB オートローダー スティックをバンドルすることもできます。",
 payloads_description_send: "任意の PS5 ペイロード ファイル — .elf、.bin、.js、.lua、または .jar(kstuff、カスタム ホームブリュー ローダー、ブラウザ ステージ エクスプロイト、プラグイン スクリプト、BD-JB JAR)— を PS5 に送信。Connection タブと同じフロー、選んだファイルをポイントするだけ。注: BD-JB スタイルの .jar ペイロードには 9021 以外のポートで JAR 対応ローダーが必要 — ローダーが listen するポートに設定してください。",
 payloads_inventory_failed: "ローカル ペイロード キャッシュを読み取れませんでした",
+cmdpalette_toggle_theme: "テーマを切り替え",
+cmdpalette_paste_host: "クリップボードからホストを貼り付け",
+cmdpalette_paste_host_hint: "IPv4 アドレスを探して navigator.clipboard を読み取り",
+cmdpalette_host_updated: "ホストを更新しました",
+cmdpalette_host_updated_body: "クリップボードから {ip} に設定しました。",
+cmdpalette_no_ip_found: "IP が見つかりません",
+cmdpalette_no_ip_body: "クリップボードに IPv4 アドレスが含まれていません。",
+cmdpalette_clipboard_failed: "クリップボードの読み取りに失敗",
+cmdpalette_clipboard_failed_body: "権限が拒否されたか利用できません。",
 };
 
 export default ja;

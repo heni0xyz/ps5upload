@@ -1128,6 +1128,15 @@ payloads_tab_send: "傳送檔案",
 payloads_description_catalog: "精心挑選的第三方 PS5 自製有效負載。檢查最新版本,下載一次,然後一鍵傳送到您的 PS5。版本會快取在本機,因此您還可以打包 USB 自動載入器隨身碟。",
 payloads_description_send: "將任何 PS5 有效負載檔案 — .elf、.bin、.js、.lua 或 .jar(kstuff、自訂 homebrew 載入器、瀏覽器階段漏洞、外掛腳本、BD-JB JAR)— 傳送到您的 PS5。與連線分頁相同的流程,只是指向您選擇的檔案。注意:BD-JB 風格的 .jar 有效負載需要在非 9021 連接埠上的 JAR 感知載入器 — 將連接埠設定為您的載入器接收的內容。",
 payloads_inventory_failed: "無法讀取本機有效負載快取",
+cmdpalette_toggle_theme: "切換主題",
+cmdpalette_paste_host: "從剪貼簿貼上主機",
+cmdpalette_paste_host_hint: "從 navigator.clipboard 讀取 IPv4 位址",
+cmdpalette_host_updated: "主機已更新",
+cmdpalette_host_updated_body: "已從剪貼簿設定為 {ip}。",
+cmdpalette_no_ip_found: "找不到 IP",
+cmdpalette_no_ip_body: "剪貼簿未包含 IPv4 位址。",
+cmdpalette_clipboard_failed: "讀取剪貼簿失敗",
+cmdpalette_clipboard_failed_body: "權限遭拒或無法使用。",
 };
 
 export default zh_TW;

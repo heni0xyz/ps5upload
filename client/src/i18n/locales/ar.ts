@@ -1127,6 +1127,15 @@ payloads_tab_send: "إرسال ملف",
 payloads_description_catalog: "حمولات Homebrew لـ PS5 من جهات خارجية منتقاة. تحقق من أحدث إصدار، قم بالتنزيل مرة واحدة، ثم أرسل إلى PS5 الخاصة بك بنقرة واحدة. تخزن الإصدارات محليًا حتى تتمكن أيضًا من تجميع عصا تحميل تلقائي عبر USB.",
 payloads_description_send: "أرسل أي ملف حمولة PS5 — .elf أو .bin أو .js أو .lua أو .jar (kstuff، أو محملات homebrew المخصصة، أو استغلالات مرحلة المتصفح، أو نصوص المكونات الإضافية، أو ملفات JAR لـ BD-JB) — إلى PS5 الخاص بك. نفس التدفق مثل علامة التبويب الاتصال، فقط موجه إلى ملف تختاره. ملاحظة: حمولات .jar من نوع BD-JB تحتاج إلى محمل يدعم JAR على منفذ غير 9021 — اضبط المنفذ على ما يستمع إليه محملك.",
 payloads_inventory_failed: "تعذر قراءة ذاكرة التخزين المؤقت المحلية للحمولة",
+cmdpalette_toggle_theme: "تبديل السمة",
+cmdpalette_paste_host: "لصق المضيف من الحافظة",
+cmdpalette_paste_host_hint: "يقرأ من ‏navigator.clipboard‏ بحثاً عن عنوان IPv4",
+cmdpalette_host_updated: "تم تحديث المضيف",
+cmdpalette_host_updated_body: "تم التعيين إلى {ip} من الحافظة.",
+cmdpalette_no_ip_found: "لم يتم العثور على IP",
+cmdpalette_no_ip_body: "الحافظة لم تحتوي على عنوان IPv4.",
+cmdpalette_clipboard_failed: "فشلت قراءة الحافظة",
+cmdpalette_clipboard_failed_body: "تم رفض الإذن أو غير متاح.",
 };
 
 export default ar;

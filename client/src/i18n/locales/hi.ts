@@ -1127,6 +1127,15 @@ payloads_tab_send: "फ़ाइल भेजें",
 payloads_description_catalog: "क्यूरेटेड तृतीय-पक्ष PS5 होमब्रू पेलोड। नवीनतम रिलीज़ की जाँच करें, एक बार डाउनलोड करें, फिर एक क्लिक से अपने PS5 पर भेजें। संस्करण स्थानीय रूप से कैश होते हैं ताकि आप एक USB ऑटोलोडर स्टिक भी बंडल कर सकें।",
 payloads_description_send: "कोई भी PS5 पेलोड फ़ाइल — .elf, .bin, .js, .lua, या .jar (kstuff, कस्टम होमब्रू लोडर, ब्राउज़र-स्टेज एक्सप्लॉइट्स, प्लगइन स्क्रिप्ट्स, BD-JB JAR) — अपने PS5 पर भेजें। कनेक्शन टैब के समान प्रवाह, बस आपकी चुनी हुई फ़ाइल पर निर्देशित। नोट: BD-JB-स्टाइल .jar पेलोड के लिए 9021 के अलावा किसी पोर्ट पर एक JAR-जागरूक लोडर की आवश्यकता होती है — पोर्ट को वह सेट करें जो आपका लोडर सुनता है।",
 payloads_inventory_failed: "स्थानीय पेलोड कैश पढ़ा नहीं जा सका",
+cmdpalette_toggle_theme: "थीम टॉगल करें",
+cmdpalette_paste_host: "क्लिपबोर्ड से होस्ट पेस्ट करें",
+cmdpalette_paste_host_hint: "IPv4 पते के लिए navigator.clipboard पढ़ता है",
+cmdpalette_host_updated: "होस्ट अपडेट हुआ",
+cmdpalette_host_updated_body: "क्लिपबोर्ड से {ip} पर सेट किया गया।",
+cmdpalette_no_ip_found: "कोई IP नहीं मिला",
+cmdpalette_no_ip_body: "क्लिपबोर्ड में कोई IPv4 पता नहीं था।",
+cmdpalette_clipboard_failed: "क्लिपबोर्ड पढ़ना विफल",
+cmdpalette_clipboard_failed_body: "अनुमति अस्वीकृत या अनुपलब्ध।",
 };
 
 export default hi;

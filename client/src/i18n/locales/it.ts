@@ -1126,6 +1126,15 @@ payloads_tab_send: "Invia file",
 payloads_description_catalog: "Payload homebrew PS5 di terze parti curati. Controlla l'ultima versione, scarica una volta, poi invia alla tua PS5 con un clic. Le versioni vengono memorizzate nella cache locale, così puoi anche preparare una chiavetta USB autoloader.",
 payloads_description_send: "Invia qualsiasi file payload PS5 — .elf, .bin, .js, .lua o .jar (kstuff, loader homebrew personalizzati, exploit browser-stage, script di plugin, JAR BD-JB) — alla tua PS5. Stesso flusso della scheda Connessione, solo puntato su un file scelto da te. Nota: i payload .jar in stile BD-JB necessitano di un loader compatibile JAR su una porta non 9021 — imposta la porta su quella che il tuo loader ascolta.",
 payloads_inventory_failed: "Impossibile leggere la cache locale dei payload",
+cmdpalette_toggle_theme: "Cambia tema",
+cmdpalette_paste_host: "Incolla host dagli appunti",
+cmdpalette_paste_host_hint: "Legge navigator.clipboard per un indirizzo IPv4",
+cmdpalette_host_updated: "Host aggiornato",
+cmdpalette_host_updated_body: "Impostato a {ip} dagli appunti.",
+cmdpalette_no_ip_found: "Nessun IP trovato",
+cmdpalette_no_ip_body: "Gli appunti non contenevano un indirizzo IPv4.",
+cmdpalette_clipboard_failed: "Lettura degli appunti non riuscita",
+cmdpalette_clipboard_failed_body: "Permesso negato o non disponibile.",
 };
 
 export default it;

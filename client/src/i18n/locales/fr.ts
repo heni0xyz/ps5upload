@@ -1127,6 +1127,15 @@ payloads_tab_send: "Envoyer un fichier",
 payloads_description_catalog: "Payloads homebrew PS5 tiers sélectionnés. Vérifie la dernière version, télécharge une fois, puis envoie à ta PS5 d'un clic. Les versions sont mises en cache localement pour que tu puisses aussi préparer une clé USB d'autoloader.",
 payloads_description_send: "Envoie n'importe quel fichier payload PS5 — .elf, .bin, .js, .lua ou .jar (kstuff, chargeurs homebrew personnalisés, exploits browser-stage, scripts de plugins, JAR BD-JB) — vers ta PS5. Même flux que l'onglet Connexion, juste pointé sur un fichier que tu choisis. Note : les payloads .jar de type BD-JB nécessitent un chargeur compatible JAR sur un port autre que 9021 — règle le port sur ce que ton chargeur écoute.",
 payloads_inventory_failed: "Impossible de lire le cache local des payloads",
+cmdpalette_toggle_theme: "Basculer le thème",
+cmdpalette_paste_host: "Coller l'hôte depuis le presse-papiers",
+cmdpalette_paste_host_hint: "Lit navigator.clipboard pour trouver une adresse IPv4",
+cmdpalette_host_updated: "Hôte mis à jour",
+cmdpalette_host_updated_body: "Défini sur {ip} depuis le presse-papiers.",
+cmdpalette_no_ip_found: "Aucune IP trouvée",
+cmdpalette_no_ip_body: "Le presse-papiers ne contenait pas d'adresse IPv4.",
+cmdpalette_clipboard_failed: "Échec de la lecture du presse-papiers",
+cmdpalette_clipboard_failed_body: "Permission refusée ou indisponible.",
 };
 
 export default fr;

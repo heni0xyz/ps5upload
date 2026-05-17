@@ -1127,6 +1127,15 @@ payloads_tab_send: "Datei senden",
 payloads_description_catalog: "Kuratierte PS5-Homebrew-Payloads von Drittanbietern. Prüfe die neueste Version, lade sie einmal herunter und sende sie dann mit einem Klick an deine PS5. Versionen werden lokal zwischengespeichert, sodass du auch einen USB-Autoloader-Stick zusammenstellen kannst.",
 payloads_description_send: "Sende jede PS5-Payload-Datei — .elf, .bin, .js, .lua oder .jar (kstuff, eigene Homebrew-Loader, Browser-Stage-Exploits, Plugin-Skripte, BD-JB-JARs) — an deine PS5. Gleicher Ablauf wie der Connection-Tab, nur auf eine von dir gewählte Datei gerichtet. Hinweis: BD-JB-artige .jar-Payloads brauchen einen JAR-fähigen Loader auf einem Nicht-9021-Port — stelle den Port auf das ein, was dein Loader abhört.",
 payloads_inventory_failed: "Lokaler Payload-Cache konnte nicht gelesen werden",
+cmdpalette_toggle_theme: "Design umschalten",
+cmdpalette_paste_host: "Host aus Zwischenablage einfügen",
+cmdpalette_paste_host_hint: "Liest navigator.clipboard nach einer IPv4-Adresse",
+cmdpalette_host_updated: "Host aktualisiert",
+cmdpalette_host_updated_body: "Auf {ip} aus der Zwischenablage gesetzt.",
+cmdpalette_no_ip_found: "Keine IP gefunden",
+cmdpalette_no_ip_body: "Die Zwischenablage enthielt keine IPv4-Adresse.",
+cmdpalette_clipboard_failed: "Zwischenablage konnte nicht gelesen werden",
+cmdpalette_clipboard_failed_body: "Berechtigung verweigert oder nicht verfügbar.",
 };
 
 export default de;

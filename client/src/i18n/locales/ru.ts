@@ -1126,6 +1126,15 @@ payloads_tab_send: "Отправить файл",
 payloads_description_catalog: "Подобранные сторонние PS5 homebrew-полезные нагрузки. Проверьте последний релиз, загрузите один раз, затем отправьте на свой PS5 одним щелчком. Версии кэшируются локально, поэтому вы также можете собрать USB-автозагрузочную флешку.",
 payloads_description_send: "Отправьте любой файл полезной нагрузки PS5 — .elf, .bin, .js, .lua или .jar (kstuff, пользовательские homebrew-загрузчики, эксплойты на этапе браузера, скрипты плагинов, JAR-файлы BD-JB) — на свой PS5. Тот же поток, что и на вкладке «Соединение», только указывающий на выбранный вами файл. Примечание: полезные нагрузки .jar в стиле BD-JB требуют JAR-совместимого загрузчика на порту, отличном от 9021 — установите порт на тот, который слушает ваш загрузчик.",
 payloads_inventory_failed: "Не удалось прочитать локальный кэш полезной нагрузки",
+cmdpalette_toggle_theme: "Переключить тему",
+cmdpalette_paste_host: "Вставить хост из буфера обмена",
+cmdpalette_paste_host_hint: "Читает navigator.clipboard в поисках IPv4-адреса",
+cmdpalette_host_updated: "Хост обновлён",
+cmdpalette_host_updated_body: "Установлено {ip} из буфера обмена.",
+cmdpalette_no_ip_found: "IP не найден",
+cmdpalette_no_ip_body: "Буфер обмена не содержал IPv4-адрес.",
+cmdpalette_clipboard_failed: "Не удалось прочитать буфер обмена",
+cmdpalette_clipboard_failed_body: "Доступ запрещён или недоступен.",
 };
 
 export default ru;

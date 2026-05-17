@@ -1127,6 +1127,15 @@ payloads_tab_send: "Enviar archivo",
 payloads_description_catalog: "Payloads de homebrew de PS5 de terceros curados. Comprueba la última versión, descárgala una vez y luego envíala a tu PS5 con un clic. Las versiones se almacenan en caché localmente para que también puedas crear una memoria USB de carga automática.",
 payloads_description_send: "Envía cualquier archivo de payload de PS5 — .elf, .bin, .js, .lua o .jar (kstuff, cargadores homebrew personalizados, exploits de etapa del navegador, scripts de complementos, JAR de BD-JB) — a tu PS5. El mismo flujo que la pestaña Conexión, solo apuntado a un archivo que elijas. Nota: los payloads .jar de estilo BD-JB necesitan un cargador compatible con JAR en un puerto distinto de 9021 — configura el puerto a lo que escuche tu cargador.",
 payloads_inventory_failed: "No se pudo leer la caché local de payloads",
+cmdpalette_toggle_theme: "Alternar tema",
+cmdpalette_paste_host: "Pegar host desde el portapapeles",
+cmdpalette_paste_host_hint: "Lee navigator.clipboard buscando una dirección IPv4",
+cmdpalette_host_updated: "Host actualizado",
+cmdpalette_host_updated_body: "Establecido a {ip} desde el portapapeles.",
+cmdpalette_no_ip_found: "No se encontró IP",
+cmdpalette_no_ip_body: "El portapapeles no contenía una dirección IPv4.",
+cmdpalette_clipboard_failed: "Falló la lectura del portapapeles",
+cmdpalette_clipboard_failed_body: "Permiso denegado o no disponible.",
 };
 
 export default es;

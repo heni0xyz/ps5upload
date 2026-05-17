@@ -1126,6 +1126,15 @@ payloads_tab_send: "Enviar arquivo",
 payloads_description_catalog: "Payloads de homebrew de PS5 de terceiros selecionados. Verifique a versão mais recente, baixe uma vez e envie para seu PS5 com um clique. As versões são armazenadas em cache localmente para que você também possa montar um pendrive autoloader USB.",
 payloads_description_send: "Envie qualquer arquivo de payload do PS5 — .elf, .bin, .js, .lua ou .jar (kstuff, carregadores homebrew personalizados, exploits browser-stage, scripts de plug-in, JARs do BD-JB) — para seu PS5. Mesmo fluxo da aba Conexão, apenas apontado para um arquivo que você escolher. Observação: payloads .jar no estilo BD-JB precisam de um carregador compatível com JAR em uma porta não-9021 — defina a porta para o que seu carregador escuta.",
 payloads_inventory_failed: "Não foi possível ler o cache local de payloads",
+cmdpalette_toggle_theme: "Alternar tema",
+cmdpalette_paste_host: "Colar host da área de transferência",
+cmdpalette_paste_host_hint: "Lê navigator.clipboard para um endereço IPv4",
+cmdpalette_host_updated: "Host atualizado",
+cmdpalette_host_updated_body: "Definido como {ip} da área de transferência.",
+cmdpalette_no_ip_found: "Nenhum IP encontrado",
+cmdpalette_no_ip_body: "A área de transferência não continha um endereço IPv4.",
+cmdpalette_clipboard_failed: "Falha ao ler a área de transferência",
+cmdpalette_clipboard_failed_body: "Permissão negada ou indisponível.",
 };
 
 export default pt_BR;

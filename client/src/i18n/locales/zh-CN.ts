@@ -1134,6 +1134,15 @@ payloads_tab_send: "发送文件",
 payloads_description_catalog: "精心挑选的第三方 PS5 自制有效负载。检查最新版本,下载一次,然后一键发送到您的 PS5。版本会缓存在本地,因此您还可以打包 USB 自动加载器 U 盘。",
 payloads_description_send: "将任何 PS5 有效负载文件 — .elf、.bin、.js、.lua 或 .jar(kstuff、自定义 homebrew 加载器、浏览器阶段漏洞、插件脚本、BD-JB JAR)— 发送到您的 PS5。与连接选项卡相同的流程,只是指向您选择的文件。注意:BD-JB 风格的 .jar 有效负载需要在非 9021 端口上的 JAR 感知加载器 — 将端口设置为您的加载器侦听的内容。",
 payloads_inventory_failed: "无法读取本地有效负载缓存",
+cmdpalette_toggle_theme: "切换主题",
+cmdpalette_paste_host: "从剪贴板粘贴主机",
+cmdpalette_paste_host_hint: "从 navigator.clipboard 读取 IPv4 地址",
+cmdpalette_host_updated: "主机已更新",
+cmdpalette_host_updated_body: "已从剪贴板设置为 {ip}。",
+cmdpalette_no_ip_found: "未找到 IP",
+cmdpalette_no_ip_body: "剪贴板未包含 IPv4 地址。",
+cmdpalette_clipboard_failed: "读取剪贴板失败",
+cmdpalette_clipboard_failed_body: "权限被拒绝或不可用。",
 };
 
 export default zh_CN;

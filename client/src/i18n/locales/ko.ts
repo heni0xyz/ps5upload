@@ -1127,6 +1127,15 @@ payloads_tab_send: "파일 전송",
 payloads_description_catalog: "큐레이트된 타사 PS5 홈브루 페이로드. 최신 릴리스를 확인하고 한 번 다운로드한 다음 한 번의 클릭으로 PS5에 보냅니다. 버전은 로컬에 캐시되므로 USB 자동 로더 스틱도 번들할 수 있습니다.",
 payloads_description_send: "모든 PS5 페이로드 파일 — .elf, .bin, .js, .lua 또는 .jar (kstuff, 사용자 정의 홈브루 로더, 브라우저 스테이지 익스플로잇, 플러그인 스크립트, BD-JB JAR) — 을 PS5로 보냅니다. Connection 탭과 동일한 흐름이지만 선택한 파일을 가리킵니다. 참고: BD-JB 스타일 .jar 페이로드는 9021이 아닌 포트에 JAR 인식 로더가 필요합니다 — 포트를 로더가 수신하는 것으로 설정하세요.",
 payloads_inventory_failed: "로컬 페이로드 캐시를 읽을 수 없습니다",
+cmdpalette_toggle_theme: "테마 전환",
+cmdpalette_paste_host: "클립보드에서 호스트 붙여넣기",
+cmdpalette_paste_host_hint: "IPv4 주소를 찾기 위해 navigator.clipboard 읽기",
+cmdpalette_host_updated: "호스트가 업데이트됨",
+cmdpalette_host_updated_body: "클립보드에서 {ip}로 설정됨.",
+cmdpalette_no_ip_found: "IP를 찾을 수 없음",
+cmdpalette_no_ip_body: "클립보드에 IPv4 주소가 포함되어 있지 않습니다.",
+cmdpalette_clipboard_failed: "클립보드 읽기 실패",
+cmdpalette_clipboard_failed_body: "권한이 거부되었거나 사용할 수 없습니다.",
 };
 
 export default ko;

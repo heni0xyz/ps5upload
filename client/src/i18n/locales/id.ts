@@ -1126,6 +1126,15 @@ payloads_tab_send: "Kirim file",
 payloads_description_catalog: "Payload homebrew PS5 pihak ketiga yang dikurasi. Periksa rilis terbaru, unduh sekali, lalu kirim ke PS5 Anda dengan sekali klik. Versi di-cache secara lokal sehingga Anda juga dapat mem-bundle stik autoloader USB.",
 payloads_description_send: "Kirim file payload PS5 apa saja — .elf, .bin, .js, .lua, atau .jar (kstuff, loader homebrew kustom, eksploit tahap browser, skrip plugin, JAR BD-JB) — ke PS5 Anda. Alur yang sama seperti tab Koneksi, hanya diarahkan ke file yang Anda pilih. Catatan: payload .jar gaya BD-JB memerlukan loader yang sadar JAR pada port non-9021 — atur port ke apa pun yang didengarkan loader Anda.",
 payloads_inventory_failed: "Tidak dapat membaca cache payload lokal",
+cmdpalette_toggle_theme: "Alihkan tema",
+cmdpalette_paste_host: "Tempel host dari clipboard",
+cmdpalette_paste_host_hint: "Membaca navigator.clipboard untuk alamat IPv4",
+cmdpalette_host_updated: "Host diperbarui",
+cmdpalette_host_updated_body: "Disetel ke {ip} dari clipboard.",
+cmdpalette_no_ip_found: "Tidak ada IP yang ditemukan",
+cmdpalette_no_ip_body: "Clipboard tidak berisi alamat IPv4.",
+cmdpalette_clipboard_failed: "Gagal membaca clipboard",
+cmdpalette_clipboard_failed_body: "Izin ditolak atau tidak tersedia.",
 };
 
 export default id;

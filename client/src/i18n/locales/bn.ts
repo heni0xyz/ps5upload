@@ -1126,6 +1126,15 @@ payloads_tab_send: "ফাইল পাঠান",
 payloads_description_catalog: "নির্বাচিত তৃতীয়-পক্ষের PS5 হোমব্রু পেলোড। সর্বশেষ রিলিজ চেক করুন, একবার ডাউনলোড করুন, তারপর এক ক্লিকে আপনার PS5-এ পাঠান। সংস্করণগুলি স্থানীয়ভাবে ক্যাশে হয় যাতে আপনি একটি USB অটোলোডার স্টিকও বান্ডেল করতে পারেন।",
 payloads_description_send: "যেকোনো PS5 পেলোড ফাইল — .elf, .bin, .js, .lua, বা .jar (kstuff, কাস্টম homebrew লোডার, ব্রাউজার-স্টেজ এক্সপ্লয়েট, প্লাগইন স্ক্রিপ্ট, BD-JB JAR) — আপনার PS5-এ পাঠান। সংযোগ ট্যাবের মতোই প্রবাহ, শুধু আপনার পছন্দের ফাইলে নির্দেশিত। দ্রষ্টব্য: BD-JB-স্টাইল .jar পেলোডগুলির 9021 নয় এমন পোর্টে একটি JAR-সচেতন লোডার প্রয়োজন — পোর্টটি আপনার লোডার যাতে শোনে তাতে সেট করুন।",
 payloads_inventory_failed: "স্থানীয় পেলোড ক্যাশে পড়া যায়নি",
+cmdpalette_toggle_theme: "থিম টগল করুন",
+cmdpalette_paste_host: "ক্লিপবোর্ড থেকে হোস্ট পেস্ট করুন",
+cmdpalette_paste_host_hint: "IPv4 ঠিকানার জন্য navigator.clipboard পড়ে",
+cmdpalette_host_updated: "হোস্ট আপডেট হয়েছে",
+cmdpalette_host_updated_body: "ক্লিপবোর্ড থেকে {ip}-এ সেট করা হয়েছে।",
+cmdpalette_no_ip_found: "কোন IP পাওয়া যায়নি",
+cmdpalette_no_ip_body: "ক্লিপবোর্ডে IPv4 ঠিকানা ছিল না।",
+cmdpalette_clipboard_failed: "ক্লিপবোর্ড পড়া ব্যর্থ",
+cmdpalette_clipboard_failed_body: "অনুমতি অস্বীকৃত বা অনুপলব্ধ।",
 };
 
 export default bn;

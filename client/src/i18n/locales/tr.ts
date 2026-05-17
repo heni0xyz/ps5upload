@@ -1126,6 +1126,15 @@ payloads_tab_send: "Dosya gönder",
 payloads_description_catalog: "Seçilmiş üçüncü taraf PS5 homebrew yükleri. En son sürümü kontrol et, bir kez indir, ardından tek tıkla PS5'ine gönder. Sürümler yerel olarak önbelleğe alınır, böylece bir USB autoloader çubuğu da hazırlayabilirsin.",
 payloads_description_send: "Herhangi bir PS5 yük dosyasını — .elf, .bin, .js, .lua veya .jar (kstuff, özel homebrew yükleyicileri, browser-stage exploit'leri, eklenti komut dosyaları, BD-JB JAR'ları) — PS5'ine gönder. Bağlantı sekmesiyle aynı akış, sadece seçtiğin bir dosyaya yönlendirilmiş. Not: BD-JB tarzı .jar yükleri 9021 dışındaki bir portta JAR-uyumlu bir yükleyici gerektirir — portu yükleyicinin dinlediği şeye ayarla.",
 payloads_inventory_failed: "Yerel yük önbelleği okunamadı",
+cmdpalette_toggle_theme: "Temayı değiştir",
+cmdpalette_paste_host: "Panodan ana bilgisayarı yapıştır",
+cmdpalette_paste_host_hint: "IPv4 adresi için navigator.clipboard'ı okur",
+cmdpalette_host_updated: "Ana bilgisayar güncellendi",
+cmdpalette_host_updated_body: "Panodan {ip} olarak ayarlandı.",
+cmdpalette_no_ip_found: "IP bulunamadı",
+cmdpalette_no_ip_body: "Pano IPv4 adresi içermiyordu.",
+cmdpalette_clipboard_failed: "Pano okuma başarısız",
+cmdpalette_clipboard_failed_body: "İzin reddedildi veya kullanılamıyor.",
 };
 
 export default tr;

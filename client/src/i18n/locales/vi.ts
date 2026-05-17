@@ -1128,6 +1128,15 @@ payloads_tab_send: "Gửi tệp",
 payloads_description_catalog: "Các payload homebrew PS5 của bên thứ ba được tuyển chọn. Kiểm tra bản phát hành mới nhất, tải xuống một lần, sau đó gửi đến PS5 của bạn chỉ với một cú nhấp chuột. Các phiên bản được lưu vào bộ nhớ cache cục bộ để bạn cũng có thể gói một thanh autoloader USB.",
 payloads_description_send: "Gửi bất kỳ tệp payload PS5 nào — .elf, .bin, .js, .lua hoặc .jar (kstuff, trình tải homebrew tùy chỉnh, khai thác browser-stage, tập lệnh plugin, BD-JB JAR) — đến PS5 của bạn. Cùng luồng như tab Kết nối, chỉ trỏ đến một tệp bạn chọn. Lưu ý: payload .jar kiểu BD-JB cần một trình tải nhận biết JAR trên cổng không phải 9021 — đặt cổng thành cổng mà trình tải của bạn lắng nghe.",
 payloads_inventory_failed: "Không thể đọc bộ đệm payload cục bộ",
+cmdpalette_toggle_theme: "Chuyển đổi giao diện",
+cmdpalette_paste_host: "Dán máy chủ từ clipboard",
+cmdpalette_paste_host_hint: "Đọc navigator.clipboard tìm địa chỉ IPv4",
+cmdpalette_host_updated: "Đã cập nhật máy chủ",
+cmdpalette_host_updated_body: "Đã đặt thành {ip} từ clipboard.",
+cmdpalette_no_ip_found: "Không tìm thấy IP",
+cmdpalette_no_ip_body: "Clipboard không chứa địa chỉ IPv4.",
+cmdpalette_clipboard_failed: "Đọc clipboard thất bại",
+cmdpalette_clipboard_failed_body: "Quyền bị từ chối hoặc không khả dụng.",
 };
 
 export default vi;
