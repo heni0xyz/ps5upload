@@ -8064,18 +8064,44 @@ static int handle_smp_meta_control(runtime_state_t *state, int client_fd,
             j++;
             char action_buf[16];
             size_t alen = 0;
+            int reject = 0;
             while (j < (size_t)body_len && request_body[j] != '"' &&
                    alen + 1 < sizeof(action_buf)) {
-                action_buf[alen++] = request_body[j++];
+                unsigned char ch = (unsigned char)request_body[j++];
+                /* Reject control chars + backslash. An attacker who
+                 * sends a raw NUL or \xFF mid-string could otherwise
+                 * truncate action_buf inside this loop and have us
+                 * strcmp against a short prefix that happens to match
+                 * "start" / "run_now" / "set_poll". Backslash is
+                 * rejected so unhandled JSON escapes (st…)
+                 * can't bypass strict matching either. */
+                if (ch < 0x20 || ch == 0x7F || ch == '\\') {
+                    reject = 1;
+                    break;
+                }
+                action_buf[alen++] = (char)ch;
             }
             action_buf[alen] = '\0';
-            if      (!strcmp(action_buf, "start"))    do_start    = 1;
-            else if (!strcmp(action_buf, "run_now"))  do_run_now  = 1;
-            else if (!strcmp(action_buf, "set_poll")) do_set_poll = 1;
+            if (!reject) {
+                if      (!strcmp(action_buf, "start"))    do_start    = 1;
+                else if (!strcmp(action_buf, "run_now"))  do_run_now  = 1;
+                else if (!strcmp(action_buf, "set_poll")) do_set_poll = 1;
+            }
             break;
         }
         if (do_set_poll) {
-            (void)json_read_int_field(request_body, (size_t)body_len, "interval", &interval);
+            /* Check rc — `json_read_int_field` returns 0 when the key
+             * is missing or malformed, leaving `interval` at its 0
+             * initializer. Without this check we'd silently call
+             * `set_poll_seconds(0)` which the payload clamps to MIN=5
+             * — benign today but tomorrow's MIN tightening would
+             * surface as "user said 30 but worker sweeps every 5s".
+             * Refusing set_poll when interval is missing keeps the
+             * UI's slider value the source of truth. */
+            if (json_read_int_field(request_body, (size_t)body_len,
+                                     "interval", &interval) != 1) {
+                do_set_poll = 0;
+            }
         }
     }
 

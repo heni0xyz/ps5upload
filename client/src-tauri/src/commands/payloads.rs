@@ -714,6 +714,21 @@ pub async fn payloads_release(
         }
     }
 
+    // Allowlist guard. The catalog is a `const` baked into the
+    // binary at build time, so the only way an entry can carry a
+    // hostile `repo_host` is a malicious PR. Code review is the
+    // primary defense, but a static allowlist enforced at runtime
+    // makes that PR fail fast in dev + CI and removes the foot-gun
+    // of `repo_host` being silently treated as authoritative. New
+    // hosts go through both a code-review PR AND an allowlist edit.
+    const ALLOWED_HOSTS: &[&str] = &["github.com", "git.earthonion.com"];
+    if !ALLOWED_HOSTS.contains(&entry.repo_host) {
+        return Err(format!(
+            "catalog entry {} declares repo_host={:?} which is not in the allowlist",
+            entry.id, entry.repo_host
+        ));
+    }
+
     // GitHub uses a separate `api.github.com` host; Gitea/Forgejo
     // serve the API under the same host as the web UI at /api/v1/.
     // JSON shape is otherwise identical (verified against

@@ -63,15 +63,17 @@ jobs:
 
       # Pin to a specific SDK tag rather than `latest` so an upstream
       # SDK release that bumps offsets (or breaks a symbol) can't
-      # silently take out our release pipeline. v0.38 was the release
-      # that added 11.x + 12.x kernel offsets — we want at least that.
-      # Bump PS5_SDK_TAG when a new firmware needs support.
+      # silently take out our release pipeline. v0.39 is the release
+      # that added `getloadavg()` to prospero-libc — we now call it
+      # from hw_info.c so anything older fails to link with
+      # `undefined symbol: getloadavg`. Bump PS5_SDK_TAG when a new
+      # firmware needs support OR a new libc/kernel symbol gets used.
       #
       # `curl --retry` handles the occasional GitHub CDN hiccup so one
       # flaky network moment doesn't fail an entire release run.
       - name: Download PS5 Payload SDK
         env:
-          PS5_SDK_TAG: v0.38
+          PS5_SDK_TAG: v0.39
         run: |
           curl --retry 3 --retry-delay 5 --retry-connrefused \
             --fail --location --silent --show-error \

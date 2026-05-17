@@ -574,6 +574,18 @@ int hw_storage_get_text(char *out, size_t out_cap, size_t *out_written,
  * armed it stays for the payload's lifetime (detached, no join). */
 static atomic_int g_pinned_threshold_c   = 0;
 static atomic_int g_fan_watcher_started  = 0;
+/* Serializes the (ioctl, pin) sequence inside `hw_fan_set_threshold`.
+ *
+ * Two concurrent FTX2 callers setting different thresholds could
+ * otherwise interleave: A opens/ioctls 50 → kernel state = 50;
+ * B opens/ioctls 70 → kernel state = 70; A pins 50 → atomic = 50;
+ * B pins 70 → atomic = 70.   That sequence ends consistent, but
+ * SWAP one pair: A's ioctl 50 → kernel 50, B's ioctl 70 → kernel 70,
+ * B's pin 70 → atomic 70, A's pin 50 → atomic 50.   Now the watcher
+ * drives kernel back to 50 every 15s even though B was the most-
+ * recent caller. Holding this mutex across the whole sequence
+ * forces last-writer-wins consistency. */
+static pthread_mutex_t g_fan_set_mtx = PTHREAD_MUTEX_INITIALIZER;
 
 int hw_fan_pinned_threshold(void) {
     return atomic_load(&g_pinned_threshold_c);
@@ -665,8 +677,16 @@ int hw_fan_set_threshold(uint8_t threshold_c, const char **err_reason_out) {
     if (threshold_c < HW_FAN_THRESHOLD_MIN) threshold_c = HW_FAN_THRESHOLD_MIN;
     if (threshold_c > HW_FAN_THRESHOLD_MAX) threshold_c = HW_FAN_THRESHOLD_MAX;
 
+    /* Serialize so two concurrent callers can't end up with the
+     * kernel-state and the pin-atomic carrying different values
+     * (which would cause the watcher to drive the kernel back to
+     * whichever caller pinned last regardless of which ioctl
+     * landed last). See g_fan_set_mtx comment for the race. */
+    pthread_mutex_lock(&g_fan_set_mtx);
+
     int fd = open(ICC_FAN_DEVICE_NODE, O_RDONLY);
     if (fd < 0) {
+        pthread_mutex_unlock(&g_fan_set_mtx);
         if (err_reason_out) *err_reason_out = "icc_fan_open_failed";
         return -1;
     }
@@ -679,6 +699,7 @@ int hw_fan_set_threshold(uint8_t threshold_c, const char **err_reason_out) {
     close(fd);
 
     if (rc < 0) {
+        pthread_mutex_unlock(&g_fan_set_mtx);
         /* On firmwares where the ioctl is refused we keep a generic
          * reason — surfacing errno to the client would leak FreeBSD-
          * specific codes that aren't actionable. Useful local debug
@@ -693,6 +714,7 @@ int hw_fan_set_threshold(uint8_t threshold_c, const char **err_reason_out) {
      * the thread happened to tick before atomic_store landed, it
      * would early-exit on the still-zero pin and skip a cycle. */
     hw_fan_pin_threshold(threshold_c);
+    pthread_mutex_unlock(&g_fan_set_mtx);
     hw_fan_watcher_start_once();
     return 0;
 }

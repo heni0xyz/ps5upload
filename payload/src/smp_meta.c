@@ -96,6 +96,18 @@ static int mkdir_one(const char *path) {
 }
 
 /* Buffered copy with partial-write handling. Returns 0 on success.
+ *
+ * Security: opens the source with O_NOFOLLOW so a symlink planted by
+ * a hostile / malformed package can't redirect the read out of the
+ * source tree; opens the destination with O_NOFOLLOW + O_EXCL so a
+ * TOCTOU race that swaps `dst` for a symlink between the
+ * file_exists_nonempty() check and this open can't trick the payload
+ * (which runs with kstuff-elevated ucred) into writing attacker
+ * content into a system file via the symlink target. O_EXCL means
+ * "fail with EEXIST if the path already exists" — the caller has
+ * already verified the file does NOT exist, so on EEXIST we just
+ * lose the race and the next sweep heals it.
+ *
  * Unlinks the destination on any failure so we don't leave a
  * half-written icon0.png that file_exists_nonempty would later mistake
  * for "already healed". */
@@ -105,8 +117,13 @@ static int copy_file(const char *src, const char *dst) {
     ssize_t n;
     int rc = -1;
 
-    if ((sfd = open(src, O_RDONLY)) < 0) goto done;
-    if ((dfd = open(dst, O_CREAT | O_WRONLY | O_TRUNC, 0644)) < 0) goto done;
+    if ((sfd = open(src, O_RDONLY | O_NOFOLLOW)) < 0) goto done;
+    if ((dfd = open(dst, O_CREAT | O_WRONLY | O_EXCL | O_NOFOLLOW, 0644)) < 0) {
+        /* EEXIST = lost the race to another sweep / SMP itself;
+         * ELOOP / EFTYPE / EMLINK = symlink rejected, which is
+         * exactly what we want. Either way: leave the file alone. */
+        goto done;
+    }
 
     while ((n = read(sfd, buf, sizeof(buf))) > 0) {
         ssize_t off = 0;
@@ -122,7 +139,16 @@ static int copy_file(const char *src, const char *dst) {
 done:
     if (sfd >= 0) close(sfd);
     if (dfd >= 0) close(dfd);
-    if (rc != 0) unlink(dst);   /* don't leave half-written files behind */
+    if (rc != 0 && dfd >= 0) {
+        /* unlink can fail too (dst replaced by attacker between
+         * close and unlink); log nothing but capture errno for
+         * future debug. Without this, a leftover zero-byte file
+         * would poison the next sweep's file_exists_nonempty check
+         * via size==0 → "not present" → infinite retry. Actually
+         * size==0 already filters out via file_exists_nonempty so
+         * an unlink failure here is at worst one wasted retry. */
+        (void)unlink(dst);
+    }
     return rc;
 }
 
@@ -286,19 +312,19 @@ static void *worker_thread_fn(void *arg) {
      * chmod, but the safe-startup pause is cheap and matches their
      * proven timing. A run_now trigger short-circuits the wait.
      *
-     * Flag-clear ordering: clear AFTER sweep_once, not before. If we
-     * cleared first, a smp_meta_run_now() arriving while sweep_once
-     * was still running would land on a cleared flag and get dropped
-     * — the caller would have to wait up to `poll_seconds` for the
-     * next tick. Clearing after means the next iteration sees the
-     * flag and runs immediately. The cost is one redundant sweep when
-     * run_now arrives during a sweep, which is harmless (idempotent). */
+     * Flag-consume via atomic_exchange — earlier versions used
+     * atomic_store(0) after sweep_once, which dropped any run_now
+     * that arrived during sweep_once itself (caller had to wait up
+     * to poll_seconds for the next tick). Using atomic_exchange to
+     * READ-AND-CLEAR before the sweep means a run_now that arrives
+     * during the sweep stays set for the next iteration and triggers
+     * an immediate re-sweep — desired behavior. */
     for (int i = 0; i < 60; i++) {
         if (atomic_load(&g_run_now_flag)) break;
         sleep(1);
     }
+    (void)atomic_exchange(&g_run_now_flag, 0);
     sweep_once();
-    atomic_store(&g_run_now_flag, 0);
 
     while (1) {
         int interval = atomic_load(&g_poll_seconds);
@@ -311,8 +337,8 @@ static void *worker_thread_fn(void *arg) {
             if (atomic_load(&g_run_now_flag)) break;
             sleep(1);
         }
+        (void)atomic_exchange(&g_run_now_flag, 0);
         sweep_once();
-        atomic_store(&g_run_now_flag, 0);
     }
     return NULL;
 }
@@ -320,23 +346,34 @@ static void *worker_thread_fn(void *arg) {
 /* ── public API ───────────────────────────────────────────────── */
 
 int smp_meta_init(void) {
+    /* Hold the mutex across the entire start sequence — including
+     * pthread_create. The pre-fix dropped the lock before
+     * pthread_create, then re-took it on failure to roll g_thread_started
+     * back to 0. Window: caller A sets flag=1, drops lock, pthread_create
+     * fails; before A can re-take the lock and rollback, caller B
+     * takes the lock, sees flag=1, returns 0 ("watcher running"). B's
+     * caller then trusts the watcher to exist; it doesn't.
+     *
+     * Holding the lock across pthread_create is safe because the
+     * created worker doesn't touch g_lock until well after it spins
+     * up (the first lock acquisition in worker_thread_fn is the
+     * `g_stats.running = 1` write, line ~280, which happens after
+     * we've already returned and dropped the lock here). */
     pthread_mutex_lock(&g_lock);
     if (g_thread_started) {
         pthread_mutex_unlock(&g_lock);
         return 0;
     }
-    g_thread_started = 1;
-    pthread_mutex_unlock(&g_lock);
 
     pthread_t t;
     if (pthread_create(&t, NULL, worker_thread_fn, NULL) != 0) {
-        /* Roll the flag back so the caller can retry. */
-        pthread_mutex_lock(&g_lock);
-        g_thread_started = 0;
+        /* Don't set g_thread_started — caller retries get a clean slot. */
         pthread_mutex_unlock(&g_lock);
         return -1;
     }
     pthread_detach(t);
+    g_thread_started = 1;
+    pthread_mutex_unlock(&g_lock);
     return 0;
 }
 

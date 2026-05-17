@@ -345,11 +345,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang lld unzip
 
-      # Pin SDK tag — keep in sync with release.yml. v0.38 ships the
-      # 11.x + 12.x kernel offsets we rely on.
+      # Pin SDK tag — keep in sync with release.yml. v0.39 ships
+      # getloadavg() (which hw_info.c::hw_power_get_text now calls)
+      # and the new 11.xx/12.xx kernel offsets. Bumping from v0.38
+      # would otherwise fail with `undefined symbol: getloadavg` at
+      # link time.
       - name: Download PS5 Payload SDK
         env:
-          PS5_SDK_TAG: v0.38
+          PS5_SDK_TAG: v0.39
         run: |
           curl -L -o /tmp/ps5-payload-sdk.zip \
             "https://github.com/ps5-payload-dev/sdk/releases/download/${PS5_SDK_TAG}/ps5-payload-sdk.zip"
