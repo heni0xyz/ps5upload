@@ -122,7 +122,12 @@ export default function App() {
           }
         />
         {/* 2.12.0: send-payload merged into /payloads?tab=send. Keep
-            the old route alive as a redirect so bookmarks survive. */}
+            the old route alive as a redirect so bookmarks survive.
+            TODO(2.13.0): delete once CommandPalette + FAQ are
+            verified to no longer reference /send-payload. As of
+            2.12.0 the palette already points at /payloads?tab=send
+            directly; this redirect is just for external bookmarks
+            of a desktop-only Tauri app, which is a very small set. */}
         <Route
           path="/send-payload"
           element={<Navigate to="/payloads?tab=send" replace />}
@@ -168,7 +173,10 @@ export default function App() {
           }
         />
         {/* 2.12.0: kernel log merged into /logs?tab=kernel. Keep
-            the old route alive as a redirect so bookmarks survive. */}
+            the old route alive as a redirect so bookmarks survive.
+            TODO(2.13.0): delete once CommandPalette + FAQ are
+            verified clean of /kernel-log; palette already targets
+            /logs?tab=kernel directly. */}
         <Route
           path="/kernel-log"
           element={<Navigate to="/logs?tab=kernel" replace />}
