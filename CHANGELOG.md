@@ -4,6 +4,87 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 2.10.0
+
+Adds a full **Date & Time settings** panel to the Hardware screen
+that exposes the PS5's timezone, daylight-saving policy, NTP
+auto-sync flag, date/time format preference, and tzdata version —
+all read/writable from ps5upload. To the best of our research (see
+`reference_ps5_date_registry_keys.md`), ps5upload 2.10.0 is the
+first public PS5 homebrew project to write to the
+`SCE_REGMGR_ENT_KEY_DATE_*` registry namespace. Write side is
+marked experimental until per-key behaviour is confirmed on real
+hardware.
+
+**Important — what this does and doesn't do.** Six community-
+known gotchas are surfaced inline as an expandable warnings panel:
+
+- The PS5 has **two clocks**: the user-visible wall clock (which
+  this panel reads and writes) plus a SAMU-protected secure RTC
+  that signs trophies and licenses. **Setting the wall clock
+  cannot fake trophy timestamps.**
+- Setting the clock far in the past breaks PSN sign-in (TLS cert
+  `notBefore` validation fails).
+- Setting the clock far in the future breaks game cert validation
+  (GTAV-stuck-at-90%-load class).
+- "Use Sony's NTP" silently re-syncs the wall clock on every
+  reboot — manual time doesn't persist unless you turn it OFF
+  first.
+- DST rules are bundled in the firmware's tzdata; recently-changed
+  regions (Lebanon 2023, Mexico 2022) may be wrong until the next
+  firmware update.
+- Write side is novel territory; Sony's Settings will reset any
+  field that misbehaves.
+
+### What landed (new code paths)
+
+- New payload module `payload/src/sys_registry.c` — generic
+  `sceRegMgrGet/SetInt`, `GetStr`, and `sceRtcGetCurrentNetworkTick`
+  wrappers via `dlsym(RTLD_DEFAULT, ...)`, same envelope our
+  existing `sys_time.c` already uses for
+  `sceSystemServiceSet/GetCurrentDateTime`.
+- New FTX2 frames 136-139 (`TimeStateGet`/`Ack`/`Set`/`Ack`) and
+  matching `runtime.c` handlers (`handle_time_state_get` /
+  `handle_time_state_set`) that read every DATE key best-effort and
+  surface per-field availability flags so the desktop can degrade
+  gracefully when a key isn't reachable on the user's firmware.
+- New Rust types `PsTimeState`, `PsTimeStateSetRequest`,
+  `PsTimeStateSetResult` in `ps5upload-core/src/sys_time.rs`; new
+  `ps5_time_state_get` / `ps5_time_state_set` engine functions; new
+  axum routes `/api/ps5/time/state/get` and `/api/ps5/time/state/set`.
+- New Tauri commands `ps5_time_state_get` / `ps5_time_state_set`
+  registered in `lib.rs::invoke_handler`.
+- New `DateTimeStateCard` component on the Hardware screen.
+  Renders below the existing "System time" card. Tz/DST/format are
+  staged in a pending-edit buffer and committed in one "Apply"
+  click — same UX shape as Sony's Settings. The Apply response
+  surfaces per-field rc + err_code so the user sees exactly which
+  writes Sony accepted and which were rejected.
+- **NTP-drift indicator**: `sceRtcGetCurrentNetworkTick` (cached
+  NTP-derived tick, not a fresh sync) shown next to the wall clock
+  so a large divergence visibly flags "your manual time has drifted
+  from what NTP would say".
+- 41 new i18n keys, translated into all 17 non-English locales.
+- New memory note `reference_ps5_date_registry_keys.md` documents
+  per-key hardware-verification status and the rationale for which
+  DATE namespace keys we deliberately don't expose (devkit /
+  unknown blob formats).
+
+### What the panel intentionally does NOT do (research, then deferred)
+
+- **Secure-RTC manipulation** (trophy timestamp clock) — requires
+  kernel patches and per-firmware offset tables, out of scope.
+- **NTP-server override** (`DATE_rtc_net`) — bin8 blob format isn't
+  reverse-engineered yet; wrong write could brick the NTP daemon
+  until Settings → Init.
+- **Synthetic NTP-tick injection** (`sceRtcSetCurrentNetworkTick`) —
+  unknown impact on Sony's sync daemon and trophy / license state.
+
+These are documented in the research note for a possible later
+release after community verification.
+
+---
+
 ## 2.9.0
 
 A 4-agent self-audit (race conditions, security, silent failures,

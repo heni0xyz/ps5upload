@@ -373,6 +373,11 @@ export default function HardwareScreen() {
             payloadUp={payloadStatus === "up"}
           />
 
+          <DateTimeStateCard
+            host={host ?? ""}
+            payloadUp={payloadStatus === "up"}
+          />
+
           {/* Lifetime ICC telemetry — fetched on mount + on demand,
               not on the live-poll interval. Different cadence from
               the sensor cards above because these values barely
@@ -894,3 +899,691 @@ function SystemTimeCard({
   );
 }
 
+// ── PS5 Date & Time state card (registry-backed, new in 2.10.0) ─────────
+//
+// Sits beneath the existing SystemTimeCard. Reads the full PS5 Date
+// & Time registry surface (timezone, DST, date/time format, NTP
+// auto-sync flag, tzdata version, NTP-error counter) plus the
+// cached NTP-derived tick for drift comparison. Write side is
+// EXPERIMENTAL — we are (per the 2.10.0 research agent) the first
+// public PS5 homebrew to write these keys, and per-firmware
+// behavior isn't catalogued yet. Every write field carries a small
+// "experimental" badge so users know.
+//
+// The 6 gotchas the research agent surfaced are baked into an
+// expandable "Important to know" section at the top:
+//   1. Two clocks: wall vs secure RTC (trophies use secure RTC)
+//   2. Far-past wall clock breaks PSN sign-in (TLS cert notBefore)
+//   3. Far-future wall clock breaks game cert validation
+//   4. set_auto=1 silently re-syncs on reboot
+//   5. tzdata is bundled in firmware — old DST rules possible
+//   6. Don't touch _dbg / _ad NTP slots on retail (we don't expose)
+
+/** Wire shape returned by ps5_time_state_get. Flat — mirrors the
+ *  payload's JSON exactly. `*_avail` flags let us grey out fields
+ *  the payload couldn't read on this firmware. */
+interface PsTimeStateJson {
+  ok: boolean;
+  truncated?: boolean;
+  tz_index: number;
+  tz_index_avail: boolean;
+  tz_index_err: number;
+  date_format: number;
+  date_format_avail: boolean;
+  date_format_err: number;
+  time_format: number;
+  time_format_avail: boolean;
+  time_format_err: number;
+  summer_policy: number;
+  summer_policy_avail: boolean;
+  summer_policy_err: number;
+  set_auto: number;
+  set_auto_avail: boolean;
+  set_auto_err: number;
+  is_summer_time: number;
+  is_summer_time_avail: boolean;
+  is_summer_time_err: number;
+  utc_offset_sec: number;
+  utc_offset_sec_avail: boolean;
+  utc_offset_sec_err: number;
+  tz_offset_min: number;
+  tz_offset_min_avail: boolean;
+  tz_offset_min_err: number;
+  rtc_error_count: number;
+  rtc_error_count_avail: boolean;
+  rtc_error_count_err: number;
+  tzdata: string;
+  tzdata_avail: boolean;
+  tzdata_err: number;
+  ntp_tick_unix: number;
+  ntp_tick_avail: boolean;
+  ntp_tick_err: number;
+  wall_clock_unix: number;
+  wall_clock_avail: boolean;
+  wall_clock_err: number;
+}
+
+interface PsTimeStateSetJson {
+  ok: boolean;
+  any_attempted: boolean;
+  truncated?: boolean;
+  tz_index_attempted: boolean;
+  tz_index_rc: number;
+  tz_index_err: number;
+  date_format_attempted: boolean;
+  date_format_rc: number;
+  date_format_err: number;
+  time_format_attempted: boolean;
+  time_format_rc: number;
+  time_format_err: number;
+  summer_policy_attempted: boolean;
+  summer_policy_rc: number;
+  summer_policy_err: number;
+  set_auto_attempted: boolean;
+  set_auto_rc: number;
+  set_auto_err: number;
+}
+
+/** Format the cached NTP-derived tick vs wall clock as a drift
+ *  string. Returns null when either side is missing so the caller
+ *  can hide the row entirely instead of showing "n/a". */
+function formatNtpDrift(state: PsTimeStateJson): string | null {
+  if (!state.ntp_tick_avail || !state.wall_clock_avail) return null;
+  if (state.ntp_tick_unix < 0 || state.wall_clock_unix < 0) return null;
+  const diff = state.wall_clock_unix - state.ntp_tick_unix;
+  const abs = Math.abs(diff);
+  const sign = diff >= 0 ? "+" : "−";
+  if (abs < 60) return `${sign}${abs}s`;
+  if (abs < 3600) return `${sign}${Math.floor(abs / 60)}m ${abs % 60}s`;
+  return `${sign}${Math.floor(abs / 3600)}h ${Math.floor((abs % 3600) / 60)}m`;
+}
+
+function DateTimeStateCard({
+  host,
+  payloadUp,
+}: {
+  host: string;
+  payloadUp: boolean;
+}) {
+  const tr = useTr();
+  const [state, setState] = useState<PsTimeStateJson | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [writeBusy, setWriteBusy] = useState(false);
+  const [writeResult, setWriteResult] = useState<PsTimeStateSetJson | null>(
+    null,
+  );
+  const [showGotchas, setShowGotchas] = useState(false);
+
+  // Pending-edit buffer: each control writes to here on change, then
+  // a single Apply button POSTs the whole batch. Lets the user stage
+  // multiple changes (tz + format + dst) and commit atomically
+  // instead of one per field — same UX as Sony's Settings screen.
+  const [pendingTz, setPendingTz] = useState<number | null>(null);
+  const [pendingDateFormat, setPendingDateFormat] = useState<number | null>(
+    null,
+  );
+  const [pendingTimeFormat, setPendingTimeFormat] = useState<number | null>(
+    null,
+  );
+  const [pendingSummer, setPendingSummer] = useState<number | null>(null);
+  const [pendingSetAuto, setPendingSetAuto] = useState<number | null>(null);
+
+  const hasPending =
+    pendingTz !== null ||
+    pendingDateFormat !== null ||
+    pendingTimeFormat !== null ||
+    pendingSummer !== null ||
+    pendingSetAuto !== null;
+
+  const refresh = useCallback(async () => {
+    if (!payloadUp || !host.trim()) return;
+    // Host-stale guard (mirrors the rest of Hardware).
+    const probedHost = host;
+    const isStale = () =>
+      useConnectionStore.getState().host !== probedHost;
+    setLoading(true);
+    try {
+      const addr = `${probedHost}:${PS5_PAYLOAD_PORT}`;
+      const r = (await invoke("ps5_time_state_get", { addr })) as PsTimeStateJson;
+      if (isStale()) return;
+      setState(r);
+      setError(null);
+    } catch (e) {
+      if (isStale()) return;
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  }, [host, payloadUp]);
+
+  useEffect(() => {
+    if (!payloadUp) return;
+    void refresh();
+  }, [payloadUp, refresh]);
+
+  const handleApply = useCallback(async () => {
+    if (!hasPending || writeBusy) return;
+    setWriteBusy(true);
+    setWriteResult(null);
+    try {
+      const addr = `${host}:${PS5_PAYLOAD_PORT}`;
+      const args: Record<string, unknown> = { addr };
+      if (pendingTz !== null) args.tzIndex = pendingTz;
+      if (pendingDateFormat !== null) args.dateFormat = pendingDateFormat;
+      if (pendingTimeFormat !== null) args.timeFormat = pendingTimeFormat;
+      if (pendingSummer !== null) args.summerPolicy = pendingSummer;
+      if (pendingSetAuto !== null) args.setAuto = pendingSetAuto;
+      const r = (await invoke("ps5_time_state_set", args)) as PsTimeStateSetJson;
+      setWriteResult(r);
+      // Clear pending only for fields that succeeded; leave the
+      // others so the user sees what's still uncommitted.
+      if (r.tz_index_attempted && r.tz_index_rc === 0) setPendingTz(null);
+      if (r.date_format_attempted && r.date_format_rc === 0)
+        setPendingDateFormat(null);
+      if (r.time_format_attempted && r.time_format_rc === 0)
+        setPendingTimeFormat(null);
+      if (r.summer_policy_attempted && r.summer_policy_rc === 0)
+        setPendingSummer(null);
+      if (r.set_auto_attempted && r.set_auto_rc === 0) setPendingSetAuto(null);
+      // Re-read so the panel reflects what actually landed.
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setWriteBusy(false);
+    }
+  }, [
+    hasPending,
+    writeBusy,
+    host,
+    pendingTz,
+    pendingDateFormat,
+    pendingTimeFormat,
+    pendingSummer,
+    pendingSetAuto,
+    refresh,
+  ]);
+
+  const ntpDrift = state ? formatNtpDrift(state) : null;
+
+  // Derived display values: current effective value = pending if set,
+  // otherwise the read-back value from state.
+  const effectiveTz = pendingTz ?? state?.tz_index ?? 0;
+  const effectiveDateFormat = pendingDateFormat ?? state?.date_format ?? 0;
+  const effectiveTimeFormat = pendingTimeFormat ?? state?.time_format ?? 0;
+  const effectiveSummer = pendingSummer ?? state?.summer_policy ?? 0;
+  const effectiveSetAuto = pendingSetAuto ?? state?.set_auto ?? 0;
+
+  return (
+    <section className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4">
+      <header className="mb-3 flex items-center justify-between gap-2 text-xs uppercase tracking-wide text-[var(--color-muted)]">
+        <span className="flex items-center gap-2">
+          <CalendarClock size={14} />
+          <span>
+            {tr("hardware_dtstate_title", undefined, "Date & Time settings")}
+          </span>
+          <span className="rounded-full border border-[var(--color-warn)] px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-[var(--color-warn)]">
+            {tr("hardware_dtstate_experimental", undefined, "experimental")}
+          </span>
+        </span>
+        <button
+          type="button"
+          onClick={() => setShowGotchas((v) => !v)}
+          className="text-[10px] underline decoration-dotted hover:text-[var(--color-text)]"
+        >
+          {showGotchas
+            ? tr("hardware_dtstate_hide_warnings", undefined, "Hide warnings")
+            : tr("hardware_dtstate_show_warnings", undefined, "Important warnings")}
+        </button>
+      </header>
+
+      {/* Gotcha panel — collapsible because most users will read it
+          once. Six warnings: two clocks, past wall clock breaks PSN,
+          future wall clock breaks game certs, set_auto re-syncs on
+          reboot, tzdata bundled in firmware, secure RTC owns trophy
+          times. */}
+      {showGotchas && (
+        <div className="mb-3 rounded-md border border-[var(--color-warn)] bg-[var(--color-surface)] p-2 text-[11px] text-[var(--color-muted)]">
+          <ul className="list-disc space-y-1 pl-4">
+            <li>
+              {tr(
+                "hardware_dtstate_warn_two_clocks",
+                undefined,
+                "PS5 has two clocks: this user-visible wall clock, plus a kernel-protected secure RTC that signs trophies and licenses. Setting this clock CAN'T fake trophy timestamps.",
+              )}
+            </li>
+            <li>
+              {tr(
+                "hardware_dtstate_warn_past",
+                undefined,
+                "Setting the clock far in the past breaks PSN sign-in (TLS certificate validation fails).",
+              )}
+            </li>
+            <li>
+              {tr(
+                "hardware_dtstate_warn_future",
+                undefined,
+                "Setting the clock far in the future breaks signed-game validation (GTAV-stuck-at-90%-load class).",
+              )}
+            </li>
+            <li>
+              {tr(
+                "hardware_dtstate_warn_set_auto",
+                undefined,
+                "If \"Use Sony's NTP\" is ON, your PS5 silently re-syncs the wall clock on every reboot — manual time doesn't persist unless you turn it OFF first.",
+              )}
+            </li>
+            <li>
+              {tr(
+                "hardware_dtstate_warn_tzdata",
+                undefined,
+                "DST rules ship in the firmware's tzdata. Recently-changed regions (Lebanon 2023, Mexico 2022) may be wrong until the next firmware update.",
+              )}
+            </li>
+            <li>
+              {tr(
+                "hardware_dtstate_warn_novel",
+                undefined,
+                "Write side of this panel is novel territory — ps5upload is the first homebrew to set these registry keys. Sony's Settings will reset anything that misbehaves.",
+              )}
+            </li>
+          </ul>
+        </div>
+      )}
+
+      {!state && !error && (
+        <div className="text-[11px] text-[var(--color-muted)]">
+          {loading
+            ? tr("hardware_dtstate_loading", undefined, "Loading…")
+            : tr(
+                "hardware_dtstate_no_payload",
+                undefined,
+                "Connect to a PS5 with ps5upload payload running to see Date & Time settings.",
+              )}
+        </div>
+      )}
+
+      {state && (
+        <div className="space-y-3 text-xs">
+          {/* NTP drift row — shown only when both NTP tick and wall
+              clock read successfully. Positive = wall clock is
+              AHEAD of what NTP would say. */}
+          {ntpDrift !== null && (
+            <StatRow
+              label={tr(
+                "hardware_dtstate_ntp_drift",
+                undefined,
+                "Wall vs NTP",
+              )}
+              value={ntpDrift}
+              hint={tr(
+                "hardware_dtstate_ntp_drift_hint",
+                undefined,
+                "Difference between the PS5's wall clock and what Sony's NTP says (cached from last sync). Large drift = manual time has wandered.",
+              )}
+            />
+          )}
+
+          {/* Timezone — index editor + offset display. The tz_index
+              is an enum into Sony's bundled tzdata table; the
+              user-friendly mapping isn't documented per-firmware so
+              we expose the raw index plus the offset for confirmation. */}
+          <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-2">
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <span className="text-[11px] font-medium">
+                {tr("hardware_dtstate_tz", undefined, "Timezone")}
+              </span>
+              {state.tz_offset_min_avail && (
+                <span className="text-[10px] text-[var(--color-muted)]">
+                  {tr(
+                    "hardware_dtstate_tz_offset",
+                    {
+                      sign: state.tz_offset_min >= 0 ? "+" : "−",
+                      h: Math.floor(Math.abs(state.tz_offset_min) / 60),
+                      m: (Math.abs(state.tz_offset_min) % 60)
+                        .toString()
+                        .padStart(2, "0"),
+                    },
+                    `UTC ${state.tz_offset_min >= 0 ? "+" : "−"}${Math.floor(Math.abs(state.tz_offset_min) / 60)}:${(Math.abs(state.tz_offset_min) % 60).toString().padStart(2, "0")}`,
+                  )}
+                </span>
+              )}
+            </div>
+            {state.tz_index_avail ? (
+              <input
+                type="number"
+                value={effectiveTz}
+                onChange={(e) => {
+                  const n = parseInt(e.target.value, 10);
+                  setPendingTz(Number.isFinite(n) && n >= 0 ? n : null);
+                }}
+                className="w-24 rounded border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2 py-1 text-xs"
+                min={0}
+                max={500}
+              />
+            ) : (
+              <span className="text-[11px] text-[var(--color-muted)]">
+                {tr(
+                  "hardware_dtstate_field_unavailable",
+                  undefined,
+                  "(not readable on this firmware)",
+                )}
+              </span>
+            )}
+            {pendingTz !== null && (
+              <span className="ml-2 text-[10px] text-[var(--color-accent)]">
+                {tr("hardware_dtstate_pending", undefined, "(pending)")}
+              </span>
+            )}
+          </div>
+
+          {/* Date format + Time format pair */}
+          <div className="grid grid-cols-2 gap-2">
+            <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-2">
+              <div className="mb-1 text-[11px] font-medium">
+                {tr(
+                  "hardware_dtstate_date_format",
+                  undefined,
+                  "Date format",
+                )}
+              </div>
+              <select
+                value={effectiveDateFormat}
+                disabled={!state.date_format_avail}
+                onChange={(e) => setPendingDateFormat(parseInt(e.target.value, 10))}
+                className="w-full rounded border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2 py-1 text-xs"
+              >
+                <option value={0}>
+                  {tr("hardware_dtstate_date_fmt_ymd", undefined, "YYYY/MM/DD")}
+                </option>
+                <option value={1}>
+                  {tr("hardware_dtstate_date_fmt_dmy", undefined, "DD/MM/YYYY")}
+                </option>
+                <option value={2}>
+                  {tr("hardware_dtstate_date_fmt_mdy", undefined, "MM/DD/YYYY")}
+                </option>
+              </select>
+              {pendingDateFormat !== null && (
+                <span className="text-[10px] text-[var(--color-accent)]">
+                  {tr("hardware_dtstate_pending", undefined, "(pending)")}
+                </span>
+              )}
+            </div>
+            <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-2">
+              <div className="mb-1 text-[11px] font-medium">
+                {tr(
+                  "hardware_dtstate_time_format",
+                  undefined,
+                  "Time format",
+                )}
+              </div>
+              <select
+                value={effectiveTimeFormat}
+                disabled={!state.time_format_avail}
+                onChange={(e) => setPendingTimeFormat(parseInt(e.target.value, 10))}
+                className="w-full rounded border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2 py-1 text-xs"
+              >
+                <option value={0}>{tr("hardware_dtstate_24h", undefined, "24-hour")}</option>
+                <option value={1}>{tr("hardware_dtstate_12h", undefined, "12-hour")}</option>
+              </select>
+              {pendingTimeFormat !== null && (
+                <span className="text-[10px] text-[var(--color-accent)]">
+                  {tr("hardware_dtstate_pending", undefined, "(pending)")}
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* DST policy + currently-in-DST status */}
+          <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-2">
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <span className="text-[11px] font-medium">
+                {tr(
+                  "hardware_dtstate_dst",
+                  undefined,
+                  "Daylight saving time",
+                )}
+              </span>
+              {state.is_summer_time_avail && (
+                <span className="text-[10px] text-[var(--color-muted)]">
+                  {state.is_summer_time
+                    ? tr(
+                        "hardware_dtstate_currently_dst",
+                        undefined,
+                        "currently observing DST",
+                      )
+                    : tr(
+                        "hardware_dtstate_not_currently_dst",
+                        undefined,
+                        "not observing DST",
+                      )}
+                </span>
+              )}
+            </div>
+            <select
+              value={effectiveSummer}
+              disabled={!state.summer_policy_avail}
+              onChange={(e) => setPendingSummer(parseInt(e.target.value, 10))}
+              className="w-full rounded border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2 py-1 text-xs"
+            >
+              <option value={0}>
+                {tr("hardware_dtstate_dst_off", undefined, "Off")}
+              </option>
+              <option value={1}>
+                {tr("hardware_dtstate_dst_auto", undefined, "Auto (tzdata-driven)")}
+              </option>
+              <option value={2}>
+                {tr("hardware_dtstate_dst_on", undefined, "Always on (manual)")}
+              </option>
+            </select>
+            {pendingSummer !== null && (
+              <span className="text-[10px] text-[var(--color-accent)]">
+                {tr("hardware_dtstate_pending", undefined, "(pending)")}
+              </span>
+            )}
+          </div>
+
+          {/* NTP auto-sync toggle + error-count diagnostic */}
+          <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-2">
+            <label className="flex items-center justify-between gap-2 text-[11px]">
+              <span>
+                <span className="font-medium">
+                  {tr(
+                    "hardware_dtstate_set_auto",
+                    undefined,
+                    "Use Sony's NTP (auto-sync wall clock)",
+                  )}
+                </span>
+                {pendingSetAuto !== null && (
+                  <span className="ml-1 text-[10px] text-[var(--color-accent)]">
+                    {tr("hardware_dtstate_pending", undefined, "(pending)")}
+                  </span>
+                )}
+              </span>
+              <input
+                type="checkbox"
+                checked={effectiveSetAuto === 1}
+                disabled={!state.set_auto_avail}
+                onChange={(e) => setPendingSetAuto(e.target.checked ? 1 : 0)}
+                className="h-4 w-4"
+              />
+            </label>
+            {state.rtc_error_count_avail && (
+              <div className="mt-1 text-[10px] text-[var(--color-muted)]">
+                {tr(
+                  "hardware_dtstate_ntp_errors",
+                  { n: state.rtc_error_count },
+                  `NTP sync failures: ${state.rtc_error_count}`,
+                )}
+                {state.rtc_error_count > 5 && (
+                  <span className="ml-1 text-[var(--color-warn)]">
+                    {tr(
+                      "hardware_dtstate_ntp_errors_hint",
+                      undefined,
+                      "(DNS broken? UDP 123 blocked?)",
+                    )}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* tzdata version footer — lets users notice when a firmware
+              update silently shipped new DST rules. */}
+          {state.tzdata_avail && state.tzdata.length > 0 && (
+            <div className="text-[10px] text-[var(--color-muted)]">
+              {tr(
+                "hardware_dtstate_tzdata_version",
+                { version: state.tzdata },
+                `tzdata version: ${state.tzdata}`,
+              )}
+            </div>
+          )}
+
+          {/* Apply button — only shown when there's something pending. */}
+          {hasPending && (
+            <div className="flex items-center gap-2 pt-2">
+              <Button
+                variant="primary"
+                size="sm"
+                disabled={writeBusy}
+                onClick={handleApply}
+              >
+                {writeBusy
+                  ? tr("hardware_dtstate_applying", undefined, "Applying…")
+                  : tr("hardware_dtstate_apply", undefined, "Apply changes")}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setPendingTz(null);
+                  setPendingDateFormat(null);
+                  setPendingTimeFormat(null);
+                  setPendingSummer(null);
+                  setPendingSetAuto(null);
+                }}
+              >
+                {tr("hardware_dtstate_discard", undefined, "Discard")}
+              </Button>
+            </div>
+          )}
+
+          {/* Result line — surface per-field outcome when any field
+              was rejected so the user sees which writes took and
+              which didn't. */}
+          {writeResult && (
+            <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-2 text-[11px]">
+              {writeResult.ok ? (
+                <div className="text-[var(--color-good)]">
+                  {tr(
+                    "hardware_dtstate_apply_ok",
+                    undefined,
+                    "Applied. Sony's Settings will reflect the change after the next foreground render.",
+                  )}
+                </div>
+              ) : (
+                <>
+                  <div className="text-[var(--color-bad)]">
+                    {tr(
+                      "hardware_dtstate_apply_partial",
+                      undefined,
+                      "Some writes were rejected — see below.",
+                    )}
+                  </div>
+                  <ul className="mt-1 space-y-0.5 text-[10px] text-[var(--color-muted)]">
+                    {writeResult.tz_index_attempted &&
+                      writeResult.tz_index_rc !== 0 && (
+                        <li>
+                          {tr(
+                            "hardware_dtstate_field_err",
+                            {
+                              field: "tz_index",
+                              rc: writeResult.tz_index_rc,
+                              err: writeResult.tz_index_err
+                                .toString(16)
+                                .padStart(8, "0"),
+                            },
+                            `tz_index rc=${writeResult.tz_index_rc} err=0x${writeResult.tz_index_err.toString(16).padStart(8, "0")}`,
+                          )}
+                        </li>
+                      )}
+                    {writeResult.date_format_attempted &&
+                      writeResult.date_format_rc !== 0 && (
+                        <li>
+                          {tr(
+                            "hardware_dtstate_field_err",
+                            {
+                              field: "date_format",
+                              rc: writeResult.date_format_rc,
+                              err: writeResult.date_format_err
+                                .toString(16)
+                                .padStart(8, "0"),
+                            },
+                            `date_format rc=${writeResult.date_format_rc} err=0x${writeResult.date_format_err.toString(16).padStart(8, "0")}`,
+                          )}
+                        </li>
+                      )}
+                    {writeResult.time_format_attempted &&
+                      writeResult.time_format_rc !== 0 && (
+                        <li>
+                          {tr(
+                            "hardware_dtstate_field_err",
+                            {
+                              field: "time_format",
+                              rc: writeResult.time_format_rc,
+                              err: writeResult.time_format_err
+                                .toString(16)
+                                .padStart(8, "0"),
+                            },
+                            `time_format rc=${writeResult.time_format_rc} err=0x${writeResult.time_format_err.toString(16).padStart(8, "0")}`,
+                          )}
+                        </li>
+                      )}
+                    {writeResult.summer_policy_attempted &&
+                      writeResult.summer_policy_rc !== 0 && (
+                        <li>
+                          {tr(
+                            "hardware_dtstate_field_err",
+                            {
+                              field: "summer_policy",
+                              rc: writeResult.summer_policy_rc,
+                              err: writeResult.summer_policy_err
+                                .toString(16)
+                                .padStart(8, "0"),
+                            },
+                            `summer_policy rc=${writeResult.summer_policy_rc} err=0x${writeResult.summer_policy_err.toString(16).padStart(8, "0")}`,
+                          )}
+                        </li>
+                      )}
+                    {writeResult.set_auto_attempted &&
+                      writeResult.set_auto_rc !== 0 && (
+                        <li>
+                          {tr(
+                            "hardware_dtstate_field_err",
+                            {
+                              field: "set_auto",
+                              rc: writeResult.set_auto_rc,
+                              err: writeResult.set_auto_err
+                                .toString(16)
+                                .padStart(8, "0"),
+                            },
+                            `set_auto rc=${writeResult.set_auto_rc} err=0x${writeResult.set_auto_err.toString(16).padStart(8, "0")}`,
+                          )}
+                        </li>
+                      )}
+                  </ul>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {error && (
+        <div className="mt-2 text-[11px] text-[var(--color-bad)]">{error}</div>
+      )}
+    </section>
+  );
+}

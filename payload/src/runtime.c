@@ -30,6 +30,7 @@
 #include "register.h"
 #include "hw_info.h"
 #include "sys_time.h"
+#include "sys_registry.h"
 #include "proc_list.h"
 #include "blake3.h"
 
@@ -266,6 +267,10 @@ extern int posix_fallocate(int fd, off_t offset, off_t len);
 #define FTX2_FRAME_TIME_GET_ACK             133u
 #define FTX2_FRAME_TIME_SET                 134u
 #define FTX2_FRAME_TIME_SET_ACK             135u
+#define FTX2_FRAME_TIME_STATE_GET           136u
+#define FTX2_FRAME_TIME_STATE_GET_ACK       137u
+#define FTX2_FRAME_TIME_STATE_SET           138u
+#define FTX2_FRAME_TIME_STATE_SET_ACK       139u
 /* Where we place mount points. Scoped under /mnt/ps5upload/ so it
  * never collides with mount paths owned by other utilities. */
 #define FS_MOUNT_BASE "/mnt/ps5upload"
@@ -7705,6 +7710,291 @@ static int handle_time_set(runtime_state_t *state, int client_fd,
                       body, (uint64_t)n);
 }
 
+/* ── PS5 Date & Time state (registry-backed) ─────────────────────────────
+ *
+ * Reads (TIME_STATE_GET) and writes (TIME_STATE_SET) the SCE registry
+ * DATE_* keyspace — timezone, DST policy, date/time format,
+ * auto-sync (NTP) flag, tzdata version, NTP-error counter — plus
+ * the libSceRtc NTP-derived tick (cached, no fresh sync).
+ *
+ * GET is straightforward: one read per key, JSON-encode with
+ * per-field `*_avail` flags so the desktop can grey out fields the
+ * payload couldn't read on this firmware (Sony's runtime exports
+ * vary per FW; not all DATE_* keys may be reachable everywhere).
+ *
+ * SET takes a JSON request with OPTIONAL fields — only present
+ * fields get written. The response surfaces per-field rc + err_code
+ * so the user can see "set_auto succeeded but tz_index was
+ * rejected" instead of one opaque ok/fail. Same ucred-elevation
+ * envelope as TIME_SET.
+ *
+ * Novel territory in 2.10.0 — first public PS5 homebrew to write
+ * to this namespace. See reference_ps5_date_registry_keys.md for
+ * the hardware-verification status of each key. */
+
+/* Helper: write a `"<name>":<int>,"<name>_avail":<bool>` JSON pair
+ * for one registry int field, given the read rc + value. Returns
+ * bytes written. Caller appends the trailing comma if more fields
+ * follow. Used to keep handle_time_state_get's snprintf chain
+ * readable instead of 10 separate conditional branches. */
+static int append_state_int_field(char *out, size_t cap,
+                                   const char *name,
+                                   int rc, int val, uint32_t err) {
+    if (rc == 0) {
+        return snprintf(out, cap,
+                        "\"%s\":%d,\"%s_avail\":true,\"%s_err\":0",
+                        name, val, name, name);
+    }
+    return snprintf(out, cap,
+                    "\"%s\":0,\"%s_avail\":false,\"%s_err\":%u",
+                    name, name, name, (unsigned)err);
+}
+
+static int handle_time_state_get(runtime_state_t *state, int client_fd,
+                                   uint64_t trace_id) {
+    if (!state) return -1;
+
+    /* Read every key. None of these failing should abort the
+     * response — the desktop wants partial data with per-field
+     * availability so it can render a "tz_index unreadable on this
+     * firmware" tooltip rather than an empty card. */
+    int tz_index = 0;          uint32_t tz_err = 0;
+    int date_fmt = 0;          uint32_t date_fmt_err = 0;
+    int time_fmt = 0;          uint32_t time_fmt_err = 0;
+    int summer_pol = 0;        uint32_t summer_pol_err = 0;
+    int set_auto = 0;          uint32_t set_auto_err = 0;
+    int is_summer = 0;         uint32_t is_summer_err = 0;
+    int utc_off_sec = 0;       uint32_t utc_off_sec_err = 0;
+    int tz_off_min = 0;        uint32_t tz_off_min_err = 0;
+    int rtc_err_count = 0;     uint32_t rtc_err_count_err = 0;
+    char tzdata_ver[32] = {0}; uint32_t tzdata_ver_err = 0;
+    int64_t ntp_tick_unix = -1; uint32_t ntp_tick_err = 0;
+    sce_datetime_t wall_dt;     uint32_t wall_err = 0;
+    memset(&wall_dt, 0, sizeof(wall_dt));
+
+    int tz_rc          = sys_registry_get_int(SCE_KEY_DATE_TIME_ZONE,
+                                                &tz_index, &tz_err);
+    int date_fmt_rc    = sys_registry_get_int(SCE_KEY_DATE_DATE_FORMAT,
+                                                &date_fmt, &date_fmt_err);
+    int time_fmt_rc    = sys_registry_get_int(SCE_KEY_DATE_TIME_FORMAT,
+                                                &time_fmt, &time_fmt_err);
+    int summer_pol_rc  = sys_registry_get_int(SCE_KEY_DATE_SUMMER_TIME,
+                                                &summer_pol, &summer_pol_err);
+    int set_auto_rc    = sys_registry_get_int(SCE_KEY_DATE_SET_AUTO,
+                                                &set_auto, &set_auto_err);
+    int is_summer_rc   = sys_registry_get_int(SCE_KEY_DATE_IS_SUMMER_TIME,
+                                                &is_summer, &is_summer_err);
+    int utc_off_rc     = sys_registry_get_int(SCE_KEY_DATE_UTC_OFFSET,
+                                                &utc_off_sec, &utc_off_sec_err);
+    int tz_off_rc      = sys_registry_get_int(SCE_KEY_DATE_TIMEZONE_OFFSET,
+                                                &tz_off_min, &tz_off_min_err);
+    int rtc_err_rc     = sys_registry_get_int(SCE_KEY_DATE_RTC_ERROR_COUNT,
+                                                &rtc_err_count, &rtc_err_count_err);
+    int tzdata_rc      = sys_registry_get_str(SCE_KEY_DATE_TZDATA_UPDATE,
+                                                tzdata_ver, sizeof(tzdata_ver),
+                                                &tzdata_ver_err);
+    int ntp_tick_rc    = sys_registry_get_ntp_tick_unix(&ntp_tick_unix,
+                                                          &ntp_tick_err);
+    int wall_rc        = sys_time_get(&wall_dt, &wall_err);
+
+    /* Build response. JSON grows up to ~1.2 KB with all fields
+     * populated; sizing to 2 KB gives plenty of slack for the
+     * per-field err_code expansions. Each append_state_int_field
+     * returns the bytes written; we accumulate `off` and check for
+     * truncation after every append (snprintf semantics: returns
+     * the bytes that WOULD have been written, possibly > cap-left). */
+    char body[2048];
+    char *p = body;
+    size_t cap = sizeof(body);
+    int n;
+
+    n = snprintf(p, cap, "{\"ok\":true,");
+    if (n < 0 || (size_t)n >= cap) goto truncated;
+    p += n; cap -= (size_t)n;
+
+#define APPEND_INT_FIELD(name, rc, val, err) do { \
+    n = append_state_int_field(p, cap, name, rc, val, err); \
+    if (n < 0 || (size_t)n >= cap) goto truncated; \
+    p += n; cap -= (size_t)n; \
+    if (cap < 2) goto truncated; \
+    *p++ = ','; cap -= 1; \
+} while (0)
+
+    APPEND_INT_FIELD("tz_index",         tz_rc,          tz_index,      tz_err);
+    APPEND_INT_FIELD("date_format",      date_fmt_rc,    date_fmt,      date_fmt_err);
+    APPEND_INT_FIELD("time_format",      time_fmt_rc,    time_fmt,      time_fmt_err);
+    APPEND_INT_FIELD("summer_policy",    summer_pol_rc,  summer_pol,    summer_pol_err);
+    APPEND_INT_FIELD("set_auto",         set_auto_rc,    set_auto,      set_auto_err);
+    APPEND_INT_FIELD("is_summer_time",   is_summer_rc,   is_summer,     is_summer_err);
+    APPEND_INT_FIELD("utc_offset_sec",   utc_off_rc,     utc_off_sec,   utc_off_sec_err);
+    APPEND_INT_FIELD("tz_offset_min",    tz_off_rc,      tz_off_min,    tz_off_min_err);
+    APPEND_INT_FIELD("rtc_error_count",  rtc_err_rc,     rtc_err_count, rtc_err_count_err);
+
+#undef APPEND_INT_FIELD
+
+    /* tzdata version (string). JSON-escape isn't strictly needed
+     * since Sony's format is `[0-9a-z.]+` (e.g. "2023d"), but be
+     * defensive — pass through any printable ASCII and refuse the
+     * non-printables. */
+    char tzdata_safe[64];
+    {
+        size_t si = 0;
+        for (size_t i = 0; i < sizeof(tzdata_ver) && tzdata_ver[i] != '\0' &&
+             si + 1 < sizeof(tzdata_safe); i++) {
+            unsigned char c = (unsigned char)tzdata_ver[i];
+            if (c >= 0x20 && c <= 0x7E && c != '"' && c != '\\') {
+                tzdata_safe[si++] = (char)c;
+            } else {
+                tzdata_safe[si++] = '?';
+            }
+        }
+        tzdata_safe[si] = '\0';
+    }
+    n = snprintf(p, cap,
+                  "\"tzdata\":\"%s\",\"tzdata_avail\":%s,\"tzdata_err\":%u,",
+                  tzdata_safe,
+                  tzdata_rc == 0 ? "true" : "false",
+                  (unsigned)tzdata_ver_err);
+    if (n < 0 || (size_t)n >= cap) goto truncated;
+    p += n; cap -= (size_t)n;
+
+    /* NTP tick (cached, signed unix seconds). -1 sentinel when read
+     * failed; the desktop computes drift only when both ntp_tick and
+     * wall_clock_unix are non-negative. */
+    n = snprintf(p, cap,
+                  "\"ntp_tick_unix\":%lld,\"ntp_tick_avail\":%s,\"ntp_tick_err\":%u,",
+                  (long long)ntp_tick_unix,
+                  ntp_tick_rc == 0 ? "true" : "false",
+                  (unsigned)ntp_tick_err);
+    if (n < 0 || (size_t)n >= cap) goto truncated;
+    p += n; cap -= (size_t)n;
+
+    /* Wall clock as the same epoch shape, derived from the
+     * sce_datetime_t we already read. Computed via the same UTC-only
+     * convention sys_time_set uses for prior/new_unix in TIME_SET_ACK
+     * — keeps drift comparisons apples-to-apples. */
+    int64_t wall_unix = -1;
+    if (wall_rc == 0) {
+        struct tm tm;
+        memset(&tm, 0, sizeof(tm));
+        tm.tm_year = (int)wall_dt.year - 1900;
+        tm.tm_mon  = (int)wall_dt.month - 1;
+        tm.tm_mday = (int)wall_dt.day;
+        tm.tm_hour = (int)wall_dt.hour;
+        tm.tm_min  = (int)wall_dt.minute;
+        tm.tm_sec  = (int)wall_dt.second;
+        time_t t = timegm(&tm);
+        if (t != (time_t)-1) wall_unix = (int64_t)t;
+    }
+    n = snprintf(p, cap,
+                  "\"wall_clock_unix\":%lld,\"wall_clock_avail\":%s,\"wall_clock_err\":%u}",
+                  (long long)wall_unix,
+                  wall_rc == 0 ? "true" : "false",
+                  (unsigned)wall_err);
+    if (n < 0 || (size_t)n >= cap) goto truncated;
+    p += n;
+
+    pthread_mutex_lock(&state->state_mtx);
+    state->command_count += 1;
+    pthread_mutex_unlock(&state->state_mtx);
+    return send_frame(client_fd, FTX2_FRAME_TIME_STATE_GET_ACK, 0, trace_id,
+                      body, (uint64_t)(p - body));
+
+truncated: {
+    /* Last-resort fallback — any field above blew the buffer.
+     * Shouldn't happen at 2 KB but the alternative (return -1 and
+     * drop the connection) is worse for the user than a stub
+     * response. */
+    const char *fb = "{\"ok\":false,\"err_code\":0,\"truncated\":true}";
+    return send_frame(client_fd, FTX2_FRAME_TIME_STATE_GET_ACK, 0, trace_id,
+                      fb, (uint64_t)strlen(fb));
+}
+}
+
+static int handle_time_state_set(runtime_state_t *state, int client_fd,
+                                   uint64_t trace_id,
+                                   const char *request_body,
+                                   uint64_t body_len) {
+    if (!state) return -1;
+    if (!request_body || body_len == 0) {
+        const char *err = "{\"ok\":false,\"err_code\":3758108673}"; /* SYS_REGISTRY_ERR_NULL_ARG */
+        return send_frame(client_fd, FTX2_FRAME_TIME_STATE_SET_ACK, 0, trace_id,
+                          err, (uint64_t)strlen(err));
+    }
+
+    /* Optional fields. json_read_int_field returns 0 if the key
+     * isn't present — we use that as "skip this write." This is
+     * partial-update semantics: caller sends {"set_auto":1} and we
+     * only touch set_auto, leaving tz_index etc. as-is. */
+    long tz_idx = 0, date_fmt = 0, time_fmt = 0, summer = 0, set_auto = 0;
+    int has_tz       = json_read_int_field(request_body, (size_t)body_len, "tz_index",      &tz_idx);
+    int has_date_fmt = json_read_int_field(request_body, (size_t)body_len, "date_format",   &date_fmt);
+    int has_time_fmt = json_read_int_field(request_body, (size_t)body_len, "time_format",   &time_fmt);
+    int has_summer   = json_read_int_field(request_body, (size_t)body_len, "summer_policy", &summer);
+    int has_set_auto = json_read_int_field(request_body, (size_t)body_len, "set_auto",      &set_auto);
+
+    /* Range-clamp the writeable fields to documented Sony values
+     * before passing them through. Rejecting out-of-range is safer
+     * than letting Sony do something undefined with e.g.
+     * date_format=99 — the Settings UI would then have to round-trip
+     * through "weird state" to recover. */
+    if (has_date_fmt && (date_fmt < 0 || date_fmt > 2))     has_date_fmt = 0;
+    if (has_time_fmt && (time_fmt < 0 || time_fmt > 1))     has_time_fmt = 0;
+    if (has_summer   && (summer   < 0 || summer   > 2))     has_summer   = 0;
+    if (has_set_auto && (set_auto < 0 || set_auto > 1))     has_set_auto = 0;
+    /* tz_index is an enum into Sony's tzdata table (~120 entries);
+     * we don't have the exact upper bound for every firmware so
+     * accept any non-negative int. A wrong value is easily reset
+     * via Settings → Date and Time. */
+    if (has_tz       && tz_idx    < 0)                        has_tz       = 0;
+
+    /* Issue each write. Each populates its own rc + err_code. */
+    int rc_tz = 1, rc_date = 1, rc_time = 1, rc_summer = 1, rc_auto = 1;
+    uint32_t ec_tz = 0, ec_date = 0, ec_time = 0, ec_summer = 0, ec_auto = 0;
+    if (has_tz)       rc_tz     = sys_registry_set_int(SCE_KEY_DATE_TIME_ZONE,    (int)tz_idx,     &ec_tz);
+    if (has_date_fmt) rc_date   = sys_registry_set_int(SCE_KEY_DATE_DATE_FORMAT,  (int)date_fmt,   &ec_date);
+    if (has_time_fmt) rc_time   = sys_registry_set_int(SCE_KEY_DATE_TIME_FORMAT,  (int)time_fmt,   &ec_time);
+    if (has_summer)   rc_summer = sys_registry_set_int(SCE_KEY_DATE_SUMMER_TIME,  (int)summer,     &ec_summer);
+    if (has_set_auto) rc_auto   = sys_registry_set_int(SCE_KEY_DATE_SET_AUTO,     (int)set_auto,   &ec_auto);
+
+    /* `ok` is true only if EVERY attempted write succeeded. Skipped
+     * writes don't count against ok — they leave rc_* = 1 (untouched)
+     * which we filter below. */
+    int any_attempted = has_tz || has_date_fmt || has_time_fmt || has_summer || has_set_auto;
+    int all_ok = 1;
+    if (has_tz       && rc_tz     != 0) all_ok = 0;
+    if (has_date_fmt && rc_date   != 0) all_ok = 0;
+    if (has_time_fmt && rc_time   != 0) all_ok = 0;
+    if (has_summer   && rc_summer != 0) all_ok = 0;
+    if (has_set_auto && rc_auto   != 0) all_ok = 0;
+
+    char body[768];
+    int n = snprintf(body, sizeof(body),
+                      "{\"ok\":%s,\"any_attempted\":%s,"
+                      "\"tz_index_attempted\":%s,\"tz_index_rc\":%d,\"tz_index_err\":%u,"
+                      "\"date_format_attempted\":%s,\"date_format_rc\":%d,\"date_format_err\":%u,"
+                      "\"time_format_attempted\":%s,\"time_format_rc\":%d,\"time_format_err\":%u,"
+                      "\"summer_policy_attempted\":%s,\"summer_policy_rc\":%d,\"summer_policy_err\":%u,"
+                      "\"set_auto_attempted\":%s,\"set_auto_rc\":%d,\"set_auto_err\":%u}",
+                      (all_ok && any_attempted) ? "true" : "false",
+                      any_attempted ? "true" : "false",
+                      has_tz ? "true" : "false",       has_tz ? rc_tz : 0,         (unsigned)ec_tz,
+                      has_date_fmt ? "true" : "false", has_date_fmt ? rc_date : 0, (unsigned)ec_date,
+                      has_time_fmt ? "true" : "false", has_time_fmt ? rc_time : 0, (unsigned)ec_time,
+                      has_summer ? "true" : "false",   has_summer ? rc_summer : 0, (unsigned)ec_summer,
+                      has_set_auto ? "true" : "false", has_set_auto ? rc_auto : 0, (unsigned)ec_auto);
+    if (n < 0 || (size_t)n >= sizeof(body)) {
+        const char *fb = "{\"ok\":false,\"err_code\":0,\"truncated\":true}";
+        return send_frame(client_fd, FTX2_FRAME_TIME_STATE_SET_ACK, 0, trace_id,
+                          fb, (uint64_t)strlen(fb));
+    }
+    pthread_mutex_lock(&state->state_mtx);
+    state->command_count += 1;
+    pthread_mutex_unlock(&state->state_mtx);
+    return send_frame(client_fd, FTX2_FRAME_TIME_STATE_SET_ACK, 0, trace_id,
+                      body, (uint64_t)n);
+}
+
 /* ── System control (reboot / shutdown / standby / wake-tick) ─────────── */
 
 /* Sony API declarations — these live in libSceSystemService (already in
@@ -12030,6 +12320,13 @@ abort_done:
     if (hdr.frame_type == FTX2_FRAME_TIME_SET) {
         return handle_time_set(state, client_fd, hdr.trace_id,
                                 request_body, hdr.body_len);
+    }
+    if (hdr.frame_type == FTX2_FRAME_TIME_STATE_GET) {
+        return handle_time_state_get(state, client_fd, hdr.trace_id);
+    }
+    if (hdr.frame_type == FTX2_FRAME_TIME_STATE_SET) {
+        return handle_time_state_set(state, client_fd, hdr.trace_id,
+                                       request_body, hdr.body_len);
     }
     if (hdr.frame_type == FTX2_FRAME_PROC_LIST) {
         return handle_proc_list(state, client_fd, hdr.trace_id,

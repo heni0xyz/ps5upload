@@ -24,6 +24,12 @@ use crate::connection::Connection;
 pub const SYS_TIME_ERR_NULL_ARG: u32 = 0xE0002001;
 pub const SYS_TIME_ERR_NO_SYMBOL: u32 = 0xE0002002;
 
+/// sys_registry sentinels — kept here too so `humanize_err` can route
+/// them. Keep in sync with payload/include/sys_registry.h.
+pub const SYS_REGISTRY_ERR_NULL_ARG: u32 = 0xE0003001;
+pub const SYS_REGISTRY_ERR_NO_SYMBOL: u32 = 0xE0003002;
+pub const SYS_REGISTRY_ERR_BUFFER_TOO_SMALL: u32 = 0xE0003003;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PsTime {
     #[serde(default)]
@@ -137,10 +143,10 @@ pub fn ps5_time_set(addr: &str, target_unix_seconds: i64) -> Result<PsTimeSetRes
 }
 
 /// Humanise a Sony / sentinel err_code into a short reason string for
-/// the UI. The 0xE0002xxx sentinels are ours; 0x80A2xxxx values come
-/// from Sony's SceShellCore authid check; anything else falls through
-/// as a hex code. Used by the Tauri command to keep the React side
-/// from having to know the constants.
+/// the UI. The 0xE0002xxx + 0xE0003xxx sentinels are ours; 0x80A2xxxx
+/// values come from Sony's SceShellCore authid check; anything else
+/// falls through as a hex code. Used by the Tauri command to keep the
+/// React side from having to know the constants.
 pub fn humanize_err(err_code: u32) -> String {
     match err_code {
         0 => "success".to_string(),
@@ -148,6 +154,9 @@ pub fn humanize_err(err_code: u32) -> String {
         SYS_TIME_ERR_NO_SYMBOL => {
             "sceSystemServiceSet/GetCurrentDateTime not exported on this firmware".to_string()
         }
+        SYS_REGISTRY_ERR_NULL_ARG => "invalid registry request (null arg)".to_string(),
+        SYS_REGISTRY_ERR_NO_SYMBOL => "sceRegMgr Get/Set not exported on this firmware".to_string(),
+        SYS_REGISTRY_ERR_BUFFER_TOO_SMALL => "registry response buffer too small".to_string(),
         c if (0x80A2_0000..0x80A3_0000).contains(&c) => format!(
             "Sony rejected the call (0x{c:08x}) — usually means the payload's process \
              is not ucred-elevated; reload via kstuff or an equivalent loader and retry"
@@ -157,6 +166,255 @@ pub fn humanize_err(err_code: u32) -> String {
         }
         c => format!("error 0x{c:08x}"),
     }
+}
+
+// ── PS5 Date & Time state (registry-backed, novel as of 2.10.0) ─────────
+//
+// Adds full read/write of the SCE_REGMGR_ENT_KEY_DATE_* namespace
+// (timezone, DST policy, NTP auto-sync flag, date/time format,
+// tzdata version, NTP-error count) plus a comparison against the
+// cached libSceRtc NTP-derived tick. The payload-side handler reads
+// every key best-effort and surfaces per-field availability flags
+// so this struct uses `default`s everywhere; missing data shows up
+// as `*_avail=false` rather than the whole response failing.
+//
+// See reference_ps5_date_registry_keys.md for the hardware-
+// verification status of each individual key.
+
+/// One per-field availability + error triple. Every numeric field in
+/// `PsTimeState` has an `_avail` and `_err` companion field; this is
+/// just the type those companions share.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PsTimeStateField<T> {
+    pub value: T,
+    pub avail: bool,
+    pub err: u32,
+}
+
+/// Full PS5 Date & Time state surfaced by TIME_STATE_GET. The shape
+/// here mirrors the payload's flat JSON (one `<name>` + `<name>_avail`
+/// + `<name>_err` triple per field) — we don't fold it into nested
+///   structs because flat JSON is cheaper to debug from the engine
+///   log and serde generates the same Rust code either way.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PsTimeState {
+    #[serde(default)]
+    pub ok: bool,
+    #[serde(default)]
+    pub truncated: bool,
+
+    // Timezone (enum index into Sony's tzdata table; ~120 entries).
+    #[serde(default)]
+    pub tz_index: i32,
+    #[serde(default)]
+    pub tz_index_avail: bool,
+    #[serde(default)]
+    pub tz_index_err: u32,
+
+    // Date format: 0=YYYY/MM/DD, 1=DD/MM/YYYY, 2=MM/DD/YYYY.
+    #[serde(default)]
+    pub date_format: i32,
+    #[serde(default)]
+    pub date_format_avail: bool,
+    #[serde(default)]
+    pub date_format_err: u32,
+
+    // Time format: 0=24h, 1=12h.
+    #[serde(default)]
+    pub time_format: i32,
+    #[serde(default)]
+    pub time_format_avail: bool,
+    #[serde(default)]
+    pub time_format_err: u32,
+
+    // DST policy: 0=off, 1=auto (tzdata-driven), 2=manual on.
+    #[serde(default)]
+    pub summer_policy: i32,
+    #[serde(default)]
+    pub summer_policy_avail: bool,
+    #[serde(default)]
+    pub summer_policy_err: u32,
+
+    // Auto-sync (NTP) flag: 0=manual, 1=use Sony's NTP.
+    #[serde(default)]
+    pub set_auto: i32,
+    #[serde(default)]
+    pub set_auto_avail: bool,
+    #[serde(default)]
+    pub set_auto_err: u32,
+
+    // Read-only flag: currently in DST?
+    #[serde(default)]
+    pub is_summer_time: i32,
+    #[serde(default)]
+    pub is_summer_time_avail: bool,
+    #[serde(default)]
+    pub is_summer_time_err: u32,
+
+    // Local time offset from UTC in seconds.
+    #[serde(default)]
+    pub utc_offset_sec: i32,
+    #[serde(default)]
+    pub utc_offset_sec_avail: bool,
+    #[serde(default)]
+    pub utc_offset_sec_err: u32,
+
+    // Same offset, expressed in minutes (Sony stores both — write
+    // both consistently or the Settings UI may show drift between
+    // the two views).
+    #[serde(default)]
+    pub tz_offset_min: i32,
+    #[serde(default)]
+    pub tz_offset_min_avail: bool,
+    #[serde(default)]
+    pub tz_offset_min_err: u32,
+
+    // NTP sync failure counter — non-zero indicates the console
+    // couldn't reach Sony's NTP (DNS broken? UDP 123 blocked?).
+    #[serde(default)]
+    pub rtc_error_count: i32,
+    #[serde(default)]
+    pub rtc_error_count_avail: bool,
+    #[serde(default)]
+    pub rtc_error_count_err: u32,
+
+    // tzdata version string (e.g. "2023d") — read from the registry's
+    // string-typed `DATE_tzdata_update` key.
+    #[serde(default)]
+    pub tzdata: String,
+    #[serde(default)]
+    pub tzdata_avail: bool,
+    #[serde(default)]
+    pub tzdata_err: u32,
+
+    // Cached NTP-derived unix epoch (seconds, UTC). -1 sentinel if
+    // the libSceRtc symbol wasn't resolvable. NOT a fresh NTP query —
+    // this is what the system thinks NTP would say based on its last
+    // successful sync (which can be hours/days old on offline consoles).
+    #[serde(default = "minus_one")]
+    pub ntp_tick_unix: i64,
+    #[serde(default)]
+    pub ntp_tick_avail: bool,
+    #[serde(default)]
+    pub ntp_tick_err: u32,
+
+    // Wall-clock unix epoch (seconds, UTC), derived from the
+    // sce_datetime_t the payload reads on the same call. Same shape
+    // as `prior_unix` in PsTimeSetResult.
+    #[serde(default = "minus_one")]
+    pub wall_clock_unix: i64,
+    #[serde(default)]
+    pub wall_clock_avail: bool,
+    #[serde(default)]
+    pub wall_clock_err: u32,
+}
+
+/// Optional fields for TIME_STATE_SET. Each field is optional; only
+/// present (non-None) fields are written. Mirrors the payload's
+/// partial-update semantics.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PsTimeStateSetRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tz_index: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub date_format: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub time_format: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summer_policy: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub set_auto: Option<i32>,
+}
+
+/// Per-field write results from TIME_STATE_SET. `ok` is true only if
+/// EVERY attempted write succeeded; per-field `*_attempted` /
+/// `*_rc` / `*_err` lets the UI render which writes took.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PsTimeStateSetResult {
+    #[serde(default)]
+    pub ok: bool,
+    #[serde(default)]
+    pub any_attempted: bool,
+    #[serde(default)]
+    pub truncated: bool,
+
+    #[serde(default)]
+    pub tz_index_attempted: bool,
+    #[serde(default)]
+    pub tz_index_rc: i32,
+    #[serde(default)]
+    pub tz_index_err: u32,
+
+    #[serde(default)]
+    pub date_format_attempted: bool,
+    #[serde(default)]
+    pub date_format_rc: i32,
+    #[serde(default)]
+    pub date_format_err: u32,
+
+    #[serde(default)]
+    pub time_format_attempted: bool,
+    #[serde(default)]
+    pub time_format_rc: i32,
+    #[serde(default)]
+    pub time_format_err: u32,
+
+    #[serde(default)]
+    pub summer_policy_attempted: bool,
+    #[serde(default)]
+    pub summer_policy_rc: i32,
+    #[serde(default)]
+    pub summer_policy_err: u32,
+
+    #[serde(default)]
+    pub set_auto_attempted: bool,
+    #[serde(default)]
+    pub set_auto_rc: i32,
+    #[serde(default)]
+    pub set_auto_err: u32,
+}
+
+/// Read all PS5 Date & Time state in one round-trip — see
+/// `PsTimeState` for the field semantics. Best-effort: every
+/// per-field availability flag lets the caller render partial data
+/// when one or more reads fail.
+pub fn ps5_time_state_get(addr: &str) -> Result<PsTimeState> {
+    let mut c = Connection::connect(addr)?;
+    c.send_frame(FrameType::TimeStateGet, &[])?;
+    let (hdr, resp) = c.recv_frame()?;
+    let ft = hdr.frame_type().unwrap_or(FrameType::Error);
+    if ft == FrameType::Error {
+        bail!(
+            "payload rejected TIME_STATE_GET: {}",
+            String::from_utf8_lossy(&resp)
+        );
+    }
+    if ft != FrameType::TimeStateGetAck {
+        bail!("expected TIME_STATE_GET_ACK, got {ft:?}");
+    }
+    Ok(serde_json::from_slice(&resp)?)
+}
+
+/// Write a partial subset of PS5 Date & Time state. `None` fields are
+/// skipped — only `Some(value)` fields are written. Returns per-field
+/// rc + err so the UI can show "set_auto succeeded but tz_index
+/// rejected" rather than one opaque ok/fail.
+pub fn ps5_time_state_set(addr: &str, req: &PsTimeStateSetRequest) -> Result<PsTimeStateSetResult> {
+    let body = serde_json::to_vec(req)?;
+    let mut c = Connection::connect(addr)?;
+    c.send_frame(FrameType::TimeStateSet, &body)?;
+    let (hdr, resp) = c.recv_frame()?;
+    let ft = hdr.frame_type().unwrap_or(FrameType::Error);
+    if ft == FrameType::Error {
+        bail!(
+            "payload rejected TIME_STATE_SET: {}",
+            String::from_utf8_lossy(&resp)
+        );
+    }
+    if ft != FrameType::TimeStateSetAck {
+        bail!("expected TIME_STATE_SET_ACK, got {ft:?}");
+    }
+    Ok(serde_json::from_slice(&resp)?)
 }
 
 // ── tiny unix ↔ y/m/d/h/m/s converters (UTC) ────────────────────────────

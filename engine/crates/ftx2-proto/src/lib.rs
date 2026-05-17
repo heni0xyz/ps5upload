@@ -393,6 +393,25 @@ pub enum FrameType {
     TimeGetAck = 133,
     TimeSet = 134,
     TimeSetAck = 135,
+    /// Read all PS5 Date & Time state in one round-trip: wall-clock
+    /// (UTC), NTP-derived tick (cached, no fresh sync), timezone
+    /// index + offset, DST policy + current flag, date/time format
+    /// preference, auto-sync (NTP) flag, tzdata version, and the
+    /// NTP-sync error counter. Body: empty. Ack body: JSON object
+    /// with per-field availability flags so the desktop can grey
+    /// out fields the payload couldn't read on this firmware.
+    TimeStateGet = 136,
+    TimeStateGetAck = 137,
+    /// Write a subset of PS5 Date & Time state — timezone index,
+    /// DST policy, date/time format, auto-sync flag. Each field is
+    /// optional in the request JSON; only present fields are
+    /// written. Ack body returns per-field rc + err_code so the
+    /// desktop can report which writes took and which were rejected
+    /// (e.g. write to set_auto succeeded but tz_index didn't).
+    /// Writes go through sceRegMgrSetInt which needs ucred elevation
+    /// — same envelope as TimeSet.
+    TimeStateSet = 138,
+    TimeStateSetAck = 139,
 }
 
 impl FrameType {
@@ -521,6 +540,10 @@ impl FrameType {
             133 => Ok(Self::TimeGetAck),
             134 => Ok(Self::TimeSet),
             135 => Ok(Self::TimeSetAck),
+            136 => Ok(Self::TimeStateGet),
+            137 => Ok(Self::TimeStateGetAck),
+            138 => Ok(Self::TimeStateSet),
+            139 => Ok(Self::TimeStateSetAck),
             _ => Err(DecodeError::UnknownFrameType(v)),
         }
     }
@@ -984,6 +1007,10 @@ mod tests {
             FrameType::TimeGetAck,
             FrameType::TimeSet,
             FrameType::TimeSetAck,
+            FrameType::TimeStateGet,
+            FrameType::TimeStateGetAck,
+            FrameType::TimeStateSet,
+            FrameType::TimeStateSetAck,
         ];
         for ft in variants {
             assert_eq!(FrameType::try_from_u16(ft as u16).unwrap(), ft);

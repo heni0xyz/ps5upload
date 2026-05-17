@@ -572,6 +572,63 @@ pub async fn ps5_time_sync(
     .await
 }
 
+/// Read all PS5 Date & Time state (timezone, DST, NTP flag,
+/// date/time format, tzdata version, NTP-error counter, cached
+/// NTP-tick) in one call. Returns the flat JSON the payload emits;
+/// per-field availability flags let the UI grey out fields that
+/// failed to read on this firmware. New in 2.10.0 — depends on the
+/// novel DATE_* registry read path, see
+/// reference_ps5_date_registry_keys.md for hardware status.
+#[tauri::command]
+pub async fn ps5_time_state_get(addr: Option<String>) -> Result<JsonValue, String> {
+    get_json(&addr_url("/api/ps5/time/state/get", addr.as_deref())).await
+}
+
+/// Write a partial subset of PS5 Date & Time state. Pass any subset
+/// of `tz_index`, `date_format`, `time_format`, `summer_policy`,
+/// `set_auto` — None / omitted fields are NOT written. Response
+/// surfaces per-field rc + err_code so the UI can show "set_auto
+/// took, tz_index rejected" instead of one opaque ok/fail. Same
+/// ucred-elevation envelope as ps5_time_sync.
+#[tauri::command]
+pub async fn ps5_time_state_set(
+    addr: Option<String>,
+    tz_index: Option<i32>,
+    date_format: Option<i32>,
+    time_format: Option<i32>,
+    summer_policy: Option<i32>,
+    set_auto: Option<i32>,
+) -> Result<JsonValue, String> {
+    let base = engine::url();
+    let url = format!("{base}/api/ps5/time/state/set");
+    // Build the request body with only present fields. serde's
+    // skip_serializing_if + Option<T> on the engine side already
+    // handles this, but we ALSO build the JSON conditionally so a
+    // future engine-side change that flips defaults can't silently
+    // start writing unintended fields. Belt-and-suspenders given
+    // we're writing to a novel registry surface.
+    let mut body = serde_json::Map::new();
+    if let Some(a) = addr {
+        body.insert("addr".into(), serde_json::Value::String(a));
+    }
+    if let Some(v) = tz_index {
+        body.insert("tz_index".into(), serde_json::Value::Number(v.into()));
+    }
+    if let Some(v) = date_format {
+        body.insert("date_format".into(), serde_json::Value::Number(v.into()));
+    }
+    if let Some(v) = time_format {
+        body.insert("time_format".into(), serde_json::Value::Number(v.into()));
+    }
+    if let Some(v) = summer_policy {
+        body.insert("summer_policy".into(), serde_json::Value::Number(v.into()));
+    }
+    if let Some(v) = set_auto {
+        body.insert("set_auto".into(), serde_json::Value::Number(v.into()));
+    }
+    post_json(&url, &serde_json::Value::Object(body)).await
+}
+
 /// "Console Storage" aggregate matching what PS5 Settings shows
 /// (added in 2.2.26). Returns total/free/used/reserved across
 /// `/user effective + /system_data + /system_ex` plus per-partition

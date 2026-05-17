@@ -1580,6 +1580,58 @@ async fn ps5_time_sync_route(
     }
 }
 
+/// Read the full PS5 Date & Time state (timezone, DST, NTP flag,
+/// date/time format, tzdata version, NTP-error counter, cached NTP
+/// tick, wall clock) in one round-trip. Best-effort: per-field
+/// availability lets the UI degrade gracefully when the payload
+/// can't read some keys on this firmware.
+async fn ps5_time_state_get_route(
+    State(state): State<AppState>,
+    Query(q): Query<AddrQuery>,
+) -> impl IntoResponse {
+    let addr = mgmt_addr_or_default(q.addr, &state.default_ps5_addr);
+    let r: Result<ps5upload_core::sys_time::PsTimeState, anyhow::Error> =
+        tokio::task::spawn_blocking(move || ps5upload_core::sys_time::ps5_time_state_get(&addr))
+            .await
+            .map_err(anyhow::Error::from)
+            .and_then(|r| r);
+    match r {
+        Ok(v) => (StatusCode::OK, Json(v)).into_response(),
+        Err(e) => json_err(StatusCode::BAD_GATEWAY, format!("{e:#}")).into_response(),
+    }
+}
+
+/// Write a partial subset of PS5 Date & Time state. Mirrors the
+/// payload's partial-update semantics — only fields explicitly
+/// present in the request JSON are written; everything else is
+/// untouched. Returns per-field results so the UI can render which
+/// writes took and which were rejected.
+#[derive(serde::Deserialize)]
+struct TimeStateSetReq {
+    addr: Option<String>,
+    #[serde(flatten)]
+    fields: ps5upload_core::sys_time::PsTimeStateSetRequest,
+}
+
+async fn ps5_time_state_set_route(
+    State(state): State<AppState>,
+    Json(req): Json<TimeStateSetReq>,
+) -> impl IntoResponse {
+    let addr = mgmt_addr_or_default(req.addr, &state.default_ps5_addr);
+    let fields = req.fields;
+    let r: Result<ps5upload_core::sys_time::PsTimeStateSetResult, anyhow::Error> =
+        tokio::task::spawn_blocking(move || {
+            ps5upload_core::sys_time::ps5_time_state_set(&addr, &fields)
+        })
+        .await
+        .map_err(anyhow::Error::from)
+        .and_then(|r| r);
+    match r {
+        Ok(v) => (StatusCode::OK, Json(v)).into_response(),
+        Err(e) => json_err(StatusCode::BAD_GATEWAY, format!("{e:#}")).into_response(),
+    }
+}
+
 /// "Console Storage" aggregate. Same shape PS5 Settings shows: total
 /// across `/user effective + /system_data + /system_ex`, free across
 /// the same set, plus the per-partition breakdown for diagnostics.
@@ -3216,6 +3268,8 @@ async fn main() {
         .route("/api/ps5/hw/temps", get(ps5_hw_temps))
         .route("/api/ps5/time/get", get(ps5_time_get_route))
         .route("/api/ps5/time/sync", post(ps5_time_sync_route))
+        .route("/api/ps5/time/state/get", get(ps5_time_state_get_route))
+        .route("/api/ps5/time/state/set", post(ps5_time_state_set_route))
         .route("/api/ps5/hw/power", get(ps5_hw_power))
         .route("/api/ps5/hw/storage", get(ps5_hw_storage))
         .route("/api/ps5/proc/list", get(ps5_proc_list))
