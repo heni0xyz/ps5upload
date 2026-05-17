@@ -31,6 +31,7 @@ import {
 import type { SourceKind } from "./upload";
 import type { UploadStrategy } from "./transfer";
 import { useUploadSettingsStore } from "./uploadSettings";
+import { createRunGen } from "../lib/runGen";
 
 /**
  * Sequential upload queue. Lives in its own Zustand store separate
@@ -182,7 +183,11 @@ export const useUploadQueueStore = create<QueueState>((set, get) => {
   // captures its own generation and bails between awaits when the
   // global runId moves on. Stop() just bumps the counter; running:false
   // is set by the loop when it notices.
-  let runId = 0;
+  // 2.12.0: extracted to lib/runGen (shared with transfer.ts +
+  // payloadPlaylists.ts). installQueue.ts intentionally keeps its
+  // store-field runId because it needs atomic increment-and-claim
+  // via functional set — different semantics.
+  const gen = createRunGen();
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
   /** Schedule a debounced whole-document save. Idempotent — multiple
@@ -482,8 +487,8 @@ export const useUploadQueueStore = create<QueueState>((set, get) => {
     },
 
     clear() {
-      // Bumps runId so any in-flight run exits at the next await.
-      runId++;
+      // Bumps the gen counter so any in-flight run exits at next await.
+      gen.next();
       set({ items: [], running: false });
       scheduleSave();
     },
@@ -500,8 +505,8 @@ export const useUploadQueueStore = create<QueueState>((set, get) => {
 
     async start() {
       if (get().running) return;
-      const myRun = ++runId;
-      const isLive = () => runId === myRun;
+      const myRun = gen.next();
+      const isLive = () => gen.isLive(myRun);
       set({ running: true });
       try {
         while (isLive()) {
@@ -594,7 +599,7 @@ export const useUploadQueueStore = create<QueueState>((set, get) => {
       // before re-issuing the engine call — idempotent for the
       // payload because TX_FLAG_RESUME and same-tx_id semantics are
       // independent of queue state).
-      runId++;
+      gen.next();
       set((s) => ({
         running: false,
         items: resetRunningToPending(s.items),

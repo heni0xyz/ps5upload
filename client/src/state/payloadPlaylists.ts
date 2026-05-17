@@ -71,7 +71,8 @@ function newId(): string {
 }
 
 export const usePayloadPlaylistsStore = create<PlaylistState>((set, get) => {
-  let runId = 0;
+  // 2.12.0: generation counter via shared lib/runGen.
+  const gen = createRunGen();
   // Active abort controller for the runner's sleep step. Bumped on
   // every `run()` so a stale stop() can't cancel a fresh run; cleared
   // when the runner exits the sleep cleanly. `stop()` aborts it so
@@ -196,13 +197,13 @@ export const usePayloadPlaylistsStore = create<PlaylistState>((set, get) => {
       if (get().runStatus.kind === "running" || get().runStatus.kind === "sleeping") {
         return;
       }
-      const myRun = ++runId;
+      const myRun = gen.next();
       // Fresh abort signal for this run. stop() will fire it; the
       // sleep races against it so a Stop click during a long sleep
       // doesn't wait out the timer.
       runAbort = new AbortController();
       const myAbort = runAbort.signal;
-      const isLive = () => runId === myRun;
+      const isLive = () => gen.isLive(myRun);
 
       let successCount = 0;
       let failureCount = 0;
@@ -274,7 +275,7 @@ export const usePayloadPlaylistsStore = create<PlaylistState>((set, get) => {
     },
 
     stop() {
-      runId++;
+      gen.next();
       // Abort any in-flight sleep so the runner's await resolves now
       // instead of when the timer would have fired.
       runAbort?.abort();
@@ -286,19 +287,25 @@ export const usePayloadPlaylistsStore = create<PlaylistState>((set, get) => {
 
 /** Sleep that resolves early if `signal` aborts. AbortError is
  *  swallowed — caller treats both timer-fire and abort the same way
- *  (it re-checks isLive() after this returns). */
-function cancellableSleep(ms: number, signal: AbortSignal): Promise<void> {
-  if (signal.aborted) return Promise.resolve();
-  return new Promise((resolve) => {
-    const onAbort = () => {
-      clearTimeout(timer);
-      signal.removeEventListener("abort", onAbort);
-      resolve();
-    };
-    const timer = setTimeout(() => {
-      signal.removeEventListener("abort", onAbort);
-      resolve();
-    }, ms);
-    signal.addEventListener("abort", onAbort, { once: true });
-  });
+ *  (it re-checks isLive() after this returns).
+ *
+ *  2.12.0: the underlying timer/listener dance is now in
+ *  lib/cancellableSleep; we wrap to preserve the resolve-on-abort
+ *  semantics this caller relies on. */
+import {
+  cancellableSleep as canonicalCancellableSleep,
+  isAbortError,
+} from "../lib/cancellableSleep";
+import { createRunGen } from "../lib/runGen";
+
+async function cancellableSleep(
+  ms: number,
+  signal: AbortSignal,
+): Promise<void> {
+  try {
+    await canonicalCancellableSleep(ms, signal);
+  } catch (e) {
+    if (!isAbortError(e)) throw e;
+    // Swallow AbortError — caller re-checks isLive() to decide.
+  }
 }

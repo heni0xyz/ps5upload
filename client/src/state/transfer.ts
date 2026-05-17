@@ -15,6 +15,7 @@ import {
   type PlannedFile,
   type ReconcileMode,
 } from "../api/ps5";
+import { createRunGen } from "../lib/runGen";
 import {
   computeRate,
   pushRateSample,
@@ -127,7 +128,11 @@ export const useTransferStore = create<TransferState>((set) => {
   // A simple boolean `cancel` is *not* enough: the old poll could read
   // cancel=false after start() re-armed it (cancel=true, cancel=false
   // happen synchronously with no awaits between) and keep writing.
-  let runId = 0;
+  // 2.12.0: generation counter extracted to lib/runGen. The hand-
+  // rolled `let runId = 0; runId++` + `thisRun === runId` pattern is
+  // now `gen.next()` + `gen.isLive(thisRun)`. Identical semantics,
+  // single source of truth — see lib/runGen.ts for the rationale.
+  const gen = createRunGen();
   // Handle of the most recently scheduled poll timer. `reset()` clears
   // it so a rapid start/cancel loop doesn't accumulate pending
   // timeouts — each orphan would fire once, hit the `isLive()` guard,
@@ -149,7 +154,7 @@ export const useTransferStore = create<TransferState>((set) => {
       mountAfterUpload = false,
       mountReadOnly = true,
     }) {
-      const thisRun = ++runId;
+      const thisRun = gen.next();
       set({ phase: { kind: "starting" } });
 
       const isFolder = sourceKind === "folder" || sourceKind === "game-folder";
@@ -157,7 +162,7 @@ export const useTransferStore = create<TransferState>((set) => {
       // Helper: is this run still the live one? If the user cancelled
       // or kicked off another upload, we're stale and MUST NOT write
       // state (would clobber whatever the new run set up).
-      const isLive = () => thisRun === runId;
+      const isLive = () => gen.isLive(thisRun);
 
       // ── Cross-session tx_id resolution ─────────────────────────────
       // For folder uploads we carry the tx_id ourselves so a Resume
@@ -443,7 +448,7 @@ export const useTransferStore = create<TransferState>((set) => {
       // the payload's single-client transfer port means a brand-new
       // upload will wait until that finishes. Wiring a real ABORT_TX
       // cancel is a separate follow-up.
-      runId++;
+      gen.next();
       if (pollTimer !== null) {
         clearTimeout(pollTimer);
         pollTimer = null;
