@@ -1123,6 +1123,10 @@ activity_bar_toggle: "활동 패널 토글",
 audit_log: "감사 로그",
 audit_log_title: "감사 로그",
 audit_log_description: "수행한 파괴적이고 되돌릴 수 없는 작업의 영구 로컬 기록입니다. 지우기 버튼 없음 — 의도적입니다. 최근 100개 항목이 표시됩니다. 오래된 항목은 링 버퍼에서 빠져나갑니다.",
+logs_tab_app: "앱",
+logs_tab_kernel: "커널",
+logs_description_app: "데스크톱 쪽의 오류, 경고 및 주요 이벤트에 대한 앱 내 로그입니다. 버그 보고에 유용 — 복사를 클릭하여 일반 텍스트 덤프를 가져옵니다.",
+logs_description_kernel: "페이로드의 /dev/klog 라이브 스트림. 특정 문제를 추적하면서 Sony의 일상적인 서브시스템 잡담을 숨기려면 필터를 엽니다.",
 };
 
 export default ko;

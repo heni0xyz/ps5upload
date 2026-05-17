@@ -1124,6 +1124,10 @@ activity_bar_toggle: "切換活動面板",
 audit_log: "稽核記錄",
 audit_log_title: "稽核記錄",
 audit_log_description: "您執行的破壞性和不可逆操作的永久本機記錄。無清除按鈕 — 這是有意的。顯示最近 100 個項目；較舊的項目從環形緩衝區中滾出。",
+logs_tab_app: "應用",
+logs_tab_kernel: "核心",
+logs_description_app: "桌面端的錯誤、警告和值得注意的事件的應用程式內記錄。對錯誤回報很有用 — 點擊複製以獲取純文字轉儲。",
+logs_description_kernel: "來自有效負載的 /dev/klog 即時串流。在查找特定問題時,開啟過濾器以隱藏 Sony 例行子系統的閒聊。",
 };
 
 export default zh_TW;

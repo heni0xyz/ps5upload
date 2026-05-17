@@ -1124,6 +1124,10 @@ activity_bar_toggle: "Bật/tắt bảng hoạt động",
 audit_log: "Nhật ký kiểm tra",
 audit_log_title: "Nhật ký kiểm tra",
 audit_log_description: "Bản ghi cục bộ vĩnh viễn của các hành động phá hủy và không thể đảo ngược mà bạn đã thực hiện. Không có nút xóa — điều đó có chủ ý. 100 mục cuối cùng được hiển thị; các mục cũ hơn rời khỏi bộ đệm vòng.",
+logs_tab_app: "Ứng dụng",
+logs_tab_kernel: "Nhân",
+logs_description_app: "Nhật ký trong ứng dụng về các lỗi, cảnh báo và sự kiện đáng chú ý ở phía máy tính để bàn. Hữu ích cho báo cáo lỗi — nhấp vào Sao chép để lấy bản dump văn bản thuần.",
+logs_description_kernel: "Luồng trực tiếp của /dev/klog từ payload. Mở Bộ lọc để ẩn tiếng nói chuyện thường lệ của hệ thống con Sony khi tìm kiếm một vấn đề cụ thể.",
 };
 
 export default vi;

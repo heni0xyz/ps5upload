@@ -199,6 +199,10 @@ search_failed: "Search failed",
 
 // Logs screen
 logs_description: "In-app log of errors, warnings, and notable events. Useful for bug reports — click Copy to grab a plain-text dump.",
+logs_description_app: "In-app log of errors, warnings, and notable events on the desktop side. Useful for bug reports — click Copy to grab a plain-text dump.",
+logs_description_kernel: "Live stream of /dev/klog from the payload. Open Filters to hide Sony's routine subsystem chatter while hunting a specific issue.",
+logs_tab_app: "App",
+logs_tab_kernel: "Kernel",
 logs_empty_title: "Nothing logged yet",
 logs_empty_message: "Errors and warnings will appear here as you use the app.",
 logs_filter_no_matches: "No entries match the current filter. Try switching filters.",

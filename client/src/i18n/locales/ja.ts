@@ -1123,6 +1123,10 @@ activity_bar_toggle: "アクティビティパネルを切り替え",
 audit_log: "監査ログ",
 audit_log_title: "監査ログ",
 audit_log_description: "実行した破壊的かつ取り消し不可能なアクションの永続的なローカル記録。クリアボタンはありません — 意図的です。最新の 100 件のエントリが表示されます。古いエントリはリングバッファから外れます。",
+logs_tab_app: "アプリ",
+logs_tab_kernel: "カーネル",
+logs_description_app: "デスクトップ側のエラー、警告、注目すべきイベントのアプリ内ログ。バグレポートに便利 — コピーをクリックしてプレーンテキストのダンプを取得。",
+logs_description_kernel: "ペイロードからの /dev/klog のライブストリーム。特定の問題を追跡しながら Sony の定期的なサブシステムのチャットを非表示にするには、フィルタを開きます。",
 };
 
 export default ja;

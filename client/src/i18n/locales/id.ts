@@ -1122,6 +1122,10 @@ activity_bar_toggle: "Alihkan panel aktivitas",
 audit_log: "Log audit",
 audit_log_title: "Log audit",
 audit_log_description: "Catatan lokal permanen dari tindakan destruktif dan tidak dapat dibatalkan yang telah Anda lakukan. Tidak ada tombol hapus — itu disengaja. 100 entri terakhir ditampilkan; entri lama keluar dari buffer cincin.",
+logs_tab_app: "Aplikasi",
+logs_tab_kernel: "Kernel",
+logs_description_app: "Log dalam aplikasi untuk kesalahan, peringatan, dan peristiwa penting di sisi desktop. Berguna untuk laporan bug — klik Salin untuk mendapatkan dump teks biasa.",
+logs_description_kernel: "Aliran langsung /dev/klog dari payload. Buka Filter untuk menyembunyikan obrolan subsistem rutin Sony saat berburu masalah tertentu.",
 };
 
 export default id;

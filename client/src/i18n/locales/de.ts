@@ -1123,6 +1123,10 @@ activity_bar_toggle: "Aktivitäts-Panel umschalten",
 audit_log: "Audit-Protokoll",
 audit_log_title: "Audit-Protokoll",
 audit_log_description: "Permanenter lokaler Eintrag aller destruktiven und unwiderruflichen Aktionen, die du durchgeführt hast. Kein „Löschen\"-Knopf — bewusst so. Die letzten 100 Einträge werden angezeigt; ältere fallen aus dem Ringpuffer.",
+logs_tab_app: "App",
+logs_tab_kernel: "Kernel",
+logs_description_app: "In-App-Protokoll von Fehlern, Warnungen und bemerkenswerten Ereignissen auf der Desktop-Seite. Nützlich für Fehlerberichte — klicke auf „Kopieren\", um einen Klartext-Dump zu erhalten.",
+logs_description_kernel: "Live-Stream von /dev/klog vom Payload. Öffne Filter, um Sonys routinemäßiges Subsystem-Geschwätz auszublenden, während du ein bestimmtes Problem suchst.",
 };
 
 export default de;

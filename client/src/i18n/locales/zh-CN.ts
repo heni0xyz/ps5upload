@@ -1130,6 +1130,10 @@ activity_bar_toggle: "切换活动面板",
 audit_log: "审计日志",
 audit_log_title: "审计日志",
 audit_log_description: "您执行的破坏性和不可逆操作的永久本地记录。无清除按钮 — 这是有意的。显示最近 100 个条目；较旧的条目从环形缓冲区中滚出。",
+logs_tab_app: "应用",
+logs_tab_kernel: "内核",
+logs_description_app: "桌面端的错误、警告和值得注意的事件的应用内日志。对错误报告很有用 — 单击复制以获取纯文本转储。",
+logs_description_kernel: "来自有效负载的 /dev/klog 实时流。在查找特定问题时,打开过滤器以隐藏 Sony 例行子系统的闲聊。",
 };
 
 export default zh_CN;

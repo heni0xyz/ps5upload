@@ -24,7 +24,6 @@ import {
   ScrollText,
   Activity as ActivityIcon,
   BarChart3,
-  Terminal,
   TerminalSquare,
   PieChart,
   LayoutDashboard,
@@ -114,7 +113,6 @@ const items: NavItem[] = [
   { to: "/activity", key: "activity", fallback: "Activity", icon: ActivityIcon, section: { key: "nav_section_diagnostics", fallback: "Diagnostics" } },
   { to: "/stats", key: "stats", fallback: "Stats", icon: BarChart3 },
   { to: "/logs", key: "logs", fallback: "Logs", icon: ScrollText },
-  { to: "/kernel-log", key: "kernel_log", fallback: "Kernel log", icon: Terminal },
   { to: "/audit-log", key: "audit_log", fallback: "Audit log", icon: ShieldCheck },
 
   // ─ Footer-style utility entries (still rendered inline for now;

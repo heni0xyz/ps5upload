@@ -1123,6 +1123,10 @@ activity_bar_toggle: "Basculer le panneau d'activité",
 audit_log: "Journal d'audit",
 audit_log_title: "Journal d'audit",
 audit_log_description: "Enregistrement local permanent des actions destructrices et irréversibles que tu as effectuées. Pas de bouton d'effacement — c'est délibéré. Les 100 dernières entrées sont affichées ; les plus anciennes sortent du tampon circulaire.",
+logs_tab_app: "App",
+logs_tab_kernel: "Noyau",
+logs_description_app: "Journal interne des erreurs, avertissements et événements notables côté bureau. Utile pour les rapports de bug — clique sur Copier pour obtenir un dump texte brut.",
+logs_description_kernel: "Flux en direct de /dev/klog depuis le payload. Ouvre Filtres pour masquer le bavardage routinier des sous-systèmes de Sony tout en cherchant un problème spécifique.",
 };
 
 export default fr;

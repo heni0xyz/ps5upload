@@ -1122,6 +1122,10 @@ activity_bar_toggle: "Etkinlik panelini değiştir",
 audit_log: "Denetim günlüğü",
 audit_log_title: "Denetim günlüğü",
 audit_log_description: "Gerçekleştirdiğin yıkıcı ve geri alınamaz eylemlerin kalıcı yerel kaydı. Temizle düğmesi yok — kasıtlı. Son 100 giriş gösterilir; eski girişler halka tampondan düşer.",
+logs_tab_app: "Uygulama",
+logs_tab_kernel: "Çekirdek",
+logs_description_app: "Masaüstü tarafındaki hata, uyarı ve dikkate değer olayların uygulama içi günlüğü. Hata raporları için faydalı — düz metin dökümü almak için Kopyala'ya tıkla.",
+logs_description_kernel: "Yükten /dev/klog'un canlı akışı. Belirli bir sorunu ararken Sony'nin rutin alt sistem gevezeliğini gizlemek için Filtreler'i aç.",
 };
 
 export default tr;

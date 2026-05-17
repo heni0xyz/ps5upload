@@ -1123,6 +1123,10 @@ activity_bar_toggle: "Alternar panel de actividad",
 audit_log: "Registro de auditoría",
 audit_log_title: "Registro de auditoría",
 audit_log_description: "Registro local permanente de acciones destructivas e irreversibles que has realizado. Sin botón para borrar — es deliberado. Se muestran las últimas 100 entradas; las más antiguas salen del búfer circular.",
+logs_tab_app: "App",
+logs_tab_kernel: "Núcleo",
+logs_description_app: "Registro en la app de errores, advertencias y eventos notables del lado del escritorio. Útil para informes de errores — haz clic en Copiar para obtener un volcado de texto plano.",
+logs_description_kernel: "Transmisión en vivo de /dev/klog desde el payload. Abre Filtros para ocultar el parloteo rutinario del subsistema de Sony mientras buscas un problema específico.",
 };
 
 export default es;

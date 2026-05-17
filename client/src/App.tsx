@@ -37,7 +37,6 @@ const FirstRunScreen = lazy(() => import("./screens/FirstRun"));
 const SavesScreen = lazy(() => import("./screens/Saves"));
 const ScreenshotsScreen = lazy(() => import("./screens/Screenshots"));
 const StatsScreen = lazy(() => import("./screens/Stats"));
-const KernelLogScreen = lazy(() => import("./screens/KernelLog"));
 const ShellScreen = lazy(() => import("./screens/Shell"));
 const DiskUsageScreen = lazy(() => import("./screens/DiskUsage"));
 const DashboardScreen = lazy(() => import("./screens/Dashboard"));
@@ -171,13 +170,11 @@ export default function App() {
             </Suspense>
           }
         />
+        {/* 2.12.0: kernel log merged into /logs?tab=kernel. Keep
+            the old route alive as a redirect so bookmarks survive. */}
         <Route
           path="/kernel-log"
-          element={
-            <Suspense fallback={<ScreenLoader />}>
-              <KernelLogScreen />
-            </Suspense>
-          }
+          element={<Navigate to="/logs?tab=kernel" replace />}
         />
         <Route
           path="/shell"
