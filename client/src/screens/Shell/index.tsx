@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { shellRun, type ShellRunResult } from "../../api/ps5";
 import { useConnectionStore } from "../../state/connection";
+import { mgmtAddr } from "../../lib/addr";
 import { PageHeader, Button, EmptyState } from "../../components";
 import { useTr } from "../../state/lang";
 
@@ -61,7 +62,7 @@ export default function ShellScreen() {
     setHistoryCursor(null);
     const t0 = performance.now();
     try {
-      const r = await shellRun(`${host.trim()}:9114`, trimmed, 30);
+      const r = await shellRun(mgmtAddr(host), trimmed, 30);
       const durationMs = performance.now() - t0;
       setHistory((prev) =>
         prev.map((h) => (h.id === id ? { ...h, result: r, durationMs } : h)),

@@ -9417,19 +9417,63 @@ static char *strdup_safe(const char *s) {
     return r;
 }
 
-/* Split cmd into argv on whitespace. argv MUST be sized for at least
- * `max_args` slots; the last useful slot becomes the unparsed tail
- * (handy for `cat <path with spaces>` where we don't actually parse
- * quotes). Returns argc. */
+/* Split cmd into argv on whitespace, with POSIX-ish quoting:
+ *   - `'literal'`     — preserves everything verbatim incl. backslash
+ *   - `"weak quotes"` — preserves everything but allows \" and \\ escape
+ *   - `\X` outside quotes — keeps X literal (eats one char of whitespace)
+ *
+ * Writes NULs in-place into `cmd`. argv MUST be sized for at least
+ * `max_args` slots. Returns argc.
+ *
+ * Rewritten in 2.13.0 — the pre-rewrite version was whitespace-only,
+ * which broke `cat "/path with spaces"` (cat would see two args
+ * `"/path` and `with` and ENOENT immediately). All built-ins that
+ * take a path argument now handle quoted paths correctly. */
 static int shell_split(char *cmd, char *argv[], int max_args) {
     int argc = 0;
     char *p = cmd;
+    char *w = cmd; /* write cursor — handles in-place quote-stripping */
     while (*p && argc < max_args) {
+        /* Skip leading whitespace. */
         while (*p == ' ' || *p == '\t') p++;
         if (!*p) break;
-        argv[argc++] = p;
-        while (*p && *p != ' ' && *p != '\t') p++;
-        if (*p) { *p = '\0'; p++; }
+        /* Each arg starts at the current write cursor — quote-stripping
+         * may shift later chars back, so the visible arg pointer is `w`
+         * not `p` at this moment. */
+        argv[argc++] = w;
+        while (*p) {
+            char c = *p;
+            if (c == ' ' || c == '\t') break;
+            if (c == '\'') {
+                /* Single quote: copy everything to next ' verbatim. */
+                p++;
+                while (*p && *p != '\'') *w++ = *p++;
+                if (*p == '\'') p++;
+                continue;
+            }
+            if (c == '"') {
+                /* Double quote: copy with \" and \\ escapes recognised. */
+                p++;
+                while (*p && *p != '"') {
+                    if (*p == '\\' && (p[1] == '"' || p[1] == '\\')) {
+                        *w++ = p[1];
+                        p += 2;
+                    } else {
+                        *w++ = *p++;
+                    }
+                }
+                if (*p == '"') p++;
+                continue;
+            }
+            if (c == '\\' && p[1]) {
+                /* Bare backslash escape: take next char literal. */
+                *w++ = p[1];
+                p += 2;
+                continue;
+            }
+            *w++ = *p++;
+        }
+        *w++ = '\0'; /* terminate this arg */
     }
     return argc;
 }
