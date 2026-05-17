@@ -310,6 +310,29 @@ const CATALOGUE: &[CatalogueEntry] = &[
         autoload_delay_ms: 200,
         homepage: "https://github.com/LightningMods/itemzflow_PS5",
     },
+    CatalogueEntry {
+        // Companion to /logs?tab=kernel for users who want
+        // persistent on-console klog capture across desktop-app
+        // restarts. ps5upload's own KLOG_READ already streams
+        // /dev/klog into the Logs tab — klogsrv adds rotated
+        // file persistence at /data/klog/klog.log (10 backups)
+        // and a separate `nc <ip> 3232` netcat endpoint. Niche;
+        // most users won't need it. GPLv3, can't bundle — we
+        // reference the upstream's GitHub release.
+        id: "klogsrv",
+        display_name: "klogsrv",
+        role: "Persistent /dev/klog netcat server + rotated log",
+        description: "Streams /dev/klog over TCP :3232 and tees it to /data/klog/klog.log (10-backup rotation). Useful for capturing kernel-log activity that happens while the ps5upload desktop app is closed, or for tailing klog via plain netcat without our payload.",
+        repo_owner: "ps5-payload-dev",
+        repo_name: "klogsrv",
+        asset_name_hint: "klogsrv",
+        on_console_marker_path: Some("/data/klog/klog.log"),
+        process_name_hint: Some("klogsrv.elf"),
+        ports: &[3232],
+        autoload_priority: 4,
+        autoload_delay_ms: 200,
+        homepage: "https://github.com/ps5-payload-dev/klogsrv",
+    },
 ];
 
 /// Serializable mirror of `CatalogueEntry`. Has owned `String` fields
