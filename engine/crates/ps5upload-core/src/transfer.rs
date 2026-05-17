@@ -523,6 +523,64 @@ impl<'a> PipelinedSender<'a> {
     }
 }
 
+// ─── Abort ────────────────────────────────────────────────────────────────────
+
+/// Result of an `abort_transaction` call. Mostly informational —
+/// callers usually treat the function as fire-and-forget once they
+/// see it didn't error.
+#[derive(Debug, Clone)]
+pub struct AbortResult {
+    /// Raw payload of the ABORT_TX_ACK frame (a small JSON object —
+    /// `{"aborted":true,"tx_id":"…","active_transactions":N}` on
+    /// success). Returned as bytes so the caller decides whether to
+    /// parse, log, or discard.
+    pub ack_body: Vec<u8>,
+}
+
+/// Send `ABORT_TX` for the given tx_id and wait for the ACK.
+///
+/// Opens a fresh connection — typically called on the mgmt port
+/// (`:9114`) while a transfer is in flight on the transfer port
+/// (`:9113`). The payload's runtime acquires the tx entry
+/// exclusively, marks the entry `aborted`, releases its resources,
+/// and ACKs. Any subsequent `STREAM_SHARD` for the same tx on the
+/// transfer connection will fail with `tx_not_found`.
+///
+/// Returns `Err(tx_not_found)` if the tx_id isn't known to the
+/// payload — typically because it never reached BEGIN_TX, the
+/// payload was restarted, or the abort raced a successful COMMIT_TX.
+///
+/// Wiring this to a user-facing "Cancel" button requires verifying on
+/// PS5 hardware that the abort actually preempts a long-running
+/// shard write (the exclusive-acquire serialises with shard handling,
+/// but the wall-clock latency between request and effect depends on
+/// shard size + NVMe write speed). The mock-server test exercises the
+/// frame round-trip; end-to-end "cancel mid-upload" needs a real
+/// console.
+pub fn abort_transaction(addr: &str, tx_id: [u8; 16]) -> Result<AbortResult> {
+    use ftx2_proto::FrameType;
+    let body = tx_meta_buf(tx_id, 0, b"");
+    let mut c = Connection::connect(addr)?;
+    c.send_frame(FrameType::AbortTx, &body)?;
+    let (hdr, body) = c.recv_frame()?;
+    match hdr.frame_type() {
+        Ok(FrameType::AbortTxAck) => Ok(AbortResult { ack_body: body }),
+        Ok(FrameType::Error) => {
+            let msg = String::from_utf8_lossy(&body).into_owned();
+            anyhow::bail!("abort_tx error: {msg}");
+        }
+        Ok(other) => {
+            anyhow::bail!("unexpected response to ABORT_TX: {other:?}");
+        }
+        Err(e) => {
+            anyhow::bail!(
+                "ABORT_TX response had undecodable frame_type ({}): {e:?}",
+                hdr.frame_type
+            );
+        }
+    }
+}
+
 // ─── Standalone shard send (kept for `lab send-shard` convenience) ────────────
 
 /// Open a fresh connection and send one shard. Used by the lab CLI's

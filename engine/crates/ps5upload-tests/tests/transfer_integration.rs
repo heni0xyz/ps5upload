@@ -277,6 +277,56 @@ fn abort_tx_marks_aborted() {
     assert_eq!(st.txs[&tx_hex].state, "aborted");
 }
 
+/// `ps5upload_core::transfer::abort_transaction` (the public helper
+/// that wraps a single ABORT_TX/ABORT_TX_ACK round-trip) marks the
+/// matching tx as aborted on the server side. Companion to
+/// `abort_tx_marks_aborted` above, which exercises the raw frame
+/// dance; this one proves the high-level API works.
+///
+/// Wiring this to a UI "Cancel" button requires verifying on PS5
+/// hardware that the abort actually preempts a long-running shard
+/// write (mock has no shard-write blocking semantics). See the
+/// doc-comment on `abort_transaction` for the constraint.
+#[test]
+fn abort_transaction_helper_marks_aborted() {
+    use ftx2_proto::{FrameType, TxMeta};
+    use ps5upload_core::connection::Connection;
+    use ps5upload_core::transfer::abort_transaction;
+
+    let srv = MockServer::start();
+    let tx_id = random_tx_id();
+    let tx_hex: String = tx_id.iter().map(|b| format!("{b:02x}")).collect();
+
+    // BEGIN_TX so the tx exists on the server.
+    {
+        let extra = r#"{"dest_root":"/tmp/x","total_shards":1,"total_bytes":10,"file_count":1}"#
+            .to_string();
+        let mut body = TxMeta {
+            tx_id,
+            kind: 1,
+            flags: 0,
+        }
+        .encode()
+        .to_vec();
+        body.extend_from_slice(extra.as_bytes());
+        let mut c = Connection::connect(&srv.addr).unwrap();
+        c.send_frame(FrameType::BeginTx, &body).unwrap();
+        let (hdr, _) = c.recv_frame().unwrap();
+        assert_eq!(hdr.frame_type().unwrap(), FrameType::BeginTxAck);
+    }
+
+    let res = abort_transaction(&srv.addr, tx_id).expect("abort_transaction failed");
+    assert!(
+        std::str::from_utf8(&res.ack_body)
+            .unwrap_or("")
+            .contains("{"),
+        "ACK body should look like a JSON object",
+    );
+
+    let st = srv.state.lock().unwrap();
+    assert_eq!(st.txs[&tx_hex].state, "aborted");
+}
+
 #[test]
 fn blake3_mismatch_returns_error() {
     use ftx2_proto::{FrameType, ShardHeader, TxMeta};
