@@ -1135,6 +1135,10 @@ cmdpalette_no_ip_found: "কোন IP পাওয়া যায়নি",
 cmdpalette_no_ip_body: "ক্লিপবোর্ডে IPv4 ঠিকানা ছিল না।",
 cmdpalette_clipboard_failed: "ক্লিপবোর্ড পড়া ব্যর্থ",
 cmdpalette_clipboard_failed_body: "অনুমতি অস্বীকৃত বা অনুপলব্ধ।",
+search_size_any: "যেকোনো আকার",
+search_size_100mb: "> 100 MB",
+search_size_1gb: "> 1 GB",
+search_size_10gb: "> 10 GB",
 };
 
 export default bn;

@@ -9136,16 +9136,36 @@ static int handle_net_interfaces(runtime_state_t *state, int client_fd,
      *
      * The desktop UI doesn't branch on source; it just renders the
      * entries. `source` is a diag hint so we know which path won. */
-    char resp[8192];
+    /* Heap-allocate the two big buffers so this handler's stack
+     * stays small (~1 KB). Pre-2.12.0 the on-stack version added
+     * ~29 KB (resp[8192] + if_buf[16*0x500]=20480 + seen_names);
+     * combined with deep getifaddrs internals and the mgmt-thread
+     * accept-thread fallback path (runtime.c near the mgmt cap),
+     * that risks underflow on small pthread stacks. Same pattern
+     * handle_proc_modules uses at line ~10613. */
+    const size_t resp_cap = 8192;
+    char *resp = malloc(resp_cap);
+    if (!resp) {
+        const char *err = "{\"err\":\"oom\",\"interfaces\":[]}";
+        return send_frame(client_fd, FTX2_FRAME_NET_INTERFACES_ACK, 0,
+                          trace_id, err, strlen(err));
+    }
     int n = 0;
     int wrote_any = 0;
     const char *source = NULL;
-    n += snprintf(resp + n, sizeof(resp) - n, "{\"interfaces\":[");
+    n += snprintf(resp + n, resp_cap - n, "{\"interfaces\":[");
 
     /* ── Path 1: sceNetGetIfList ── */
     if (resolve_sce_net() == 0) {
-        unsigned char if_buf[NET_IF_MAX_ENTRIES * NET_IF_ENTRY_BYTES];
-        memset(if_buf, 0, sizeof(if_buf));
+        const size_t if_buf_sz = (size_t)NET_IF_MAX_ENTRIES * NET_IF_ENTRY_BYTES;
+        unsigned char *if_buf = malloc(if_buf_sz);
+        if (!if_buf) {
+            free(resp);
+            const char *err = "{\"err\":\"oom\",\"interfaces\":[]}";
+            return send_frame(client_fd, FTX2_FRAME_NET_INTERFACES_ACK, 0,
+                              trace_id, err, strlen(err));
+        }
+        memset(if_buf, 0, if_buf_sz);
         int count = 0;
         int sce_rc = p_sceNetGetIfList(if_buf, NET_IF_MAX_ENTRIES, &count);
         if (sce_rc == 0 && count > 0) {
@@ -9168,10 +9188,10 @@ static int handle_net_interfaces(runtime_state_t *state, int client_fd,
                 unsigned int mtu, flags;
                 memcpy(&mtu,   e + 0x28, sizeof(mtu));
                 memcpy(&flags, e,        sizeof(flags));
-                if (n >= (int)sizeof(resp) - 256) break;
+                if (n >= (int)resp_cap - 256) break;
                 if (wrote_any) resp[n++] = ',';
                 wrote_any = 1;
-                n += snprintf(resp + n, sizeof(resp) - n,
+                n += snprintf(resp + n, resp_cap - n,
                               "{\"name\":\"%s\","
                               "\"mac\":\"%02x:%02x:%02x:%02x:%02x:%02x\","
                               "\"ipv4\":\"%u.%u.%u.%u\","
@@ -9182,6 +9202,7 @@ static int handle_net_interfaces(runtime_state_t *state, int client_fd,
                               mtu, flags);
             }
         }
+        free(if_buf);
     }
 
     /* ── Path 2: getifaddrs fallback ──
@@ -9248,13 +9269,13 @@ static int handle_net_interfaces(runtime_state_t *state, int client_fd,
                 /* Skip purely-down placeholder interfaces with no
                  * address — those are tunnel slots Sony's UI hides. */
                 if (!ipv4[0] && !ipv6[0] && !mac[0]) continue;
-                if (n >= (int)sizeof(resp) - 384) break;
+                if (n >= (int)resp_cap - 384) break;
                 if (wrote_any) resp[n++] = ',';
                 wrote_any = 1;
                 char name_esc[80];
                 json_escape_into(ifa->ifa_name, name_esc, sizeof(name_esc));
                 int up = (ifa->ifa_flags & IFF_UP) ? 1 : 0;
-                n += snprintf(resp + n, sizeof(resp) - n,
+                n += snprintf(resp + n, resp_cap - n,
                               "{\"name\":\"%s\",\"flags\":%u,\"mtu\":%u,"
                               "\"mac\":\"%s\",\"ipv4\":\"%s\",\"ipv6\":\"%s\","
                               "\"up\":%s}",
@@ -9267,19 +9288,22 @@ static int handle_net_interfaces(runtime_state_t *state, int client_fd,
     }
 
     if (!wrote_any) {
+        free(resp);
         const char *err =
             "{\"err\":\"no_interfaces_reported\",\"interfaces\":[],"
             "\"hint\":\"both sceNetGetIfList and getifaddrs returned no usable interfaces\"}";
         return send_frame(client_fd, FTX2_FRAME_NET_INTERFACES_ACK, 0,
                           trace_id, err, strlen(err));
     }
-    n += snprintf(resp + n, sizeof(resp) - n,
+    n += snprintf(resp + n, resp_cap - n,
                   "],\"source\":\"%s\"}", source ? source : "unknown");
     pthread_mutex_lock(&state->state_mtx);
     state->command_count += 1;
     pthread_mutex_unlock(&state->state_mtx);
-    return send_frame(client_fd, FTX2_FRAME_NET_INTERFACES_ACK, 0,
-                      trace_id, resp, (uint64_t)n);
+    int rc = send_frame(client_fd, FTX2_FRAME_NET_INTERFACES_ACK, 0,
+                        trace_id, resp, (uint64_t)n);
+    free(resp);
+    return rc;
 }
 
 /* ── Peripheral control (BD/USB power) ───────────────────────────────── */

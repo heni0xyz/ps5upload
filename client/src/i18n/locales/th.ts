@@ -1135,6 +1135,10 @@ cmdpalette_no_ip_found: "ไม่พบ IP",
 cmdpalette_no_ip_body: "คลิปบอร์ดไม่มีที่อยู่ IPv4",
 cmdpalette_clipboard_failed: "อ่านคลิปบอร์ดล้มเหลว",
 cmdpalette_clipboard_failed_body: "ปฏิเสธสิทธิ์หรือไม่พร้อมใช้งาน",
+search_size_any: "ขนาดใดก็ได้",
+search_size_100mb: "> 100 MB",
+search_size_1gb: "> 1 GB",
+search_size_10gb: "> 10 GB",
 };
 
 export default th;

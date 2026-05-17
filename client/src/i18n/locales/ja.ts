@@ -1136,6 +1136,10 @@ cmdpalette_no_ip_found: "IP が見つかりません",
 cmdpalette_no_ip_body: "クリップボードに IPv4 アドレスが含まれていません。",
 cmdpalette_clipboard_failed: "クリップボードの読み取りに失敗",
 cmdpalette_clipboard_failed_body: "権限が拒否されたか利用できません。",
+search_size_any: "任意のサイズ",
+search_size_100mb: "> 100 MB",
+search_size_1gb: "> 1 GB",
+search_size_10gb: "> 10 GB",
 };
 
 export default ja;

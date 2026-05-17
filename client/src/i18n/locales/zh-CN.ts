@@ -1143,6 +1143,10 @@ cmdpalette_no_ip_found: "未找到 IP",
 cmdpalette_no_ip_body: "剪贴板未包含 IPv4 地址。",
 cmdpalette_clipboard_failed: "读取剪贴板失败",
 cmdpalette_clipboard_failed_body: "权限被拒绝或不可用。",
+search_size_any: "任意大小",
+search_size_100mb: "> 100 MB",
+search_size_1gb: "> 1 GB",
+search_size_10gb: "> 10 GB",
 };
 
 export default zh_CN;

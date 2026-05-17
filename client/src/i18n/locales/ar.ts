@@ -1136,6 +1136,10 @@ cmdpalette_no_ip_found: "لم يتم العثور على IP",
 cmdpalette_no_ip_body: "الحافظة لم تحتوي على عنوان IPv4.",
 cmdpalette_clipboard_failed: "فشلت قراءة الحافظة",
 cmdpalette_clipboard_failed_body: "تم رفض الإذن أو غير متاح.",
+search_size_any: "أي حجم",
+search_size_100mb: "‏> 100 ميغابايت",
+search_size_1gb: "‏> 1 جيجابايت",
+search_size_10gb: "‏> 10 جيجابايت",
 };
 
 export default ar;

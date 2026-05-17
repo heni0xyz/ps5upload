@@ -1135,6 +1135,10 @@ cmdpalette_no_ip_found: "Tidak ada IP yang ditemukan",
 cmdpalette_no_ip_body: "Clipboard tidak berisi alamat IPv4.",
 cmdpalette_clipboard_failed: "Gagal membaca clipboard",
 cmdpalette_clipboard_failed_body: "Izin ditolak atau tidak tersedia.",
+search_size_any: "ukuran apa pun",
+search_size_100mb: "> 100 MB",
+search_size_1gb: "> 1 GB",
+search_size_10gb: "> 10 GB",
 };
 
 export default id;

@@ -1136,6 +1136,10 @@ cmdpalette_no_ip_found: "Aucune IP trouvée",
 cmdpalette_no_ip_body: "Le presse-papiers ne contenait pas d'adresse IPv4.",
 cmdpalette_clipboard_failed: "Échec de la lecture du presse-papiers",
 cmdpalette_clipboard_failed_body: "Permission refusée ou indisponible.",
+search_size_any: "toutes tailles",
+search_size_100mb: "> 100 Mo",
+search_size_1gb: "> 1 Go",
+search_size_10gb: "> 10 Go",
 };
 
 export default fr;

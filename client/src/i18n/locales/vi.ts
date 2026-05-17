@@ -1137,6 +1137,10 @@ cmdpalette_no_ip_found: "Không tìm thấy IP",
 cmdpalette_no_ip_body: "Clipboard không chứa địa chỉ IPv4.",
 cmdpalette_clipboard_failed: "Đọc clipboard thất bại",
 cmdpalette_clipboard_failed_body: "Quyền bị từ chối hoặc không khả dụng.",
+search_size_any: "mọi kích thước",
+search_size_100mb: "> 100 MB",
+search_size_1gb: "> 1 GB",
+search_size_10gb: "> 10 GB",
 };
 
 export default vi;

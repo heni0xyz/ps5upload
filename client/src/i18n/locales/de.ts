@@ -1136,6 +1136,10 @@ cmdpalette_no_ip_found: "Keine IP gefunden",
 cmdpalette_no_ip_body: "Die Zwischenablage enthielt keine IPv4-Adresse.",
 cmdpalette_clipboard_failed: "Zwischenablage konnte nicht gelesen werden",
 cmdpalette_clipboard_failed_body: "Berechtigung verweigert oder nicht verfügbar.",
+search_size_any: "beliebige Größe",
+search_size_100mb: "> 100 MB",
+search_size_1gb: "> 1 GB",
+search_size_10gb: "> 10 GB",
 };
 
 export default de;

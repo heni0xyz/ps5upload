@@ -191,6 +191,15 @@ static intptr_t resolve_in_target(pid_t pid, const char *sym_name) {
 static int shellui_rpc_resolve_locked(void) {
     int pid = find_pid_by_name("SceShellUI");
     if (pid <= 0) {
+        /* Lookup failed — likely a transition gap where the old
+         * ShellUI just exited and the new one hasn't appeared in
+         * the process table yet. Null out g_shellui_pid so the
+         * next caller can't try pt_attach against whatever the
+         * cached value was (which would just fail and burn cycles
+         * in attach_with_refresh_locked's two-strikes retry). The
+         * next call will see g_shellui_pid <= 0 and route through
+         * the resolve path from scratch. */
+        g_shellui_pid = 0;
         g_init_rc = -1;
         return -1;
     }
@@ -286,7 +295,19 @@ static int attach_with_refresh_locked(void) {
     if (shellui_rpc_resolve_locked() != 0 || g_shellui_pid <= 0) {
         return -1;
     }
-    return pt_attach_tracked(g_shellui_pid) == 0 ? 0 : -1;
+    if (pt_attach_tracked(g_shellui_pid) == 0) {
+        return 0;
+    }
+    /* Second attach failed too. Null the cached pid so the NEXT
+     * RPC starts from a clean resolve — without this, ShellUI's
+     * post-respawn transition window would leave us pinned to a
+     * stale or half-initialized pid and every Hardware-tab poll
+     * (5s) would retry the same dead handle. The next call's
+     * resolve will see the fresh pid once Sony's respawn
+     * settles. Pairs with the "lookup failed" null in
+     * shellui_rpc_resolve_locked. */
+    g_shellui_pid = 0;
+    return -1;
 }
 
 /* Attach + run a single function call inside SceShellUI + detach.

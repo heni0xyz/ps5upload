@@ -28,7 +28,7 @@
 // inside the async work — DON'T re-read `useConnectionStore.host`
 // after the await, because that defeats the whole point.
 
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 
 import { useConnectionStore } from "../state/connection";
 
@@ -49,8 +49,14 @@ export interface HostProbe {
 }
 
 /** Build a fresh `HostProbe` capturing the current `connection.host`.
- *  Stable function reference across renders so callers can include
- *  it in `useCallback` deps without thrashing. */
+ *  Stable function AND OBJECT reference across renders so callers can
+ *  include the guard in `useCallback`/`useEffect` deps without
+ *  thrashing. The capture fn is wrapped in useCallback, AND the
+ *  returned `{ capture }` object is wrapped in useMemo — without the
+ *  latter, the bare object-literal would be a fresh reference every
+ *  render and any consumer dependency on `guard` would re-fire
+ *  every render (e.g. Hardware screen's setInterval, found by the
+ *  2.12.0 crash audit). */
 export function useStaleHostGuard(): { capture: () => HostProbe } {
   const capture = useCallback((): HostProbe => {
     // Read host fresh at capture-time, not via the React subscription —
@@ -63,7 +69,7 @@ export function useStaleHostGuard(): { capture: () => HostProbe } {
       isStale: () => useConnectionStore.getState().host !== probedHost,
     };
   }, []);
-  return { capture };
+  return useMemo(() => ({ capture }), [capture]);
 }
 
 /** Non-hook variant for use OUTSIDE React (engine bridges, queue

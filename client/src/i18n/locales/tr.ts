@@ -1135,6 +1135,10 @@ cmdpalette_no_ip_found: "IP bulunamadı",
 cmdpalette_no_ip_body: "Pano IPv4 adresi içermiyordu.",
 cmdpalette_clipboard_failed: "Pano okuma başarısız",
 cmdpalette_clipboard_failed_body: "İzin reddedildi veya kullanılamıyor.",
+search_size_any: "herhangi bir boyut",
+search_size_100mb: "> 100 MB",
+search_size_1gb: "> 1 GB",
+search_size_10gb: "> 10 GB",
 };
 
 export default tr;

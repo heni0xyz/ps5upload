@@ -1137,6 +1137,10 @@ cmdpalette_no_ip_found: "找不到 IP",
 cmdpalette_no_ip_body: "剪貼簿未包含 IPv4 位址。",
 cmdpalette_clipboard_failed: "讀取剪貼簿失敗",
 cmdpalette_clipboard_failed_body: "權限遭拒或無法使用。",
+search_size_any: "任何大小",
+search_size_100mb: "> 100 MB",
+search_size_1gb: "> 1 GB",
+search_size_10gb: "> 10 GB",
 };
 
 export default zh_TW;

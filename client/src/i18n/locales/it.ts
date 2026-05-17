@@ -1135,6 +1135,10 @@ cmdpalette_no_ip_found: "Nessun IP trovato",
 cmdpalette_no_ip_body: "Gli appunti non contenevano un indirizzo IPv4.",
 cmdpalette_clipboard_failed: "Lettura degli appunti non riuscita",
 cmdpalette_clipboard_failed_body: "Permesso negato o non disponibile.",
+search_size_any: "qualsiasi dimensione",
+search_size_100mb: "> 100 MB",
+search_size_1gb: "> 1 GB",
+search_size_10gb: "> 10 GB",
 };
 
 export default it;

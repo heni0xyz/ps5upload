@@ -1136,6 +1136,10 @@ cmdpalette_no_ip_found: "IP를 찾을 수 없음",
 cmdpalette_no_ip_body: "클립보드에 IPv4 주소가 포함되어 있지 않습니다.",
 cmdpalette_clipboard_failed: "클립보드 읽기 실패",
 cmdpalette_clipboard_failed_body: "권한이 거부되었거나 사용할 수 없습니다.",
+search_size_any: "모든 크기",
+search_size_100mb: "> 100 MB",
+search_size_1gb: "> 1 GB",
+search_size_10gb: "> 10 GB",
 };
 
 export default ko;

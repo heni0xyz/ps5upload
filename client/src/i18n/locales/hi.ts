@@ -1136,6 +1136,10 @@ cmdpalette_no_ip_found: "कोई IP नहीं मिला",
 cmdpalette_no_ip_body: "क्लिपबोर्ड में कोई IPv4 पता नहीं था।",
 cmdpalette_clipboard_failed: "क्लिपबोर्ड पढ़ना विफल",
 cmdpalette_clipboard_failed_body: "अनुमति अस्वीकृत या अनुपलब्ध।",
+search_size_any: "कोई भी आकार",
+search_size_100mb: "> 100 MB",
+search_size_1gb: "> 1 GB",
+search_size_10gb: "> 10 GB",
 };
 
 export default hi;

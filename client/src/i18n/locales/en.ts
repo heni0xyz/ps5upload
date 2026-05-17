@@ -196,6 +196,10 @@ search_description: "Searches every writable drive on your PS5. Use * and ? as w
 search_stop: "Stop",
 search_stop_tooltip: "Stop the current search",
 search_failed: "Search failed",
+search_size_any: "any size",
+search_size_100mb: "> 100 MB",
+search_size_1gb: "> 1 GB",
+search_size_10gb: "> 10 GB",
 
 // Logs screen
 logs_description_app: "In-app log of errors, warnings, and notable events on the desktop side. Useful for bug reports — click Copy to grab a plain-text dump.",

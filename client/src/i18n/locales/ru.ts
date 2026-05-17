@@ -1135,6 +1135,10 @@ cmdpalette_no_ip_found: "IP не найден",
 cmdpalette_no_ip_body: "Буфер обмена не содержал IPv4-адрес.",
 cmdpalette_clipboard_failed: "Не удалось прочитать буфер обмена",
 cmdpalette_clipboard_failed_body: "Доступ запрещён или недоступен.",
+search_size_any: "любой размер",
+search_size_100mb: "> 100 МБ",
+search_size_1gb: "> 1 ГБ",
+search_size_10gb: "> 10 ГБ",
 };
 
 export default ru;

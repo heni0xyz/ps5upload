@@ -21,10 +21,10 @@ import NetworkPanel from "./NetworkPanel";
 import PeripheralPanel from "./PeripheralPanel";
 import SpeedTestPanel from "./SpeedTestPanel";
 import { useDocumentVisible } from "../../lib/visibility";
-import { transferAddr } from "../../lib/addr";
+import { mgmtAddr, transferAddr } from "../../lib/addr";
 import { useStaleHostGuard } from "../../lib/staleHostGuard";
 
-import { useConnectionStore, PS5_PAYLOAD_PORT } from "../../state/connection";
+import { useConnectionStore } from "../../state/connection";
 import {
   psTimeToDate,
   formatUtcCompact,
@@ -119,6 +119,12 @@ export default function HardwareScreen() {
   // ticks. Prevents overlapping requests if the PS5 is slow to
   // respond.
   const busy = useRef(false);
+  // Shadow ref for `info` so `refresh` can check "have we fetched
+  // static info yet?" without listing `info` in its deps. Listing
+  // it caused the 5s interval to be torn down + re-armed every
+  // time info changed, producing a double-poll burst on first
+  // load (Hardware crash audit, 2.12.0).
+  const infoRef = useRef<HwInfo | null>(null);
 
   const refresh = useCallback(async () => {
     if (!host?.trim() || payloadStatus !== "up") return;
@@ -153,11 +159,19 @@ export default function HardwareScreen() {
       setTemps(nextTemps);
       setPower(nextPower);
       setStorage(nextStorage);
-      // info is static; fetch once if we don't have it yet.
-      if (info === null) {
+      // info is static; fetch once if we don't have it yet. Read
+      // via the ref shadow so this useCallback doesn't depend on
+      // `info` — depending on it caused refresh to be recreated on
+      // first-load, which re-armed the 5s interval mid-tick and
+      // produced a double-poll burst (Hardware crash audit, 2.12.0).
+      // Net effect: HW_INFO request only fires once per tab-mount.
+      if (infoRef.current === null) {
         const nextInfo = await fetchHwInfo(addr).catch(() => null);
         if (probe.isStale()) return;
-        if (nextInfo) setInfo(nextInfo);
+        if (nextInfo) {
+          infoRef.current = nextInfo;
+          setInfo(nextInfo);
+        }
       }
     } catch (e) {
       if (probe.isStale()) return;
@@ -166,7 +180,7 @@ export default function HardwareScreen() {
       busy.current = false;
       setLoading(false);
     }
-  }, [host, payloadStatus, info, guard]);
+  }, [host, payloadStatus, guard]);
 
   // Mount + auto-poll every POLL_INTERVAL_MS while payload is up AND
   // the window is visible. Pausing on minimize keeps idle laptops
@@ -388,10 +402,15 @@ export default function HardwareScreen() {
               seconds tracks total uptime). */}
           {host?.trim() && payloadStatus === "up" && (
             <>
-              <PowerTelemetryPanel mgmtAddr={`${host.trim()}:9114`} />
-              <NetworkPanel mgmtAddr={`${host.trim()}:9114`} />
-              <SpeedTestPanel mgmtAddr={`${host.trim()}:9114`} />
-              <PeripheralPanel mgmtAddr={`${host.trim()}:9114`} />
+              {/* Canonical mgmtAddr() (from lib/addr.ts) handles
+                  the "user pasted ip:port" edge case — raw string
+                  concat would produce ip:9113:9114 which Connection
+                  ::connect's SocketAddr parse rejects with a BAD_
+                  GATEWAY, leaving the panel silently broken. */}
+              <PowerTelemetryPanel mgmtAddr={mgmtAddr(host)} />
+              <NetworkPanel mgmtAddr={mgmtAddr(host)} />
+              <SpeedTestPanel mgmtAddr={mgmtAddr(host)} />
+              <PeripheralPanel mgmtAddr={mgmtAddr(host)} />
             </>
           )}
         </div>
@@ -485,7 +504,7 @@ function FanThresholdCard({
       setBusy(true);
       setError(null);
       try {
-        const addr = `${host}:${PS5_PAYLOAD_PORT}`;
+        const addr = transferAddr(host);
         await setFanThreshold(addr, clamped);
         setLastSetC(clamped);
         setDraftC(clamped);
@@ -772,7 +791,7 @@ function SystemTimeCard({
     setLastResult(null);
     try {
       const targetUnixSeconds = Math.floor(Date.now() / 1000);
-      const addr = `${host}:${PS5_PAYLOAD_PORT}`;
+      const addr = transferAddr(host);
       const r = (await invoke("ps5_time_sync", {
         addr,
         targetUnixSeconds,
@@ -1069,7 +1088,7 @@ function DateTimeStateCard({
     setWriteBusy(true);
     setWriteResult(null);
     try {
-      const addr = `${host}:${PS5_PAYLOAD_PORT}`;
+      const addr = transferAddr(host);
       const args: Record<string, unknown> = { addr };
       if (pendingTz !== null) args.tzIndex = pendingTz;
       if (pendingDateFormat !== null) args.dateFormat = pendingDateFormat;

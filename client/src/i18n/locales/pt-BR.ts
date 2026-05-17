@@ -1135,6 +1135,10 @@ cmdpalette_no_ip_found: "Nenhum IP encontrado",
 cmdpalette_no_ip_body: "A área de transferência não continha um endereço IPv4.",
 cmdpalette_clipboard_failed: "Falha ao ler a área de transferência",
 cmdpalette_clipboard_failed_body: "Permissão negada ou indisponível.",
+search_size_any: "qualquer tamanho",
+search_size_100mb: "> 100 MB",
+search_size_1gb: "> 1 GB",
+search_size_10gb: "> 10 GB",
 };
 
 export default pt_BR;
