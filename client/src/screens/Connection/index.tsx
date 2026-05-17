@@ -1113,7 +1113,7 @@ function CompanionSuggestion() {
           {tr(
             "companion_suggest_body",
             undefined,
-            "ps5upload pairs with kstuff (kernel exploit), ShadowMount+ (auto-mount game backups), and a dozen other homebrew payloads. The Payload library tab installs them in one click.",
+            "ps5upload pairs with kstuff (kernel exploit), ShadowMount+ (auto-mount game backups), and a dozen other homebrew payloads. The Homebrew catalog tab installs them in one click.",
           )}
         </div>
       </div>

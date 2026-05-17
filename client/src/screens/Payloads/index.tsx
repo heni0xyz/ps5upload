@@ -161,7 +161,7 @@ export default function PayloadsScreen() {
       <div className="p-6">
         <PageHeader
           icon={Boxes}
-          title={tr("payloads_title", undefined, "Payload library")}
+          title={tr("payloads_title", undefined, "Homebrew catalog")}
           description={tr(
             "payloads_loading",
             undefined,

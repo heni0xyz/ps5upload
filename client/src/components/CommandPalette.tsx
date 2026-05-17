@@ -62,7 +62,9 @@ function useCommands(close: () => void): Command[] {
       nav("/disk-usage", "Disk usage"),
       nav("/file-system", "File System", ["browse", "files"]),
       nav("/hardware", "Hardware", ["temps", "power"]),
-      nav("/payloads", "Payload library"),
+      // Keep "payload library" as a search alias for muscle memory from
+      // pre-2.12.0 — the screen is now called "Homebrew catalog".
+      nav("/payloads", "Homebrew catalog", ["payload library", "kstuff", "shadowmount", "etahen"]),
       nav("/send-payload", "Send payload"),
       nav("/activity", "Activity"),
       nav("/stats", "Stats"),

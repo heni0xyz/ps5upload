@@ -69,31 +69,55 @@ interface NavItem {
   section?: { key: string; fallback: string };
 }
 
+// 2.12.0 sidebar regroup. Previously: 3 sections (Overview / Workflow /
+// Help), with Workflow being 13 flat items — a "every feature gets a
+// top-level slot" anti-pattern that hid the app's story behind a wall
+// of equal-weight options. Now: 5 verb-driven sections that tell a
+// progression — Setup → Files → Browse → System → Diagnostics — plus
+// a clear distinction between primary navigation and utility entries.
+// Dashboard moved from "Overview" (it's neither setup nor first-thing)
+// to System. Activity + Stats grouped under Diagnostics. Send payload
+// + Homebrew catalog (was "Payload library") collocate under System
+// because they're both "manage what's running on the console".
+//
+// Total nav items unchanged (no screen removed); only the grouping +
+// "Payload library → Homebrew catalog" rename. The screen merges
+// (Payloads + SendPayload into one tabbed screen, Volumes split, etc.)
+// are separate commits that don't touch the sidebar shape.
 const items: NavItem[] = [
-  // ─ What's new / landing ─
-  { to: "/whats-new", key: "whats_new", fallback: "What's new", icon: Sparkles, section: { key: "nav_section_overview", fallback: "Overview" } },
-  { to: "/dashboard", key: "dashboard", fallback: "Dashboard", icon: LayoutDashboard },
-  // ─ Workflow: get set up, send things, browse ─
-  { to: "/connection", key: "connect", fallback: "Connection", icon: Cable, section: { key: "nav_section_workflow", fallback: "Workflow" } },
-  { to: "/upload", key: "upload", fallback: "Upload", icon: Upload },
+  // ─ Setup: orient, connect, get started ─
+  { to: "/whats-new", key: "whats_new", fallback: "What's new", icon: Sparkles, section: { key: "nav_section_setup", fallback: "Setup" } },
+  { to: "/connection", key: "connect", fallback: "Connection", icon: Cable },
+
+  // ─ Files: the "send things and install things" verbs ─
+  { to: "/upload", key: "upload", fallback: "Upload", icon: Upload, section: { key: "nav_section_files", fallback: "Files" } },
   { to: "/install-package", key: "install_package", fallback: "Install Package", icon: PackageOpen },
-  { to: "/library", key: "library", fallback: "Library", icon: LibraryBig },
   { to: "/saves", key: "saves", fallback: "Save data", icon: Save },
   { to: "/screenshots", key: "screenshots", fallback: "Screenshots", icon: ImageIcon },
+
+  // ─ Browse PS5: navigate what's on the console ─
+  { to: "/library", key: "library", fallback: "Library", icon: LibraryBig, section: { key: "nav_section_browse", fallback: "Browse PS5" } },
+  { to: "/file-system", key: "file_system", fallback: "File System", icon: FolderTree },
   { to: "/search", key: "search", fallback: "Search", icon: Search },
   { to: "/volumes", key: "volumes", fallback: "Volumes", icon: HardDrive },
   { to: "/disk-usage", key: "disk_usage", fallback: "Disk usage", icon: PieChart },
-  { to: "/file-system", key: "file_system", fallback: "File System", icon: FolderTree },
+
+  // ─ System: observe + manage the PS5 itself ─
+  { to: "/dashboard", key: "dashboard", fallback: "Dashboard", icon: LayoutDashboard, section: { key: "nav_section_system", fallback: "System" } },
   { to: "/hardware", key: "hardware", fallback: "Hardware", icon: Cpu },
+  { to: "/payloads", key: "payloads", fallback: "Homebrew catalog", icon: Boxes },
   { to: "/send-payload", key: "send_payload", fallback: "Send payload", icon: Rocket },
-  { to: "/payloads", key: "payloads", fallback: "Payload library", icon: Boxes },
-  // ─ Help / about / debug ─
-  { to: "/faq", key: "faq", fallback: "FAQ", icon: HelpCircle, section: { key: "nav_section_help", fallback: "Help" } },
-  { to: "/activity", key: "activity", fallback: "Activity", icon: ActivityIcon },
+  { to: "/shell", key: "shell", fallback: "Shell", icon: TerminalSquare },
+
+  // ─ Diagnostics: history, logs, debugging ─
+  { to: "/activity", key: "activity", fallback: "Activity", icon: ActivityIcon, section: { key: "nav_section_diagnostics", fallback: "Diagnostics" } },
   { to: "/stats", key: "stats", fallback: "Stats", icon: BarChart3 },
   { to: "/logs", key: "logs", fallback: "Logs", icon: ScrollText },
   { to: "/kernel-log", key: "kernel_log", fallback: "Kernel log", icon: Terminal },
-  { to: "/shell", key: "shell", fallback: "Shell", icon: TerminalSquare },
+
+  // ─ Footer-style utility entries (still rendered inline for now;
+  //   a future change could split them visually with a divider) ─
+  { to: "/faq", key: "faq", fallback: "FAQ", icon: HelpCircle, section: { key: "nav_section_help", fallback: "Help" } },
   { to: "/settings", key: "settings", fallback: "Settings", icon: SettingsIcon },
   { to: "/about", key: "about", fallback: "About", icon: Info },
 ];
