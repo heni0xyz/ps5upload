@@ -732,6 +732,13 @@ function SystemTimeCard({
   const tr = useTr();
   const guardSys = useStaleHostGuard();
   const [ps5Time, setPs5Time] = useState<PsTimeJson | null>(null);
+  /* `ps5SnapshotPcMs` captures the PC clock value at the moment we
+   * received `ps5Time`. We then DERIVE the PS5's current time as
+   * `ps5Snapshot + (pcNow - ps5SnapshotPcMs)`. This keeps the
+   * drift display stable instead of counting down -1/sec between
+   * 30s PS5 refreshes — the PS5 clock advances at the same rate as
+   * our PC's, so interpolating forward is accurate to a few ms. */
+  const [ps5SnapshotPcMs, setPs5SnapshotPcMs] = useState<number | null>(null);
   const [pcNowMs, setPcNowMs] = useState<number>(() => Date.now());
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -760,6 +767,12 @@ function SystemTimeCard({
       const r = (await invoke("ps5_time_get", { addr })) as PsTimeJson;
       if (probe.isStale()) return;
       setPs5Time(r);
+      // Snapshot taken — record the PC time NOW so derived ps5Date
+      // can interpolate forward without jitter (see ps5DateLive
+      // below). The few ms between the actual payload-side read and
+      // our PC tick are within the drift display's seconds-only
+      // granularity, so we don't bother accounting for the RTT.
+      setPs5SnapshotPcMs(Date.now());
       setError(null);
     } catch (e) {
       if (probe.isStale()) return;
@@ -781,32 +794,54 @@ function SystemTimeCard({
     return () => window.clearInterval(id);
   }, []);
 
-  const ps5Date = psTimeToDate(ps5Time);
+  const ps5DateSnapshot = psTimeToDate(ps5Time);
+  // Live PS5 date = the 30s-old snapshot + however much PC clock has
+  // advanced since we took it. The PS5 clock runs at the same rate
+  // as our PC's (both wall clocks are quartz-derived; one second of
+  // PC time = one second of PS5 time within microseconds). Without
+  // this interpolation, drift would visibly count DOWN by 1/sec
+  // between PS5 refreshes — the displayed ps5Date stays frozen
+  // while pcDate advances. Users see "the time section is unstable."
+  const ps5DateLive = ps5DateSnapshot && ps5SnapshotPcMs !== null
+    ? new Date(ps5DateSnapshot.getTime() + (pcNowMs - ps5SnapshotPcMs))
+    : ps5DateSnapshot;
   const pcDate = new Date(pcNowMs);
 
   const handleSync = useCallback(async () => {
     if (!canSync) return;
+    /* Capture host via the stale-guard so a mid-sync host-switch
+     * doesn't end up with the OLD console's sync result rendered
+     * under the NEW console's panel. Same pattern as
+     * DateTimeStateCard.handleApply. */
+    const probe = guardSys.capture();
     setBusy(true);
     setError(null);
     setLastResult(null);
     try {
       const targetUnixSeconds = Math.floor(Date.now() / 1000);
-      const addr = transferAddr(host);
+      const addr = transferAddr(probe.host);
       const r = (await invoke("ps5_time_sync", {
         addr,
         targetUnixSeconds,
       })) as PsTimeSyncJson;
+      if (probe.isStale()) return;
       setLastResult(r);
       setConfirming(false);
       /* Re-fetch PS5 time so the card reflects the new clock right
-       * away, not 30s later when the next poll lands. */
+       * away, not 30s later when the next poll lands. Clear the
+       * snapshot timestamp first so the drift display doesn't show
+       * the pre-sync interpolated value during the refresh round-
+       * trip — it'll briefly show the previous frozen snapshot,
+       * which is the safest fallback. */
+      setPs5SnapshotPcMs(null);
       await refreshPs5();
     } catch (e) {
+      if (probe.isStale()) return;
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
-  }, [canSync, host, refreshPs5]);
+  }, [canSync, guardSys, refreshPs5]);
 
   return (
     <section className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4">
@@ -818,7 +853,7 @@ function SystemTimeCard({
       <div className="space-y-2 text-xs">
         <StatRow
           label={tr("hardware_systime_ps5", "PS5 time")}
-          value={formatUtcCompact(ps5Date)}
+          value={formatUtcCompact(ps5DateLive)}
         />
         <StatRow
           label={tr("hardware_systime_pc", "Your PC")}
@@ -826,7 +861,7 @@ function SystemTimeCard({
         />
         <StatRow
           label={tr("hardware_systime_drift", "Drift")}
-          value={formatDrift(ps5Date, pcNowMs)}
+          value={formatDrift(ps5DateLive, pcNowMs)}
           hint={tr(
             "hardware_systime_drift_hint",
             "PS5 minus PC, in seconds. Positive = PS5 is ahead.",
@@ -1052,6 +1087,30 @@ function DateTimeStateCard({
   const [pendingSummer, setPendingSummer] = useState<number | null>(null);
   const [pendingSetAuto, setPendingSetAuto] = useState<number | null>(null);
 
+  // Monotonic counter — each handleApply call grabs the current
+  // value at the start, then ignores its own response if the value
+  // has advanced (i.e., another apply, a discard, or a host-switch
+  // happened). Without this, a fast double-click on Apply OR a
+  // mid-flight host-switch leaves the stale response setting state
+  // for the wrong console. Matches the runGen pattern from
+  // lib/runGen.
+  const applyGenRef = useRef(0);
+
+  // Clear pending writes if the user switches PS5 mid-edit OR the
+  // helper goes down. Otherwise tz/format/dst staged for console A
+  // (or against a now-dead helper) would silently apply to console
+  // B when the user clicked Apply. Also bumps the apply generation
+  // so any in-flight Apply is ignored on return.
+  useEffect(() => {
+    setPendingTz(null);
+    setPendingDateFormat(null);
+    setPendingTimeFormat(null);
+    setPendingSummer(null);
+    setPendingSetAuto(null);
+    setWriteResult(null);
+    applyGenRef.current += 1;
+  }, [host, payloadUp]);
+
   const hasPending =
     pendingTz !== null ||
     pendingDateFormat !== null ||
@@ -1085,10 +1144,17 @@ function DateTimeStateCard({
 
   const handleApply = useCallback(async () => {
     if (!hasPending || writeBusy) return;
+    // Capture host via the stale-guard so the addr we send to is
+    // the one the user was looking at when they clicked Apply, not
+    // whatever the store says after the in-flight RPC. Bump the
+    // generation so any older in-flight apply discards its result.
+    const probe = guardDt.capture();
+    applyGenRef.current += 1;
+    const myGen = applyGenRef.current;
     setWriteBusy(true);
     setWriteResult(null);
     try {
-      const addr = transferAddr(host);
+      const addr = transferAddr(probe.host);
       const args: Record<string, unknown> = { addr };
       if (pendingTz !== null) args.tzIndex = pendingTz;
       if (pendingDateFormat !== null) args.dateFormat = pendingDateFormat;
@@ -1096,6 +1162,11 @@ function DateTimeStateCard({
       if (pendingSummer !== null) args.summerPolicy = pendingSummer;
       if (pendingSetAuto !== null) args.setAuto = pendingSetAuto;
       const r = (await invoke("ps5_time_state_set", args)) as PsTimeStateSetJson;
+      // Stale-host or generation-superseded — discard this result.
+      // Without these guards a host-switch or rapid double-click
+      // Apply would set state from the wrong response, silently
+      // overwriting pendings the user just edited.
+      if (probe.isStale() || applyGenRef.current !== myGen) return;
       setWriteResult(r);
       // Clear pending only for fields that succeeded; leave the
       // others so the user sees what's still uncommitted.
@@ -1110,14 +1181,15 @@ function DateTimeStateCard({
       // Re-read so the panel reflects what actually landed.
       await refresh();
     } catch (e) {
+      if (probe.isStale() || applyGenRef.current !== myGen) return;
       setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setWriteBusy(false);
+      if (applyGenRef.current === myGen) setWriteBusy(false);
     }
   }, [
     hasPending,
     writeBusy,
-    host,
+    guardDt,
     pendingTz,
     pendingDateFormat,
     pendingTimeFormat,
