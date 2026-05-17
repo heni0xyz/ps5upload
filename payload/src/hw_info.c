@@ -17,11 +17,13 @@
 #include <string.h>
 #include <stdint.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <time.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
+#include <sys/syscall.h>
 #include <sys/time.h>
 #include <sys/sysctl.h>
 #include <sys/types.h>
@@ -48,6 +50,20 @@
 #define ICC_FAN_DEVICE_NODE         "/dev/icc_fan"
 #define ICC_FAN_CMD_LEN             10
 #define ICC_FAN_THRESHOLD_OFFSET    5
+
+/* PS5 firmware resets the fan threshold to its stock value on every
+ * app/game launch (and on suspend/resume + some system-menu paths).
+ * Without auto-reapply, the user's "65 °C threshold" setting silently
+ * reverts the moment they boot a game — exactly the workload where
+ * the lower threshold matters. A background thread that re-issues the
+ * pinned value every 15 s defeats the reset cheaply; sonicloader's
+ * fan daemon uses the same interval and it's been stable in the wild.
+ *
+ * Why 15 s and not faster: the firmware reset happens once per launch
+ * transition (not continuously), so any tick smaller than the
+ * user-perceptible delay between launch and "fan ramps up" is enough.
+ * Going below 5 s would just burn extra ioctls for no thermal gain. */
+#define FAN_REAPPLY_SEC 15
 
 /* ── Sony kernel function pointers ───────────────────────────────
  *
@@ -502,6 +518,105 @@ int hw_storage_get_text(char *out, size_t out_cap, size_t *out_written,
     return 0;
 }
 
+/* ── Fan auto-reapply watcher ─────────────────────────────────────
+ *
+ * State lives in two atomics:
+ *   g_pinned_threshold_c — the value to keep re-applying. 0 means
+ *     "nothing pinned"; the watcher early-exits on a 0 tick so a
+ *     payload that never sets fan stays at zero cost.
+ *   g_fan_watcher_started — guard for one-shot lazy launch. We use
+ *     atomic_exchange so the second concurrent caller sees the prior
+ *     "1" return value and bails before pthread_create runs again.
+ *
+ * Why lazy-start instead of starting from runtime_init: most ps5upload
+ * sessions never touch the fan (the user only sent files), so paying
+ * for an idle pthread + 15s wake-up tick on every payload boot would
+ * be wasted work. First successful fan set wakes the watcher; once
+ * armed it stays for the payload's lifetime (detached, no join). */
+static atomic_int g_pinned_threshold_c   = 0;
+static atomic_int g_fan_watcher_started  = 0;
+
+int hw_fan_pinned_threshold(void) {
+    return atomic_load(&g_pinned_threshold_c);
+}
+
+void hw_fan_pin_threshold(uint8_t threshold_c) {
+    if (threshold_c < HW_FAN_THRESHOLD_MIN) threshold_c = HW_FAN_THRESHOLD_MIN;
+    if (threshold_c > HW_FAN_THRESHOLD_MAX) threshold_c = HW_FAN_THRESHOLD_MAX;
+    atomic_store(&g_pinned_threshold_c, (int)threshold_c);
+}
+
+/* Forward decl — defined below the setter so it can share the same
+ * fd open/ioctl pattern via a static helper. */
+static int hw_fan_apply_locked(uint8_t threshold_c);
+
+static void *hw_fan_watcher_thread_fn(void *arg) {
+    (void)arg;
+    /* Best-effort thread name for ps/top output; ignored if the
+     * syscall isn't available. SYS_thr_set_name is FreeBSD-specific
+     * (matches sonicloader fan.c:170). */
+    (void)syscall(SYS_thr_set_name, -1, "ps5upload-fan");
+
+    for (;;) {
+        /* Sleep in 1 s chunks rather than one 15 s sleep so a future
+         * shutdown signal could break out cheaply if we ever add one. */
+        for (int i = 0; i < FAN_REAPPLY_SEC; i++) sleep(1);
+
+        int t = atomic_load(&g_pinned_threshold_c);
+        if (t < HW_FAN_THRESHOLD_MIN || t > HW_FAN_THRESHOLD_MAX) {
+            /* No pin set, or pin was clobbered to a sentinel value;
+             * just spin idle. Cheaper than tearing the thread down +
+             * re-launching it on the next pin. */
+            continue;
+        }
+
+        /* Re-apply failures are non-fatal — the firmware may be in a
+         * brief state (e.g., suspend transition) where /dev/icc_fan is
+         * busy. Next tick will retry. We deliberately don't log here
+         * to avoid spamming the klog during normal launch transitions
+         * (the device is briefly unavailable mid-transition). */
+        (void)hw_fan_apply_locked((uint8_t)t);
+    }
+    return NULL;
+}
+
+/* Lazy idempotent start. atomic_exchange returns the prior value, so
+ * the first caller sees 0 (and launches), every subsequent caller
+ * sees 1 (and returns without touching pthread). */
+static void hw_fan_watcher_start_once(void) {
+    if (atomic_exchange(&g_fan_watcher_started, 1)) return;
+
+    pthread_t thread;
+    pthread_attr_t attr;
+    if (pthread_attr_init(&attr) != 0) {
+        /* Roll the "started" flag back so a future call can retry. */
+        atomic_store(&g_fan_watcher_started, 0);
+        return;
+    }
+    /* Detached — we never join. Avoids leaking a joinable thread
+     * handle on shutdown paths that don't pthread_join. */
+    (void)pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    if (pthread_create(&thread, &attr, hw_fan_watcher_thread_fn, NULL) != 0) {
+        /* Same rollback as the attr_init failure above so we can retry. */
+        atomic_store(&g_fan_watcher_started, 0);
+    }
+    pthread_attr_destroy(&attr);
+}
+
+/* Bare ioctl call — no logging, no pin update, no watcher start. The
+ * watcher thread uses this so its ticks don't recursively re-arm
+ * themselves or print to stdout. */
+static int hw_fan_apply_locked(uint8_t threshold_c) {
+    int fd = open(ICC_FAN_DEVICE_NODE, O_RDONLY);
+    if (fd < 0) return -1;
+
+    unsigned char cmd[ICC_FAN_CMD_LEN] = {0};
+    cmd[ICC_FAN_THRESHOLD_OFFSET] = threshold_c;
+    int rc = ioctl(fd, ICC_FAN_IOCTL_SET_THRESHOLD, cmd);
+    close(fd);
+    return rc;
+}
+
 int hw_fan_set_threshold(uint8_t threshold_c, const char **err_reason_out) {
     /* Clamp. Intentionally silent — the client UI also clamps, but
      * we enforce here so a malicious/buggy caller can't bypass it by
@@ -533,5 +648,12 @@ int hw_fan_set_threshold(uint8_t threshold_c, const char **err_reason_out) {
         if (err_reason_out) *err_reason_out = "icc_fan_ioctl_failed";
         return -1;
     }
+
+    /* On success, pin the value and arm the auto-reapply watcher.
+     * Order matters: pin first, then start. If we started first and
+     * the thread happened to tick before atomic_store landed, it
+     * would early-exit on the still-zero pin and skip a cycle. */
+    hw_fan_pin_threshold(threshold_c);
+    hw_fan_watcher_start_once();
     return 0;
 }

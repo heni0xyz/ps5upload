@@ -80,4 +80,17 @@ int hw_fan_set_threshold(uint8_t threshold_c, const char **err_reason_out);
 #define HW_FAN_THRESHOLD_MIN 45
 #define HW_FAN_THRESHOLD_MAX 80
 
+/* Returns the currently-pinned threshold in °C, or 0 if the user has
+ * never set one this session (in which case the auto-reapply watcher
+ * stays dormant on each tick). */
+int hw_fan_pinned_threshold(void);
+
+/* Re-arm the auto-reapply watcher with a new pin value. Called
+ * internally by `hw_fan_set_threshold` on every successful set so the
+ * desktop doesn't need a separate "keep pinned" command. Safe to call
+ * before the watcher thread is started — it just stores the value and
+ * the thread (which is started lazily on the first set) will pick it
+ * up on its next tick. */
+void hw_fan_pin_threshold(uint8_t threshold_c);
+
 #endif /* PS5UPLOAD2_HW_INFO_H */
