@@ -12169,16 +12169,24 @@ commit_done:
             return send_frame(client_fd, FTX2_FRAME_ERROR, 0, hdr.trace_id,
                               "tx_not_found", 12);
         }
-        /* Guard against double-finalize. COMMIT_TX has the
-         * equivalent check at line ~11851. Without this, a replayed
+        /* Guard against double-finalize. Without this, a replayed
          * ABORT_TX or a confused client that issues both COMMIT and
          * ABORT for the same tx_id will re-flush a terminal entry
          * with state="aborted" — silently overwriting a "committed"
-         * record in the journal. The entry stays acquired, so the
-         * `abort_done:` cleanup still runs. */
-        if (strcmp(entry->state, "active") != 0) {
+         * record in the journal.
+         *
+         * NB: state "interrupted" (set when a connection dropped
+         * mid-tx without seeing COMMIT/ABORT) MUST stay abortable,
+         * otherwise the canonical "drop happened, user clicks
+         * Cancel on the dangling tx" flow breaks. Only refuse on
+         * already-terminal states (aborted or committed).
+         *
+         * The entry stays acquired, so the `abort_done:` cleanup
+         * still runs. */
+        if (strcmp(entry->state, "aborted") == 0 ||
+            strcmp(entry->state, "committed") == 0) {
             rc = send_frame(client_fd, FTX2_FRAME_ERROR, 0, hdr.trace_id,
-                            "tx_not_active", 13);
+                            "tx_already_terminal", 19);
             goto abort_done;
         }
         pthread_mutex_lock(&state->state_mtx);

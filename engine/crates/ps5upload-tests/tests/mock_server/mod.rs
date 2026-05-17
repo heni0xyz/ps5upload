@@ -480,14 +480,39 @@ fn handle_connection_inner(mut stream: TcpStream, state: Arc<Mutex<MockState>>) 
             }
 
             // ── ABORT_TX ───────────────────────────────────────────────────────
+            // Mirrors payload/src/runtime.c ABORT_TX guard:
+            //   - unknown tx_id → ERROR("tx_not_found")
+            //   - non-active state (already aborted/committed) →
+            //     ERROR("tx_not_active") to refuse double-finalize
+            //   - active → mark aborted + ACK
+            // The state guard was added in 2.12.0 to prevent journal
+            // corruption on replayed ABORT_TX. Mock has to mirror it
+            // so abort_transaction's error-path test exercises the
+            // same wire shape the real payload produces.
             FrameType::AbortTx => {
                 let mut body = vec![0u8; hdr.body_len as usize];
                 read_exact(&mut stream, &mut body);
                 if let Ok(meta) = TxMeta::decode(&body) {
                     let hex = tx_id_hex(&meta.tx_id);
                     let mut st = state.lock().unwrap();
-                    if let Some(tx) = st.txs.get_mut(&hex) {
-                        tx.state = "aborted".to_string();
+                    match st.txs.get_mut(&hex) {
+                        None => {
+                            send_error(&mut stream, "tx_not_found");
+                            return;
+                        }
+                        Some(tx) if tx.state == "aborted" || tx.state == "committed" => {
+                            // Already terminal — refuse so the
+                            // journal isn't double-finalized.
+                            // Critically, "interrupted" is NOT
+                            // terminal here — a user who saw a
+                            // network drop and then clicks Cancel
+                            // legitimately aborts a dangling tx.
+                            send_error(&mut stream, "tx_already_terminal");
+                            return;
+                        }
+                        Some(tx) => {
+                            tx.state = "aborted".to_string();
+                        }
                     }
                 }
                 send_frame(&mut stream, FrameType::AbortTxAck, b"{}");

@@ -327,6 +327,101 @@ fn abort_transaction_helper_marks_aborted() {
     assert_eq!(st.txs[&tx_hex].state, "aborted");
 }
 
+/// 2.12.0 added a state guard on the payload-side ABORT_TX handler
+/// (`payload/src/runtime.c` near the runtime_acquire_tx_entry call)
+/// that refuses to re-finalize a terminal tx — without it, a
+/// replayed ABORT_TX from a confused client could overwrite a
+/// "committed" record's state with "aborted" in the journal. Mock
+/// server mirrors that guard; this test exercises the wire shape.
+///
+/// The guard only refuses on terminal states (`aborted` / `committed`).
+/// State `interrupted` (network drop mid-tx) remains abortable — that's
+/// the canonical "user clicks Cancel on a dangling resumable tx" path.
+#[test]
+fn double_abort_returns_tx_already_terminal() {
+    use ftx2_proto::{FrameType, TxMeta};
+    use ps5upload_core::connection::Connection;
+    use ps5upload_core::transfer::abort_transaction;
+
+    let srv = MockServer::start();
+    let tx_id = random_tx_id();
+
+    // BEGIN_TX → tx is "active". Keep the connection ALIVE through
+    // the first abort so the mock's per-connection drop handler
+    // doesn't mark the tx as "interrupted" (which is a legitimately-
+    // abortable state — see `interrupted_tx_is_still_abortable` for
+    // that flow).
+    let extra =
+        r#"{"dest_root":"/tmp/x","total_shards":1,"total_bytes":10,"file_count":1}"#.to_string();
+    let mut body = TxMeta {
+        tx_id,
+        kind: 1,
+        flags: 0,
+    }
+    .encode()
+    .to_vec();
+    body.extend_from_slice(extra.as_bytes());
+    let mut c = Connection::connect(&srv.addr).unwrap();
+    c.send_frame(FrameType::BeginTx, &body).unwrap();
+    let (hdr, _) = c.recv_frame().unwrap();
+    assert_eq!(hdr.frame_type().unwrap(), FrameType::BeginTxAck);
+
+    // First ABORT_TX on a fresh conn — tx becomes "aborted".
+    abort_transaction(&srv.addr, tx_id).expect("first abort should succeed");
+    // Second ABORT_TX should be refused by the guard.
+    let err = abort_transaction(&srv.addr, tx_id).expect_err("double-abort should surface as Err");
+    let msg = format!("{err:?}");
+    assert!(
+        msg.contains("tx_already_terminal"),
+        "expected tx_already_terminal, got: {msg}",
+    );
+    drop(c);
+}
+
+/// State `interrupted` (set when the BEGIN_TX connection dropped
+/// before COMMIT/ABORT) must remain abortable — the user clicks
+/// Cancel on a dangling resumable tx and we want the abort to
+/// succeed, not get refused as "already terminal".
+///
+/// The mock's connection-drop handler marks tx "interrupted" after
+/// the per-connection thread joins; that's async vs our test thread,
+/// so we don't try to observe the intermediate state directly.
+/// What matters is: regardless of whether abort wins the race vs the
+/// drop handler, the abort must succeed (active → abort = OK;
+/// interrupted → abort = OK; only aborted/committed are refused).
+#[test]
+fn interrupted_tx_is_still_abortable() {
+    use ftx2_proto::{FrameType, TxMeta};
+    use ps5upload_core::connection::Connection;
+    use ps5upload_core::transfer::abort_transaction;
+
+    let srv = MockServer::start();
+    let tx_id = random_tx_id();
+
+    {
+        let extra = r#"{"dest_root":"/tmp/x","total_shards":1,"total_bytes":10,"file_count":1}"#
+            .to_string();
+        let mut body = TxMeta {
+            tx_id,
+            kind: 1,
+            flags: 0,
+        }
+        .encode()
+        .to_vec();
+        body.extend_from_slice(extra.as_bytes());
+        let mut c = Connection::connect(&srv.addr).unwrap();
+        c.send_frame(FrameType::BeginTx, &body).unwrap();
+        let (hdr, _) = c.recv_frame().unwrap();
+        assert_eq!(hdr.frame_type().unwrap(), FrameType::BeginTxAck);
+    }
+    // Give the server's per-connection thread a beat to detect the
+    // close so it transitions the tx to "interrupted". 50ms is more
+    // than enough on localhost.
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    // Abort should succeed — interrupted is NOT terminal.
+    abort_transaction(&srv.addr, tx_id).expect("abort on an interrupted tx should succeed");
+}
+
 #[test]
 fn blake3_mismatch_returns_error() {
     use ftx2_proto::{FrameType, ShardHeader, TxMeta};
