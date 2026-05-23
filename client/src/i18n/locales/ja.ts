@@ -1178,6 +1178,12 @@ disk_usage_no_recursive_sizes: "フォルダーのサイズは再帰的に計算
 fs_bulk_rename_conflict_title: "名前を変更するとファイルが上書きされます",
 fs_bulk_rename_conflict_body: "これらの変更後の名前が重複し、既存のファイルを破壊します。ファイルの名前は変更されていません:",
 first_run_cancel: "キャンセル",
+hw_sensors_manual_warning: "ライブ温度、クロック、および電力の読み取り値は、PS 5のシステムUIを一時停止して測定を行います。特にetaHEN/shadowMOUNT/kstuffが実行されている場合、コンソールの不安定化を回避するため、コンソールは自動的に読み取られなくなります。オンデマンドで読む：",
+hw_read_sensors: "センサーの読み取り",
+hw_sensors_last_read: "最終読み取り",
+playlists_recently_run: "最近実行したもの",
+playlist_move_up: "プレイリストを上に移動",
+playlist_move_down: "プレイリストを下に移動",
 };
 
 export default ja;

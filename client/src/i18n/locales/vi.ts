@@ -1179,6 +1179,12 @@ disk_usage_no_recursive_sizes: "Kích thước thư mục không được tính 
 fs_bulk_rename_conflict_title: "Đổi tên sẽ ghi đè các tệp",
 fs_bulk_rename_conflict_body: "Các tên đích này trùng nhau và sẽ phá hủy các tệp hiện có — không có tệp nào được đổi tên:",
 first_run_cancel: "Hủy",
+hw_sensors_manual_warning: "Các chỉ số nhiệt độ, đồng hồ và công suất trực tiếp sẽ tạm dừng một thời gian ngắn giao diện người dùng hệ thống của PS5 để thực hiện phép đo. Để tránh làm mất ổn định bảng điều khiển — đặc biệt là với etaHEN /shadowMOUNT /kstuff cũng đang chạy — chúng không còn được đọc tự động nữa. Đọc theo yêu cầu:",
+hw_read_sensors: "Đọc cảm biến",
+hw_sensors_last_read: "Đọc lần cuối",
+playlists_recently_run: "Chạy gần đây",
+playlist_move_up: "Di chuyển danh sách phát lên",
+playlist_move_down: "Di chuyển danh sách phát xuống",
 };
 
 export default vi;

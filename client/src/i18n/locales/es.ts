@@ -1178,6 +1178,12 @@ disk_usage_no_recursive_sizes: "Los tamaños de carpeta no se calculan de forma 
 fs_bulk_rename_conflict_title: "Cambiar el nombre sobrescribiría archivos",
 fs_bulk_rename_conflict_body: "Estos nombres de destino coinciden y destruirían archivos existentes; no se renombró ningún archivo:",
 first_run_cancel: "Cancelar",
+hw_sensors_manual_warning: "Las lecturas de temperatura en vivo, reloj y potencia pausan brevemente la interfaz de usuario del sistema de la PS5 para realizar una medición. Para evitar desestabilizar la consola, especialmente con etaHEN / shadowMOUNT / kstuff también en ejecución, ya no se leen automáticamente. Léalos a pedido:",
+hw_read_sensors: "Leer sensores",
+hw_sensors_last_read: "Última lectura",
+playlists_recently_run: "Ejecutado recientemente",
+playlist_move_up: "Subir lista de reproducción",
+playlist_move_down: "Mover lista de reproducción hacia abajo",
 };
 
 export default es;

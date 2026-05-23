@@ -1178,6 +1178,12 @@ disk_usage_no_recursive_sizes: "لا يتم حساب أحجام المجلدات
 fs_bulk_rename_conflict_title: "ستؤدي إعادة التسمية إلى الكتابة فوق الملفات",
 fs_bulk_rename_conflict_body: "تتعارض أسماء الوجهة هذه وستدمر الملفات الموجودة — لم تتم إعادة تسمية أي ملف:",
 first_run_cancel: "إلغاء",
+hw_sensors_manual_warning: "تقوم قراءات درجة الحرارة المباشرة والساعة والطاقة بإيقاف واجهة مستخدم نظام PS5 مؤقتًا لفترة وجيزة لإجراء القياس. لتجنب زعزعة استقرار وحدة التحكم — خاصة مع تشغيل etaHEN / shadowMOUNT/kstuff أيضًا — لم تعد تتم قراءتها تلقائيًا. اقرأها عند الطلب:",
+hw_read_sensors: "قراءة المستشعرات",
+hw_sensors_last_read: "آخر قراءة",
+playlists_recently_run: "تم تشغيله مؤخرًا",
+playlist_move_up: "نقل قائمة التشغيل لأعلى",
+playlist_move_down: "نقل قائمة التشغيل لأسفل",
 };
 
 export default ar;

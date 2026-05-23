@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   appendStep,
+  movePlaylistDown,
+  movePlaylistUp,
   moveStepDown,
   moveStepUp,
   patchPlaylist,
@@ -90,6 +92,43 @@ describe("removePlaylist", () => {
   it("returns same reference when id missing", () => {
     const list = [playlist("p1")];
     expect(removePlaylist(list, "missing")).toBe(list);
+  });
+});
+
+describe("movePlaylistUp / movePlaylistDown", () => {
+  it("moves a playlist up", () => {
+    const list = [playlist("p1"), playlist("p2"), playlist("p3")];
+    expect(movePlaylistUp(list, "p2").map((p) => p.id)).toEqual([
+      "p2",
+      "p1",
+      "p3",
+    ]);
+  });
+  it("moves a playlist down", () => {
+    const list = [playlist("p1"), playlist("p2"), playlist("p3")];
+    expect(movePlaylistDown(list, "p2").map((p) => p.id)).toEqual([
+      "p1",
+      "p3",
+      "p2",
+    ]);
+  });
+  it("up is a no-op (same ref) at the top", () => {
+    const list = [playlist("p1"), playlist("p2")];
+    expect(movePlaylistUp(list, "p1")).toBe(list);
+  });
+  it("down is a no-op (same ref) at the bottom", () => {
+    const list = [playlist("p1"), playlist("p2")];
+    expect(movePlaylistDown(list, "p2")).toBe(list);
+  });
+  it("returns same reference when id missing", () => {
+    const list = [playlist("p1"), playlist("p2")];
+    expect(movePlaylistUp(list, "missing")).toBe(list);
+    expect(movePlaylistDown(list, "missing")).toBe(list);
+  });
+  it("does not bump updatedAt (reorder is not an edit)", () => {
+    const list = [playlist("p1"), playlist("p2")];
+    const next = movePlaylistDown(list, "p1");
+    expect(next.find((p) => p.id === "p1")?.updatedAt).toBe(0);
   });
 });
 

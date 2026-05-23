@@ -1177,6 +1177,12 @@ disk_usage_no_recursive_sizes: "Klasör boyutları özyinelemeli olarak hesaplan
 fs_bulk_rename_conflict_title: "Yeniden adlandırma dosyaların üzerine yazar",
 fs_bulk_rename_conflict_body: "Bu hedef adlar çakışıyor ve mevcut dosyaları yok eder — hiçbir dosya yeniden adlandırılmadı:",
 first_run_cancel: "İptal",
+hw_sensors_manual_warning: "Canlı sıcaklık, saat ve güç okumaları, ölçüm yapmak için PS5 'in sistem kullanıcı arayüzünü kısa bir süre duraklatır. Konsolun dengesizleşmesini önlemek için — özellikle etaHEN/ shadowMOUNT / kstuff da çalışırken — artık otomatik olarak okunmazlar. Talep üzerine okuyun:",
+hw_read_sensors: "Sensörleri oku",
+hw_sensors_last_read: "Son okuma",
+playlists_recently_run: "Son zamanlarda çalıştırılan",
+playlist_move_up: "Oynatma listesini yukarı taşı",
+playlist_move_down: "Oynatma listesini aşağı taşı",
 };
 
 export default tr;

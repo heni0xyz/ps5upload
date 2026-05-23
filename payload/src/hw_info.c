@@ -40,7 +40,11 @@
  * setter used across the PS5 homebrew ecosystem. The magic code
  * encodes:
  *   0xC01C8F07 = _IOC(IOC_INOUT, 'Å', 0x07, 28)   // 'Å' (0x8F) = ICC group
- * and the 10-byte buffer carries the threshold at offset 5.
+ * The trailing 28 is IOCPARM_LEN: because the direction is IOC_INOUT,
+ * FreeBSD's generic ioctl path copies 28 bytes IN from the userspace
+ * buffer and 28 bytes back OUT into it — so the command buffer MUST be
+ * 28 bytes even though only the threshold at offset 5 matters. A smaller
+ * buffer (we shipped 10) takes an 18-byte stack overflow on the copyout.
  *
  * Why the O_RDONLY open flag with a WRITE ioctl: FreeBSD's ioctl
  * permission check allows RDONLY fds for IOC_INOUT commands. Both
@@ -50,7 +54,7 @@
  * does, and we can match their eventual fix. */
 #define ICC_FAN_IOCTL_SET_THRESHOLD 0xC01C8F07UL
 #define ICC_FAN_DEVICE_NODE         "/dev/icc_fan"
-#define ICC_FAN_CMD_LEN             10
+#define ICC_FAN_CMD_LEN             28  /* = IOCPARM_LEN(0xC01C8F07); kernel copies in/out this many bytes */
 #define ICC_FAN_THRESHOLD_OFFSET    5
 
 /* PS5 firmware resets the fan threshold to its stock value on every

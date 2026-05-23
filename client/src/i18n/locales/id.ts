@@ -1177,6 +1177,12 @@ disk_usage_no_recursive_sizes: "Ukuran folder tidak dihitung secara rekursif, ja
 fs_bulk_rename_conflict_title: "Mengganti nama akan menimpa file",
 fs_bulk_rename_conflict_body: "Nama tujuan ini bertabrakan dan akan menghancurkan file yang ada — tidak ada file yang diganti namanya:",
 first_run_cancel: "Batal",
+hw_sensors_manual_warning: "Pembacaan suhu, jam, dan daya langsung secara singkat menjeda UI sistem PS5 untuk melakukan pengukuran. Untuk menghindari destabilisasi konsol - terutama dengan etaHEN/ shadowMOUNT / kstuff juga berjalan — konsol tidak lagi dibaca secara otomatis. Bacalah sesuai permintaan:",
+hw_read_sensors: "Baca sensor",
+hw_sensors_last_read: "Terakhir dibaca",
+playlists_recently_run: "Berjalan baru - baru ini",
+playlist_move_up: "Pindahkan daftar putar ke atas",
+playlist_move_down: "Turunkan daftar putar",
 };
 
 export default id;

@@ -1177,6 +1177,12 @@ disk_usage_no_recursive_sizes: "ขนาดโฟลเดอร์ไม่ไ
 fs_bulk_rename_conflict_title: "การเปลี่ยนชื่อจะเขียนทับไฟล์",
 fs_bulk_rename_conflict_body: "ชื่อปลายทางเหล่านี้ชนกันและจะทำลายไฟล์ที่มีอยู่ — ไม่มีการเปลี่ยนชื่อไฟล์ใด ๆ:",
 first_run_cancel: "ยกเลิก",
+hw_sensors_manual_warning: "อุณหภูมิสดนาฬิกาและการอ่านค่าพลังงานหยุดชั่วคราว UI ของระบบ PS5 เพื่อทำการวัดเพื่อหลีกเลี่ยงความไม่เสถียรของคอนโซล — โดยเฉพาะอย่างยิ่งเมื่อ etaHEN/shadowMOUNT/kstuff ยังทำงานอยู่ — พวกมันจะไม่ถูกอ่านโดยอัตโนมัติอีกต่อไปอ่านตามความต้องการ:",
+hw_read_sensors: "เซ็นเซอร์อ่าน",
+hw_sensors_last_read: "อ่านล่าสุด",
+playlists_recently_run: "เรียกใช้เมื่อเร็วๆนี้",
+playlist_move_up: "ย้ายเพลย์ลิสต์ขึ้น",
+playlist_move_down: "ย้ายเพลย์ลิสต์ลง",
 };
 
 export default th;

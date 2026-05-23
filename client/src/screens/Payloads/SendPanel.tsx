@@ -249,43 +249,39 @@ export default function SendPanel() {
    *  longer exist on disk — in that case the probe surfaces the
    *  filesystem error and we skip setting a "good" state.
    *
-   *  Stale-result guard (2.9.0): payload_probe reads + parses the
-   *  ELF header, which can take meaningfully longer for big payloads
-   *  (1+ s for large statically-linked ELFs). If the user picks
-   *  payload A then quickly picks payload B, B's probe can finish
-   *  first; A's probe (slower) finishes second and clobbers status
-   *  with a verdict text about A while the picked file is B. User
-   *  sees a green "is_ps5upload: true" badge for a file that's
-   *  actually a third-party ELF, then sends the wrong-but-correctly-
-   *  labeled file. Compare the probed path against the *current*
-   *  elfPath via the latest-ref pattern and drop stale results. */
-  // Sync ref via useEffect, not direct assignment during render —
-  // react-hooks/refs forbids `ref.current = x` in the render body
-  // because it'd skip React's commit-time batching. The one-render
-  // lag this introduces (ref reflects PREVIOUS elfPath until effect
-  // runs) is fine for our use: the probe started AFTER the new
-  // elfPath was set, so by the time the await resolves the effect
-  // has long since fired and ref.current matches what the user
-  // currently sees.
-  const elfPathRef = useRef<string | null>(null);
-  useEffect(() => {
-    elfPathRef.current = elfPath;
-  }, [elfPath]);
+   *  Stale-result guard: payload_probe reads + parses the ELF header,
+   *  which can take meaningfully longer for big payloads (1+ s for large
+   *  statically-linked ELFs). If the user picks payload A then quickly
+   *  picks payload B, B's probe can finish first; A's probe (slower)
+   *  finishes second and would clobber status with a verdict about A
+   *  while the picked file is B. So each probe records itself as the
+   *  latest request and only commits its result if it's still the latest.
+   *
+   *  Why a ref set INSIDE probeFile (not a useEffect-synced mirror of
+   *  elfPath): the previous version synced the guard ref via useEffect,
+   *  which lags one commit. On the FIRST pick, pickFile → setElfPath →
+   *  await probeFile all run before that effect fires, so the probe
+   *  resolved with the ref still null (`null !== path`) and the result
+   *  was dropped — status stuck on "probing", Send disabled until a
+   *  second pick. Setting the ref synchronously at probe start fixes
+   *  that while preserving the latest-wins drop for rapid re-picks. */
+  const latestProbePathRef = useRef<string | null>(null);
   const probeFile = async (path: string) => {
+    latestProbePathRef.current = path;
     setStatus({ kind: "probing" });
     try {
       const r = await invoke<{ is_ps5upload: boolean; code: string }>(
         "payload_probe",
         { path },
       );
-      if (elfPathRef.current !== path) return;
+      if (latestProbePathRef.current !== path) return;
       setStatus({
         kind: "probed",
         isPs5upload: !!r.is_ps5upload,
         message: probeMessage(r.code, !!r.is_ps5upload),
       });
     } catch (e) {
-      if (elfPathRef.current !== path) return;
+      if (latestProbePathRef.current !== path) return;
       setStatus({
         kind: "failed",
         error: e instanceof Error ? e.message : String(e),

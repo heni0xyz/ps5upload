@@ -3,6 +3,8 @@ import { create } from "zustand";
 import { payloadPlaylistsLoad, payloadPlaylistsSave, sendPayload } from "../api/ps5";
 import {
   appendStep,
+  movePlaylistDown,
+  movePlaylistUp,
   moveStepDown,
   moveStepUp,
   patchPlaylist,
@@ -51,6 +53,8 @@ interface PlaylistState {
   renamePlaylist: (id: string, name: string) => void;
   deletePlaylist: (id: string) => void;
   setContinueOnFailure: (id: string, b: boolean) => void;
+  movePlaylistUp: (id: string) => void;
+  movePlaylistDown: (id: string) => void;
 
   // CRUD on steps within a playlist
   addStep: (id: string, step: PlaylistStep) => void;
@@ -161,6 +165,16 @@ export const usePayloadPlaylistsStore = create<PlaylistState>((set, get) => {
       scheduleSave();
     },
 
+    movePlaylistUp(id) {
+      set((s) => ({ playlists: movePlaylistUp(s.playlists, id) }));
+      scheduleSave();
+    },
+
+    movePlaylistDown(id) {
+      set((s) => ({ playlists: movePlaylistDown(s.playlists, id) }));
+      scheduleSave();
+    },
+
     addStep(id, step) {
       set((s) => ({ playlists: appendStep(s.playlists, id, step) }));
       scheduleSave();
@@ -197,6 +211,16 @@ export const usePayloadPlaylistsStore = create<PlaylistState>((set, get) => {
       if (get().runStatus.kind === "running" || get().runStatus.kind === "sleeping") {
         return;
       }
+      // Stamp "recently run" (on start, so a run that fails mid-way still
+      // counts as recently used). Direct map rather than patchPlaylist so
+      // updatedAt isn't bumped — running isn't a content edit. Persisted
+      // so the Recently-run strip survives an app restart.
+      set((s) => ({
+        playlists: s.playlists.map((p) =>
+          p.id === id ? { ...p, lastRunAt: Date.now() } : p,
+        ),
+      }));
+      scheduleSave();
       const myRun = gen.next();
       // Fresh abort signal for this run. stop() will fire it; the
       // sleep races against it so a Stop click during a long sleep

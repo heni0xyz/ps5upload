@@ -1247,6 +1247,12 @@ disk_usage_no_recursive_sizes: "Folder sizes aren't computed recursively, so a f
 fs_bulk_rename_conflict_title: "Rename would overwrite files",
 fs_bulk_rename_conflict_body: "These target names collide and would destroy existing files — no files were renamed:",
 first_run_cancel: "Cancel",
+hw_sensors_manual_warning: "Live temperature, clock, and power readings briefly pause the PS5's system UI to take a measurement. To avoid destabilizing the console — especially with etaHEN / shadowMOUNT / kstuff also running — they are no longer read automatically. Read them on demand:",
+hw_read_sensors: "Read sensors",
+hw_sensors_last_read: "Last read",
+playlists_recently_run: "Recently run",
+playlist_move_up: "Move playlist up",
+playlist_move_down: "Move playlist down",
 };
 
 export default en;

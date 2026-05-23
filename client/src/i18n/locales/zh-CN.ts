@@ -1185,6 +1185,12 @@ disk_usage_no_recursive_sizes: "文件夹大小不会递归计算，因此仅包
 fs_bulk_rename_conflict_title: "重命名将覆盖文件",
 fs_bulk_rename_conflict_body: "这些目标名称冲突并会破坏现有文件——未重命名任何文件：",
 first_run_cancel: "取消",
+hw_sensors_manual_warning: "实时温度、时钟和功率读数会短暂暂停PS5的系统UI以进行测量。为了避免破坏控制台的稳定性—特别是在etaHEN/shadowMOUNT/kstuff也在运行的情况下—它们不再自动读取。按需阅读：",
+hw_read_sensors: "读取传感器",
+hw_sensors_last_read: "前次读数",
+playlists_recently_run: "最近运行",
+playlist_move_up: "上移播放列表",
+playlist_move_down: "下移播放列表",
 };
 
 export default zh_CN;

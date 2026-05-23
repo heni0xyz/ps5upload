@@ -39,6 +39,12 @@ export interface Playlist {
   continueOnFailure: boolean;
   createdAt: number;
   updatedAt: number;
+  /** Wall-clock ms of the last time this playlist was run (started),
+   *  successful or not. Drives the "Recently run" quick-access strip.
+   *  Undefined for playlists that have never been run. Deliberately
+   *  separate from `updatedAt` (which tracks edits) so running a
+   *  playlist doesn't reorder an updatedAt-sorted view. */
+  lastRunAt?: number;
 }
 
 export type PlaylistRunStatus =
@@ -150,6 +156,29 @@ export function removePlaylist(
   const i = playlists.findIndex((p) => p.id === id);
   if (i < 0) return playlists;
   return playlists.slice(0, i).concat(playlists.slice(i + 1));
+}
+
+/** Move a playlist earlier in the list. Returns the same reference when
+ *  it's a no-op (already first, or id missing). Note: this reorders the
+ *  whole-document array, which is what gets persisted, so the order
+ *  survives a restart. We do NOT bump updatedAt — reordering isn't an
+ *  edit to the playlist's content. */
+export function movePlaylistUp(playlists: Playlist[], id: string): Playlist[] {
+  const i = playlists.findIndex((p) => p.id === id);
+  if (i <= 0) return playlists;
+  const next = playlists.slice();
+  [next[i - 1], next[i]] = [next[i], next[i - 1]];
+  return next;
+}
+
+/** Move a playlist later in the list. Returns the same reference when
+ *  it's a no-op (already last, or id missing). */
+export function movePlaylistDown(playlists: Playlist[], id: string): Playlist[] {
+  const i = playlists.findIndex((p) => p.id === id);
+  if (i < 0 || i >= playlists.length - 1) return playlists;
+  const next = playlists.slice();
+  [next[i], next[i + 1]] = [next[i + 1], next[i]];
+  return next;
 }
 
 /** Validate that a sleep value is a non-negative finite integer. The

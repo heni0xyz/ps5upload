@@ -46,6 +46,7 @@ export function PlaylistsPanel({
   const hydrate = usePayloadPlaylistsStore((s) => s.hydrate);
   const createPlaylist = usePayloadPlaylistsStore((s) => s.createPlaylist);
   const stop = usePayloadPlaylistsStore((s) => s.stop);
+  const run = usePayloadPlaylistsStore((s) => s.run);
 
   useEffect(() => {
     if (!loaded) void hydrate();
@@ -69,6 +70,15 @@ export function PlaylistsPanel({
   };
 
   const isBusy = runStatus.kind === "running" || runStatus.kind === "sleeping";
+
+  // Most-recently-run playlists for the quick-access strip. lastRunAt is
+  // stamped on every run() start, so this surfaces "the ones you actually
+  // use" without the user scrolling the full list. Cap at 5 so the strip
+  // stays one tidy row.
+  const recentlyRun = playlists
+    .filter((p) => typeof p.lastRunAt === "number")
+    .sort((a, b) => (b.lastRunAt ?? 0) - (a.lastRunAt ?? 0))
+    .slice(0, 5);
 
   return (
     <section className="mt-8 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-5">
@@ -111,6 +121,61 @@ export function PlaylistsPanel({
 
       <RunStatusBanner />
 
+      {recentlyRun.length > 0 && (
+        <div className="mb-4">
+          <div className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-[var(--color-muted)]">
+            <Clock size={12} />
+            {tr("playlists_recently_run", undefined, "Recently run")}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {recentlyRun.map((p) => {
+              const canQuickRun =
+                p.steps.length > 0 && !!host?.trim() && !isBusy;
+              return (
+                <div
+                  key={p.id}
+                  className="flex items-center gap-1.5 rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] py-1 pl-3 pr-1 text-xs"
+                >
+                  <span className="max-w-[12rem] truncate font-medium">
+                    {p.name}
+                  </span>
+                  <span className="text-[10px] text-[var(--color-muted)] tabular-nums">
+                    {formatAgo(p.lastRunAt ?? 0)}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => void run(p.id, host.trim(), port)}
+                    disabled={!canQuickRun}
+                    title={
+                      !host?.trim()
+                        ? tr(
+                            "playlist_need_host",
+                            undefined,
+                            "Set a PS5 IP at the top of the screen first",
+                          )
+                        : p.steps.length === 0
+                          ? tr(
+                              "playlist_need_steps",
+                              undefined,
+                              "Add at least one step",
+                            )
+                          : tr(
+                              "playlist_run_tooltip",
+                              { name: p.name },
+                              'Run "{name}"',
+                            )
+                    }
+                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[var(--color-accent)] hover:bg-[var(--color-surface-3)] disabled:opacity-40"
+                  >
+                    <Play size={12} />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {playlists.length === 0 && (
         <div className="rounded-md border border-dashed border-[var(--color-border)] bg-[var(--color-surface)] p-4 text-center text-xs text-[var(--color-muted)]">
           {tr(
@@ -122,13 +187,15 @@ export function PlaylistsPanel({
       )}
 
       <div className="grid gap-3">
-        {playlists.map((p) => (
+        {playlists.map((p, i) => (
           <PlaylistCard
             key={p.id}
             playlist={p}
             host={host}
             port={port}
             anyRunning={isBusy}
+            index={i}
+            total={playlists.length}
           />
         ))}
       </div>
@@ -263,15 +330,21 @@ function PlaylistCard({
   host,
   port,
   anyRunning,
+  index,
+  total,
 }: {
   playlist: Playlist;
   host: string;
   port: number;
   anyRunning: boolean;
+  index: number;
+  total: number;
 }) {
   const tr = useTr();
   const renamePlaylist = usePayloadPlaylistsStore((s) => s.renamePlaylist);
   const deletePlaylist = usePayloadPlaylistsStore((s) => s.deletePlaylist);
+  const movePlaylistUp = usePayloadPlaylistsStore((s) => s.movePlaylistUp);
+  const movePlaylistDown = usePayloadPlaylistsStore((s) => s.movePlaylistDown);
   const setContinueOnFailure = usePayloadPlaylistsStore(
     (s) => s.setContinueOnFailure,
   );
@@ -339,6 +412,28 @@ function PlaylistCard({
     <article className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
       <header className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
+          {/* Reorder this playlist within the list. Mirrors the per-step
+              up/down controls; persisted order survives a restart. */}
+          <div className="flex shrink-0 items-center">
+            <button
+              type="button"
+              onClick={() => movePlaylistUp(playlist.id)}
+              disabled={anyRunning || index === 0}
+              className="rounded p-1 text-[var(--color-muted)] hover:bg-[var(--color-surface-3)] disabled:opacity-30"
+              title={tr("playlist_move_up", undefined, "Move playlist up")}
+            >
+              <ArrowUp size={12} />
+            </button>
+            <button
+              type="button"
+              onClick={() => movePlaylistDown(playlist.id)}
+              disabled={anyRunning || index === total - 1}
+              className="rounded p-1 text-[var(--color-muted)] hover:bg-[var(--color-surface-3)] disabled:opacity-30"
+              title={tr("playlist_move_down", undefined, "Move playlist down")}
+            >
+              <ArrowDown size={12} />
+            </button>
+          </div>
           {renaming ? (
             <input
               ref={renameRef}
@@ -662,4 +757,20 @@ function StepStatusIcon({
 
 function basename(path: string): string {
   return path.split(/[\\/]/).pop() ?? path;
+}
+
+/** Compact "just now / 2m ago / 3h ago / Apr 18" for the recently-run
+ *  strip. Mirrors the SendPanel history formatter; coarse enough that a
+ *  stale render between ticks reads fine. */
+function formatAgo(ms: number): string {
+  if (ms <= 0) return "";
+  const diff = Date.now() - ms;
+  if (diff < 60_000) return "just now";
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
+  if (diff < 7 * 86_400_000) return `${Math.floor(diff / 86_400_000)}d ago`;
+  return new Date(ms).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  });
 }
