@@ -74,7 +74,7 @@ use ps5upload_core::{
     transfer::{
         inspect_zip, transfer_dir_resumable, transfer_file_list_resumable,
         transfer_file_path_resumable, transfer_zip_resumable, zip_plan_preview, FileListEntry,
-        TransferConfig, DEFAULT_ZIP_ENTRY_RAM_THRESHOLD, TX_FLAG_RESUME,
+        TransferConfig, DEFAULT_RESUME_RETRIES, DEFAULT_ZIP_ENTRY_RAM_THRESHOLD, TX_FLAG_RESUME,
     },
     volumes::{list_volumes, VolumeList},
 };
@@ -2164,20 +2164,25 @@ async fn transfer_file_handler(
             }
         }
 
-        // Resume-on-drop for single-file uploads: 1 fresh attempt + 5
-        // retries. WiFi-only PS5s see multi-hour uploads of 50+ GiB
-        // images, and a stack of 5 retries with exponential backoff
-        // (500 ms → 8 s capped) survives several wifi blips per upload
-        // before giving up. The lower 2-retry cap was tuned for wired
-        // gigabit; WiFi reality needs more headroom.
+        // Resume-on-drop for single-file uploads: 1 fresh attempt +
+        // DEFAULT_RESUME_RETRIES resumes. WiFi-only PS5s see multi-hour
+        // uploads of 50+ GiB images, and a stack of retries with exponential
+        // backoff (500 ms → 16 s capped) survives several wifi blips per
+        // upload before giving up.
         //
         // The path-based core reads one shard at a time. It avoids both
         // whole-file Vec allocation and mmap address-space/page-cache
         // failure modes that can look like OOM on Windows/Linux with
         // 50-100 GiB game images.
         let src_path = std::path::PathBuf::from(&req.src);
-        let result =
-            transfer_file_path_resumable(&cfg, tx_id, &req.dest, &src_path, 5, initial_flags);
+        let result = transfer_file_path_resumable(
+            &cfg,
+            tx_id,
+            &req.dest,
+            &src_path,
+            DEFAULT_RESUME_RETRIES,
+            initial_flags,
+        );
         let files_sent_count: u64 = 1;
         let skipped_files_count: u64 = 0;
         let skipped_bytes_count: u64 = 0;
@@ -2315,15 +2320,18 @@ async fn transfer_dir_handler(
         cfg.excludes = req.excludes;
         cfg.progress_bytes = Some(Arc::clone(&progress));
         apply_per_request_bandwidth(&mut cfg, req.bandwidth_cap_mbps);
-        // 3 attempts = 1 fresh + 2 resumes. Matches the reconcile handler.
-        // An Override upload used to give up on the first network blip;
-        // this retry wrapper puts it on equal footing with Resume uploads.
+        // 1 fresh attempt + DEFAULT_RESUME_RETRIES resumes. Folder uploads
+        // previously used only 2 retries while single-file used 5, so a single
+        // transient blip (or the payload's serial accept loop briefly busy
+        // draining the dropped connection) killed a multi-hour folder upload.
+        // Now on equal footing with single-file + headroom. See
+        // DEFAULT_RESUME_RETRIES.
         let result = transfer_dir_resumable(
             &cfg,
             tx_id,
             &req.dest_root,
             std::path::Path::new(&req.src_dir),
-            2,
+            DEFAULT_RESUME_RETRIES,
             initial_flags,
         );
         let skipped_files_count: u64 = 0;
@@ -2648,8 +2656,14 @@ async fn transfer_file_list_handler(
         apply_per_request_bandwidth(&mut cfg, req.bandwidth_cap_mbps);
         // All transfer endpoints share the same 3-attempt resume policy
         // (1 fresh + 2 resumes). See `transfer_dir_handler` for rationale.
-        let result =
-            transfer_file_list_resumable(&cfg, tx_id, &req.dest_root, &entries, 2, initial_flags);
+        let result = transfer_file_list_resumable(
+            &cfg,
+            tx_id,
+            &req.dest_root,
+            &entries,
+            DEFAULT_RESUME_RETRIES,
+            initial_flags,
+        );
         let skipped_files_count: u64 = 0;
         let skipped_bytes_count: u64 = 0;
         match result {
@@ -3256,13 +3270,19 @@ async fn transfer_dir_reconcile_handler(
         cfg.excludes = req.excludes;
         cfg.progress_bytes = Some(Arc::clone(&progress));
         apply_per_request_bandwidth(&mut cfg, req.bandwidth_cap_mbps);
-        // 3 attempts total — 1 fresh + 2 resumes. Covers the realistic
-        // case of a single payload hiccup mid-transfer; if the payload
-        // is hard-dead, the third attempt's connect will fail fast and
-        // we surface the underlying error. Signature is max_retries (not
-        // max_attempts), so 2 here means "up to 2 RESUME retries".
-        let result =
-            transfer_file_list_resumable(&cfg, tx_id, &req.dest_root, &entries, 2, initial_flags);
+        // 1 fresh attempt + DEFAULT_RESUME_RETRIES resumes. Covers several
+        // payload hiccups mid-transfer (incl. the serial accept loop briefly
+        // busy draining a dropped connection); if the payload is hard-dead,
+        // the reconnect fails fast (ConnectionRefused is non-retryable) and we
+        // surface the underlying error.
+        let result = transfer_file_list_resumable(
+            &cfg,
+            tx_id,
+            &req.dest_root,
+            &entries,
+            DEFAULT_RESUME_RETRIES,
+            initial_flags,
+        );
         match result {
             Ok(r) => {
                 let completed_at_ms = now_ms();

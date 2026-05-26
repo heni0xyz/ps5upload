@@ -1185,6 +1185,14 @@ hw_sensors_last_read: "Đọc lần cuối",
 playlists_recently_run: "Chạy gần đây",
 playlist_move_up: "Di chuyển danh sách phát lên",
 playlist_move_down: "Di chuyển danh sách phát xuống",
+about_feat_fast_transfers_title: "Chuyển tiền nhanh",
+about_feat_fast_transfers_body: "Giao thức nhị phân FTX2 với xác minh mảnh vỡ BLAKE3 + tối ưu hóa tệp nhỏ. Sử dụng mạng LAN của bạn.",
+about_feat_native_mount_title: "Giá đỡ hình ảnh gốc",
+about_feat_native_mount_body: "Đính kèm hình ảnh .exfat và .ffpkg vào /mnt/ps5upload/ qua MDIOCATTACH + nmount — không cần trợ giúp của bên thứ ba.",
+about_feat_works_everything_title: "Làm việc với mọi thứ",
+about_feat_works_everything_body: "Gửi bất kỳ tải trọng PS5 ELF nào — trình tải homebrew, bản vá hạt nhân, tiện ích tùy chỉnh — trên :9021 với luồng chọn tệp.",
+about_feat_hardware_title: "Chế độ xem phần cứng trực tiếp",
+about_feat_hardware_body: "Model, serial, thời gian hoạt động, tần số CPU, RAM và điều khiển ngưỡng quạt — tất cả đều không cần chạm vào giao diện người dùng của Sony.",
 };
 
 export default vi;

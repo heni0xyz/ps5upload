@@ -1184,6 +1184,14 @@ hw_sensors_last_read: "마지막 읽기",
 playlists_recently_run: "최근 실행",
 playlist_move_up: "재생 목록 위로 이동",
 playlist_move_down: "재생 목록 아래로 이동",
+about_feat_fast_transfers_title: "빠른 이체",
+about_feat_fast_transfers_body: "BLAKE3 샤드 검증 + 팩-작은-파일 최적화를 포함한 FTX2 바이너리 프로토콜. LAN을 플랫 아웃으로 사용합니다.",
+about_feat_native_mount_title: "네이티브 이미지 마운트",
+about_feat_native_mount_body: "MDIOCATTACH + nmount를 통해 .exfat 및 .ffpkg 이미지를/mnt/ps5upload/에 첨부합니다. 타사 도우미가 필요하지 않습니다.",
+about_feat_works_everything_title: "모든 것과 함께 작동합니다",
+about_feat_works_everything_body: "모든 PS5 페이로드 ELF (homebrew 로더, 커널 패치, 사용자 지정 유틸리티) 를 파일 선택기 흐름과 함께 9021을 통해 보냅니다.",
+about_feat_hardware_title: "라이브 하드웨어 보기",
+about_feat_hardware_body: "모델, 직렬, 가동 시간, CPU 주파수, RAM 및 팬 임계값 제어 — 모두 소니의 UI를 건드리지 않고도 가능합니다.",
 };
 
 export default ko;

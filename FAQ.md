@@ -291,6 +291,203 @@ core GTK/Wayland/X11 client libs still come from the host.
 
 ---
 
+## Network setup — direct Ethernet (optional, best stability + speed)
+
+**Q: Do I need anything special on my network?**
+No. The default setup is: PS5 and computer both on the same WiFi /
+LAN, the app finds the PS5 by IP. That works fine for most uses,
+including multi-GB folder uploads.
+
+**Q: When is direct Ethernet worth setting up?**
+When you upload **multi-hundred-GB game folders** or **disk images**
+and want the fastest, most reliable path. Running a cable straight
+between the PS5 and the computer:
+
+- **Bypasses WiFi entirely** — no congestion, no roaming, no
+  retransmits, no "blip during a long upload" failure mode.
+- **Bypasses your router** — no NAT, no QoS competing with whatever
+  else is on the LAN, no MTU surprises.
+- **Saturates the PS5's NIC** — the PS5 (and PS5 Pro) ship with a
+  gigabit Ethernet port (~118 MiB/s practical ceiling). Over WiFi
+  you'll see anywhere from 5 MiB/s (Wi-Fi 5 in a busy 2.4 GHz house)
+  to ~60 MiB/s (Wi-Fi 6 line-of-sight); over a direct cable you'll
+  pin the link.
+
+The cost: you need a **second NIC for internet** on the computer (any
+WiFi works, or a USB Ethernet adapter back to the router) because
+the direct cable carries no internet route. On the PS5 the direct
+cable replaces the LAN port's usual internet config, so if you want
+the console to reach PSN you'll switch its network back to WiFi /
+router when you're done uploading — or just leave PSN off while you
+transfer (PSN isn't required for any of ps5upload's features).
+
+### Step 1 — Cable + addresses
+
+- **Cable:** any Cat5e or better, straight-through. Auto-MDIX on
+  modern NICs means crossover cables aren't needed.
+- **Addresses we'll use** (any private /24 works — pick what doesn't
+  collide with your home network):
+  - **Computer:** `192.168.88.1`, mask `255.255.255.0`
+  - **PS5:**      `192.168.88.2`, mask `255.255.255.0`, gateway
+    `192.168.88.1`
+- **Why these:** both sides on the same `/24` so packets stay
+  link-local; the PS5's "manual" network screen requires the
+  gateway field to be set even though nothing routes anywhere — we
+  point it at the computer so the form saves.
+
+### Step 2 — Configure the COMPUTER
+
+#### Windows 11
+
+1. **Settings → Network & Internet → Ethernet** (the entry for the
+   adapter your direct cable is plugged into — *not* WiFi).
+2. **IP assignment → Edit → Manual → flip IPv4 on.**
+3. Fill in:
+   - **IP address:** `192.168.88.1`
+   - **Subnet mask:** `255.255.255.0`
+   - **Gateway:** *leave blank* — this is critical. If you put
+     anything here, Windows treats the cable as a possible default
+     route and may try to send internet traffic through it.
+   - **Preferred DNS:** *leave blank*
+4. Save. The adapter status will show "No internet" — that's
+   correct, this link only carries PS5 traffic.
+5. **Firewall:** set the Ethernet network profile to **Private**
+   (Settings → Network & Internet → Ethernet → Network profile type
+   → Private). The default Public profile blocks inbound on the
+   ports the helpers reply on. If Windows Defender still prompts,
+   allow `PS5Upload.exe` on Private networks.
+6. **Keep WiFi on for internet** — Windows automatically prefers
+   the route with a lower metric (the WiFi default gateway), so
+   your browser etc. keep working.
+
+#### macOS
+
+1. **System Settings → Network**, pick your Ethernet interface
+   (built-in on Intel Macs, USB-C/Thunderbolt-to-Ethernet adapter
+   on Apple Silicon — Apple's $29 dongle or any Realtek/Intel
+   2.5 GbE adapter works).
+2. **Details… → TCP/IP → Configure IPv4: Manually**
+   - **IP Address:** `192.168.88.1`
+   - **Subnet Mask:** `255.255.255.0`
+   - **Router:** *leave blank* — same reason as Windows. macOS
+     respects the empty Router field and doesn't promote the cable
+     to default gateway.
+3. **DNS → Configure DNS Servers:** empty.
+4. **OK → Apply.** The interface will show "Self-Assigned IP" or a
+   yellow status if the PS5 isn't configured yet; that goes away
+   once Step 3 is done.
+5. **Service order:** **System Settings → Network → ⋯ → Set Service
+   Order** — make sure WiFi sits **above** the Ethernet interface.
+   That keeps macOS from preferring the (internet-less) cable for
+   general traffic.
+6. **Firewall** (System Settings → Network → Firewall): if it's on,
+   allow incoming connections for `ps5upload` and `PS5Upload`. On a
+   fresh install the firewall is off by default.
+
+#### Linux (GNOME — Ubuntu, Fedora, Bazzite, Pop!_OS)
+
+1. **Settings → Network → Wired**, click the gear next to the
+   direct-cable adapter.
+2. **IPv4 tab → Method: Manual**
+   - **Address:** `192.168.88.1`, **Netmask:** `24` (or
+     `255.255.255.0`)
+   - **Gateway:** *leave blank*
+3. **DNS:** blank, **Automatic** off.
+4. **Apply**, then toggle the connection off/on.
+
+Or via `nmcli` (works on every NetworkManager distro including
+Bazzite / SteamOS desktop mode):
+
+```bash
+# replace eth0 with your interface name (`ip link` to find it)
+sudo nmcli connection add type ethernet ifname eth0 \
+  con-name ps5-direct ipv4.method manual \
+  ipv4.addresses 192.168.88.1/24
+sudo nmcli connection modify ps5-direct \
+  ipv4.gateway "" ipv4.dns "" ipv4.never-default yes
+sudo nmcli connection up ps5-direct
+```
+
+The `ipv4.never-default yes` is the Linux equivalent of leaving the
+gateway blank on Win/macOS — it tells NetworkManager this connection
+must never become the default route.
+
+**KDE Plasma:** System Settings → Connections → click the wired
+entry → IPv4 → Method: Manual, same values; under "Routes…" check
+"Use only for resources on this connection."
+
+**Firewall (`firewalld` on Fedora/Bazzite):**
+```bash
+sudo firewall-cmd --zone=trusted --add-interface=eth0 --permanent
+sudo firewall-cmd --reload
+```
+On Ubuntu with `ufw` the default is allow-outbound / deny-inbound;
+nothing extra needed since ps5upload only makes outbound
+connections to the PS5.
+
+### Step 3 — Configure the PS5
+
+1. **Settings → Network → Settings → Set Up Internet Connection**.
+2. **Use a LAN Cable.**
+3. **Custom** (not Easy).
+4. **IP Address Settings: Manual**
+   - **IP Address:** `192.168.88.2`
+   - **Subnet Mask:** `255.255.255.0`
+   - **Default Gateway:** `192.168.88.1`
+   - **Primary DNS:** `1.1.1.1` (Cloudflare — the PS5 won't actually
+     reach it on this cable, but the field can't be empty and a
+     real public IP avoids the DNS-timeout latency you'd get
+     pointing at `192.168.88.1` since the PC isn't running a DNS
+     server)
+   - **Secondary DNS:** `1.0.0.1` (or leave blank — most firmwares
+     accept an empty secondary; `0.0.0.0` is rejected by some)
+5. **MTU Settings:** Automatic.
+6. **Proxy Server:** Do Not Use.
+7. Save. The PS5 will run **Test Internet Connection** automatically
+   — **it will FAIL** ("Cannot connect to internet"). That's
+   expected and fine. The "Obtain IP Address" / "Connect to LAN"
+   steps will show **Successful** — those are what matter.
+
+### Step 4 — Verify the link
+
+On the computer:
+
+```bash
+# Should return replies in <1 ms — both sides see each other.
+ping 192.168.88.2
+```
+
+If ping works, you're done — open ps5upload and use `192.168.88.2`
+as the PS5 address. The payload-send (Connection → Send payload)
+and every transfer afterwards goes over the direct cable.
+
+### Notes / gotchas
+
+- **PSN, the Store, game updates, online play** — all require
+  internet. While the PS5 is on the direct cable, those won't work.
+  Switch the PS5's network back to WiFi (or your router) when you
+  want them; ps5upload remembers the last-used IP so re-pointing it
+  at the WiFi IP afterwards is a one-line change in Settings.
+- **PS5 Ethernet port is gigabit** — practical sustained ceiling is
+  around 110–118 MiB/s for huge files. The 2.16.0 multi-file
+  `posix_fallocate` fix is what keeps multi-GB transfers from
+  collapsing under that ceiling; before that fix, throughput
+  degraded the longer a single file ran.
+- **2.5 GbE / 10 GbE adapters on the computer** are fine and still
+  negotiate to 1 Gbps because the PS5 is the slowest link. The
+  extra headroom helps if you ever swap consoles.
+- **Don't share two connections at the same IP** — if your PS5 is
+  on both WiFi (DHCP from the router) AND this direct cable, give
+  them different IPs so the routing table doesn't get confused. The
+  `192.168.88.x` range above sidesteps any conflict with the common
+  `192.168.0/1.x` home subnets.
+- **Resuming an interrupted upload still works** — if you start an
+  upload over the direct cable, swap to WiFi mid-way (PS5 picks up
+  a different IP), the engine's resume-by-tx_id flow lets you
+  re-target the WiFi IP and pick up where it left off.
+
+---
+
 ## Getting started
 
 **Q: Do I need the payload?**
@@ -462,6 +659,12 @@ on the queued row) — it size-compares what's on the PS5 and only sends
 what's missing. On external USB/exFAT, prefer **Override** + a fresh run
 if a "completed" upload looks wrong, since a console that lost power
 mid-write can leave the destination in an inconsistent state.
+
+If your network itself is the unreliable bit (flaky WiFi, congested
+router, multi-hundred-GB transfers), a one-time **direct Ethernet
+cable** between the computer and PS5 gives the most stable + fastest
+path — see the **Network setup — direct Ethernet** section above for
+per-OS instructions and addressing.
 
 ---
 

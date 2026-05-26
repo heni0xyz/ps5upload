@@ -1183,6 +1183,14 @@ hw_sensors_last_read: "Última leitura",
 playlists_recently_run: "Executado recentemente",
 playlist_move_up: "Mover lista de reprodução para cima",
 playlist_move_down: "Mover a lista de reprodução para baixo",
+about_feat_fast_transfers_title: "Transferências rápidas",
+about_feat_fast_transfers_body: "Protocolo binário FTX2 com verificação de fragmento BLAKE3 + otimização de pacotes de pequenos arquivos. Usa sua LAN de forma plana.",
+about_feat_native_mount_title: "Montagem de imagem nativa",
+about_feat_native_mount_body: "Anexe imagens .exfat e .ffpkg a /mnt/ps5upload/ via MDIOCATTACH + nmount - não são necessários ajudantes de terceiros.",
+about_feat_works_everything_title: "Funciona com tudo",
+about_feat_works_everything_body: "Envie qualquer carga útil do PS5 ELF — carregadores caseiros, patches de kernel, utilitários personalizados — mais de:9021 com um fluxo de selecionador de arquivos.",
+about_feat_hardware_title: "Visualização de hardware ao vivo",
+about_feat_hardware_body: "Controle de modelo, serial, tempo de atividade, frequência da CPU, RAM e limite do ventilador — tudo sem tocar na interface do usuário da Sony.",
 };
 
 export default pt_BR;

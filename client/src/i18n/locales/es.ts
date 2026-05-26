@@ -1184,6 +1184,14 @@ hw_sensors_last_read: "Última lectura",
 playlists_recently_run: "Ejecutado recientemente",
 playlist_move_up: "Subir lista de reproducción",
 playlist_move_down: "Mover lista de reproducción hacia abajo",
+about_feat_fast_transfers_title: "Transferencias rápidas",
+about_feat_fast_transfers_body: "Protocolo binario FTX2 con verificación de fragmentos BLAKE3 + optimización de paquetes de archivos pequeños. Utiliza su LAN de plano.",
+about_feat_native_mount_title: "Montura de imagen nativa",
+about_feat_native_mount_body: "Adjunta imágenes .exfat y .ffpkg a /mnt/ps5upload/a través de MDIOCATTACH + nmount - no se necesitan ayudantes de terceros.",
+about_feat_works_everything_title: "Funciona con todo",
+about_feat_works_everything_body: "Envíe cualquier ELF de carga útil de PS5 (cargadores homebrew, parches de kernel, utilidades personalizadas) a través de :9021 con un flujo de selector de archivos.",
+about_feat_hardware_title: "Vista de hardware en directo",
+about_feat_hardware_body: "Modelo, serie, tiempo de actividad, frecuencia de CPU, RAM y control de umbral de ventilador, todo sin tocar la interfaz de usuario de Sony.",
 };
 
 export default es;

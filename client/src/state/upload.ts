@@ -82,6 +82,11 @@ export interface UploadState {
 
 const defaultExcludes: ExcludeRule[] = [
   { pattern: ".DS_Store", enabled: true },
+  // macOS AppleDouble sidecars (._eboot.bin, ._sce_sys, …). Created on
+  // non-HFS/exFAT volumes; uploading them pollutes the PS5 with junk and
+  // can confuse folder-dump registration. Prefix wildcard → any basename
+  // starting with "._".
+  { pattern: "._*", enabled: true },
   { pattern: "Thumbs.db", enabled: true },
   { pattern: "desktop.ini", enabled: true },
   { pattern: "*.esbak", enabled: true },

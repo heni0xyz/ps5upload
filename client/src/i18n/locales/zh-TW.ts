@@ -1185,6 +1185,14 @@ hw_sensors_last_read: "上次閱讀",
 playlists_recently_run: "最近運行",
 playlist_move_up: "上移播放列表",
 playlist_move_down: "下移播放列表",
+about_feat_fast_transfers_title: "快速傳輸",
+about_feat_fast_transfers_body: "FTX2二進位通訊協定搭配BLAKE3分片驗證+ pack-small-files最佳化。平面使用局域網。",
+about_feat_native_mount_title: "原生映像掛載",
+about_feat_native_mount_body: "通過MDIOCATTACH + nmount將.exfat和.ffpkg圖像附加到/mnt/ps5upload/-無需第三方幫手。",
+about_feat_works_everything_title: "適用於所有事物",
+about_feat_works_everything_body: "透過檔案選擇器流程傳送任何PS5有效載荷ELF —自製載入程式、核心修補程式、自訂公用程式— over: 9021。",
+about_feat_hardware_title: "即時硬體檢視",
+about_feat_hardware_body: "型號、串行、正常運行時間、CPU頻率、RAM和風扇閾值控制—所有這些都無需觸及Sony的UI。",
 };
 
 export default zh_TW;

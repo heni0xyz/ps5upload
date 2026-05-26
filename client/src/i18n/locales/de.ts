@@ -1184,6 +1184,14 @@ hw_sensors_last_read: "Zuletzt gelesen",
 playlists_recently_run: "Kürzlich ausgeführt",
 playlist_move_up: "Playlist nach oben verschieben",
 playlist_move_down: "Playlist nach unten verschieben",
+about_feat_fast_transfers_title: "Schnelle Überweisungen",
+about_feat_fast_transfers_body: "FTX2 Binärprotokoll mit BLAKE3 Shard Verification + Pack-Small-Files-Optimierung. Verwendet Ihr LAN mit voller Kraft.",
+about_feat_native_mount_title: "Native Image-Halterung",
+about_feat_native_mount_body: "Hängen Sie .exfat- und .ffpkg-Bilder an /mnt/ps5upload/ via MDIOCATTACH + nmount an — es werden keine Hilfskräfte von Drittanbietern benötigt.",
+about_feat_works_everything_title: "Funktioniert mit allem",
+about_feat_works_everything_body: "Senden Sie eine beliebige PS5-NUTZLAST ELF — Homebrew-Loader, Kernel-Patches, benutzerdefinierte Dienstprogramme — über :9021 mit einem File-Picker-Fluss.",
+about_feat_hardware_title: "Live-Hardware-Ansicht",
+about_feat_hardware_body: "Modell-, serielle, Uptime-, CPU-Frequenz-, RAM- und Lüfterschwellensteuerung - alles ohne die Benutzeroberfläche von Sony zu berühren.",
 };
 
 export default de;

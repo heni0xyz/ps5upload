@@ -34,6 +34,21 @@ describe("humanizeJobErrorReason", () => {
     );
   });
 
+  it("generalizes any fs_write_failed_errno_<N> (not just 27/28)", () => {
+    // The payload now reports the actual errno from a mid-transfer write
+    // failure (e.g. 5=EIO, 13=EACCES) instead of silently dropping the
+    // connection. Unknown codes must still get actionable write-failure
+    // guidance, not fall through to null (which showed the misleading
+    // "PS5 stopped responding" message).
+    const msg = humanizeJobErrorReason("fs_write_failed_errno_5");
+    expect(msg).not.toBeNull();
+    expect(msg).toMatch(/write|destination|drive|retry/i);
+    // Bare fallback (errno unavailable, e.g. the threaded writer path).
+    expect(humanizeJobErrorReason("fs_write_failed")).toMatch(
+      /write|destination|drive|retry/i,
+    );
+  });
+
   it("recognizes pre-flight insufficient-space reason", () => {
     // Phase C surfaces this BEFORE the upload starts; humanization
     // must explicitly mention "destination drive" so the user knows

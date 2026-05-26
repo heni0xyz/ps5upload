@@ -2599,6 +2599,18 @@ export class UploadJobError extends Error {
  *  in the UI with the raw `error_detail` for diagnostic depth. */
 export function humanizeJobErrorReason(reason: string | undefined): string | null {
   if (!reason) return null;
+  // Mid-transfer write failure from the payload's direct-write path. The
+  // payload sends `fs_write_failed_errno_<N>` (e.g. 28=ENOSPC, 27=EFBIG)
+  // — previously these write failures closed the socket with no error
+  // frame, so the app showed the misleading "PS5 stopped responding /
+  // crashed" message. Map the disk-space codes pointedly; anything else
+  // (and the bare `fs_write_failed` fallback) gets generic guidance.
+  if (reason.startsWith("fs_write_failed")) {
+    if (reason === "fs_write_failed_errno_28" || reason === "fs_write_failed_errno_27") {
+      return "The destination drive ran out of space (or the file is too big for that filesystem). Free space on the PS5 / external drive — or pick a different destination — then click Retry.";
+    }
+    return "The PS5 couldn't write to the destination mid-transfer — most often the drive filled up or an external drive disconnected. Check free space / reconnect the drive, then click Retry (the upload resumes from where it stopped).";
+  }
   switch (reason) {
     case "preflight_insufficient_space":
       return "The destination drive doesn't have enough free space for this file. Free up space on the PS5 (Settings → Storage) or pick a different destination, then click Retry.";
@@ -2612,9 +2624,6 @@ export function humanizeJobErrorReason(reason: string | undefined): string | nul
     case "shards_incomplete":
     case "spool_apply_failed":
       return "The transfer didn't finish before being interrupted — a file on the PS5 is incomplete, so it wasn't published (your old copy, if any, is untouched). This usually means the PS5 went into rest mode or lost power mid-upload. Keep the console awake (Settings → System → Power Saving → Set Time Until PS5 Turns Off), then re-run this item — Resume now re-sends only the missing files, or choose Override for a clean copy.";
-    case "fs_write_failed_errno_28":
-    case "fs_write_failed_errno_27":
-      return "Destination filesystem rejected the write (out of space or file too big). Pick a different destination drive or free space.";
     case "fs_delete_path_not_allowed":
     case "fs_mkdir_path_not_allowed":
     case "fs_list_dir_path_denied":

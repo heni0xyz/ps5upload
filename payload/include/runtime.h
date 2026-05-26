@@ -40,6 +40,14 @@ typedef struct {
     uint64_t hash_us;       /* BLAKE3 hasher_update aggregate */
     uint64_t shard_func_us; /* total time inside runtime_write_shard_to_path */
     int      sock_rcvbuf;   /* kernel-actual SO_RCVBUF on accepted fd */
+    /* errno (or a synthetic code: ENOMEM for a buffer-alloc failure) captured
+     * at the point a direct-write shard helper failed. The STREAM_SHARD
+     * dispatcher reads this to send a `fs_write_failed_errno_<N>` ERROR frame
+     * to the host instead of just closing the socket — without it a disk-full
+     * (ENOSPC) write surfaces as a bare EOF, which the desktop app renders as
+     * the misleading "your PS5 stopped responding / crashed" message. 0 = no
+     * failure recorded. */
+    int      last_io_errno;
     /* direct-write optimisation: skip spool entirely and write straight to a
      * `.ps5up2-tmp` sibling of the destination, rename on commit. Eliminates
      * the spool-then-apply I/O amplification. */

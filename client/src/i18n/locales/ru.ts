@@ -1183,6 +1183,14 @@ hw_sensors_last_read: "Последнее прочтение",
 playlists_recently_run: "Недавно запущено",
 playlist_move_up: "Переместить плейлист вверх",
 playlist_move_down: "Переместить плейлист вниз",
+about_feat_fast_transfers_title: "Быстрые трансферы",
+about_feat_fast_transfers_body: "Бинарный протокол FTX2 с проверкой шарда BLAKE3 + оптимизация pack-small-files. Использует вашу локальную сеть равномерно.",
+about_feat_native_mount_title: "Собственное крепление образа",
+about_feat_native_mount_body: "Прикрепите изображения .exfat и .ffpkg к /mnt/ps5upload/ через MDIOCATTACH + nmount — сторонние помощники не требуются.",
+about_feat_works_everything_title: "Работает со всем",
+about_feat_works_everything_body: "Отправьте любую полезную нагрузку PS5 ELF — самодельные загрузчики, исправления ядра, пользовательские утилиты — более :9021 с потоком выбора файлов.",
+about_feat_hardware_title: "Просмотр оборудования в реальном времени",
+about_feat_hardware_body: "Модель, последовательный интерфейс, время безотказной работы, частота процессора, оперативная память и управление пороговым значением вентилятора — все это не затрагивает пользовательский интерфейс Sony.",
 };
 
 export default ru;

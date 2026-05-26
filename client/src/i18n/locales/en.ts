@@ -301,6 +301,21 @@ about_tagline: "Fast, reliable uploads from your computer to your PS5. Transfer,
 about_what_it_does: "What it does",
 about_credits: "Credits",
 about_credits_text: "See LICENSE for licensing terms.",
+// About screen — feature cards (rendered from a {key, fallback} data table
+// in screens/About/index.tsx, which the i18n extractor doesn't walk, so
+// these are declared here by hand).
+about_feat_fast_transfers_title: "Fast transfers",
+about_feat_fast_transfers_body:
+  "FTX2 binary protocol with BLAKE3 shard verification + pack-small-files optimization. Uses your LAN flat-out.",
+about_feat_native_mount_title: "Native image mount",
+about_feat_native_mount_body:
+  "Attach .exfat and .ffpkg images to /mnt/ps5upload/ via MDIOCATTACH + nmount — no third-party helpers needed.",
+about_feat_works_everything_title: "Works with everything",
+about_feat_works_everything_body:
+  "Send any PS5 payload ELF — homebrew loaders, kernel patches, custom utilities — over :9021 with a file-picker flow.",
+about_feat_hardware_title: "Live hardware view",
+about_feat_hardware_body:
+  "Model, serial, uptime, CPU frequency, RAM, and fan-threshold control — all without touching Sony's UI.",
 // Library row buttons + confirm dialogs (cancel already exists)
 dismiss: "Dismiss",
 library_row_kind_game: "Game",

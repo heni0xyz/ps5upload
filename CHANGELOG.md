@@ -4,6 +4,26 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 2.16.0
+
+- **Folder uploads survive network blips.** Multi-hundred-GB game folders that
+  used to die on a single transient drop now reconnect and resume automatically
+  — same resilience single-file uploads always had. A 7.3 GiB / 1007-file game
+  folder now uploads cleanly in one shot on real hardware.
+- **Much faster on big folders.** Multi-GB files inside a folder upload now
+  preallocate disk space up front, removing the slow-down that hit long
+  transfers mid-stream. ~40 MiB/s sustained over gigabit Ethernet in testing.
+- **Honest error messages on upload failures.** When something actually goes
+  wrong mid-transfer (drive full, drive disconnected, etc.) the app now tells
+  you *why* instead of the generic "PS5 stopped responding."
+- **macOS junk filtered out.** Uploads from external drives no longer ship
+  `._*` AppleDouble metadata files into your PS5 game folders.
+- **New docs: direct-Ethernet setup.** The FAQ now has a per-OS guide
+  (Windows 11, macOS, Linux) for cabling the PS5 straight to your computer —
+  the most stable + fastest upload path for huge games.
+
+---
+
 ## 2.15.0
 
 - **Folders with lots of tiny files now upload reliably.** Games like Astro

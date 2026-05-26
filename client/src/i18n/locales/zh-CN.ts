@@ -1191,6 +1191,14 @@ hw_sensors_last_read: "前次读数",
 playlists_recently_run: "最近运行",
 playlist_move_up: "上移播放列表",
 playlist_move_down: "下移播放列表",
+about_feat_fast_transfers_title: "快速传输",
+about_feat_fast_transfers_body: "FTX2二进制协议，带BLAKE3分片验证+ pack-small-files优化。平面使用您的局域网。",
+about_feat_native_mount_title: "原生映像挂载",
+about_feat_native_mount_body: "通过MDIOCATTACH + nmount将.exfat和.ffpkg图像附加到/mnt/ps5upload/-无需第三方助手。",
+about_feat_works_everything_title: "适用于所有事物",
+about_feat_works_everything_body: "使用文件选取器流发送任何PS5有效负载ELF —自制加载器、内核补丁、自定义实用程序— over: 9021。",
+about_feat_hardware_title: "实时硬件视图",
+about_feat_hardware_body: "型号、串行、正常运行时间、CPU频率、RAM和风扇阈值控制—所有这些都不会触及索尼的用户界面。",
 };
 
 export default zh_CN;

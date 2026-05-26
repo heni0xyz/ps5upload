@@ -1184,6 +1184,14 @@ hw_sensors_last_read: "آخر قراءة",
 playlists_recently_run: "تم تشغيله مؤخرًا",
 playlist_move_up: "نقل قائمة التشغيل لأعلى",
 playlist_move_down: "نقل قائمة التشغيل لأسفل",
+about_feat_fast_transfers_title: "تحويلات سريعة",
+about_feat_fast_transfers_body: "بروتوكول ثنائي FTX2 مع التحقق من شظايا BLAKE3 + تحسين الملفات الصغيرة. يستخدم شبكة LAN الخاصة بك بشكل مسطح.",
+about_feat_native_mount_title: "حامل الصورة الأصلي",
+about_feat_native_mount_body: "إرفاق صور .exfat و .ffpkg إلى /mnt/ps5upload/ عبر MDIOCATTACH + nmount — لا حاجة إلى مساعدين من طرف ثالث.",
+about_feat_works_everything_title: "يعمل مع كل شيء",
+about_feat_works_everything_body: "إرسال أي حمولة PS5 ELF — لوادر البيرة المنزلية، بقع النواة، المرافق المخصصة — أكثر من :9021 مع تدفق منتقي الملفات.",
+about_feat_hardware_title: "عرض مباشر للأجهزة",
+about_feat_hardware_body: "الطراز والتسلسل ووقت التشغيل وتردد وحدة المعالجة المركزية وذاكرة الوصول العشوائي والتحكم في عتبة المروحة — كل ذلك دون لمس واجهة المستخدم من سوني.",
 };
 
 export default ar;

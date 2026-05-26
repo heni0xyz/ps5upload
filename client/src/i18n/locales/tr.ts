@@ -1183,6 +1183,14 @@ hw_sensors_last_read: "Son okuma",
 playlists_recently_run: "Son zamanlarda çalıştırılan",
 playlist_move_up: "Oynatma listesini yukarı taşı",
 playlist_move_down: "Oynatma listesini aşağı taşı",
+about_feat_fast_transfers_title: "Hızlı transferler",
+about_feat_fast_transfers_body: "BLAKE3 parça doğrulaması + küçük dosya paketi optimizasyonu ile FTX2 ikili protokolü. LAN'ınızı tamamen kullanır.",
+about_feat_native_mount_title: "Yerel görüntü montajı",
+about_feat_native_mount_body: "MDIOCATTACH + nmount ile/mnt/ps5upload/ adresine .exfat ve .ffpkg görüntüleri ekleyin — üçüncü taraf yardımcılarına gerek yoktur.",
+about_feat_works_everything_title: "Her şeyle çalışır",
+about_feat_works_everything_body: "Herhangi bir PS5 yükünü ELF — homebrew yükleyiciler, çekirdek yamaları, özel yardımcı programlar — gönderin: dosya seçici akışıyla 9021.",
+about_feat_hardware_title: "Canlı donanım görünümü",
+about_feat_hardware_body: "Sony'nin kullanıcı arayüzüne dokunmadan model, seri, çalışma süresi, CPU frekansı, RAM ve fan eşiği kontrolü.",
 };
 
 export default tr;

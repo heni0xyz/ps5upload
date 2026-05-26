@@ -1184,6 +1184,14 @@ hw_sensors_last_read: "最終読み取り",
 playlists_recently_run: "最近実行したもの",
 playlist_move_up: "プレイリストを上に移動",
 playlist_move_down: "プレイリストを下に移動",
+about_feat_fast_transfers_title: "高速転送",
+about_feat_fast_transfers_body: "BLAKE 3シャード検証+パック-小ファイル最適化を備えたFTX 2バイナリプロトコル。LANを平らに使用します。",
+about_feat_native_mount_title: "ネイティブイメージマウント",
+about_feat_native_mount_body: "MDIOCATTACH + nmount経由で/mnt/ps 5 upload/に.exfatと.ffpkg画像を添付します。サードパーティのヘルパーは必要ありません。",
+about_feat_works_everything_title: "すべてに対応",
+about_feat_works_everything_body: "任意のPS 5ペイロードELF —自作ローダー、カーネルパッチ、カスタムユーティリティ—ファイルピッカーフローを使用して9021を送信します。",
+about_feat_hardware_title: "ライブハードウェアビュー",
+about_feat_hardware_body: "モデル、シリアル、稼働時間、CPU周波数、RAM、ファン閾値制御—すべてソニーのUIに触れることなく。",
 };
 
 export default ja;

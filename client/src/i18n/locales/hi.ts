@@ -1184,6 +1184,14 @@ hw_sensors_last_read: "आखिरी बार पढ़ा गया",
 playlists_recently_run: "हाल ही में चलाया गया",
 playlist_move_up: "प्लेलिस्ट ऊपर ले जाएँ",
 playlist_move_down: "प्लेलिस्ट को नीचे ले जाएँ",
+about_feat_fast_transfers_title: "तेज़ ट्रांसफ़र",
+about_feat_fast_transfers_body: "BLAKE3 शार्ड सत्यापन + पैक - छोटी फ़ाइलों के ऑप्टिमाइज़ेशन के साथ FTX2 बाइनरी प्रोटोकॉल। अपने LAN का फ़्लैट - आउट इस्तेमाल करें।",
+about_feat_native_mount_title: "नेटिव इमेज माउंट",
+about_feat_native_mount_body: "MDIOCATTACH + nmount के माध्यम से .exfat और .ffpkg छवियों को /mnt/ps5upload/में संलग्न करें — किसी तीसरे पक्ष के सहायकों की आवश्यकता नहीं है।",
+about_feat_works_everything_title: "हर चीज़ के साथ काम करता है",
+about_feat_works_everything_body: "कोई भी PS5 पेलोड ELF — होमब्री लोडर, कर्नेल पैच, कस्टम यूटिलिटीज — फ़ाइल — पिकर फ़्लो के साथ 9021 से अधिक भेजें।",
+about_feat_hardware_title: "लाइव हार्डवेयर व्यू",
+about_feat_hardware_body: "मॉडल, सीरियल, अपटाइम, सीपीयू फ़्रीक्वेंसी, रैम और फ़ैन - थ्रेशोल्ड कंट्रोल — सभी सोनी के यूआई को छुए बिना।",
 };
 
 export default hi;

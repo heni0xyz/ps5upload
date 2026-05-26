@@ -1183,6 +1183,14 @@ hw_sensors_last_read: "সর্বশেষ পড়া",
 playlists_recently_run: "সম্প্রতি চলছে",
 playlist_move_up: "প্লেলিস্ট উপরে সরান",
 playlist_move_down: "প্লেলিস্ট নিচে সরান",
+about_feat_fast_transfers_title: "দ্রুত স্থানান্তর",
+about_feat_fast_transfers_body: "BLAKE3 শার্ড যাচাইকরণ + প্যাক-স্মল-ফাইল অপ্টিমাইজেশনের সাথে FTX2 বাইনারি প্রোটোকল । আপনার LAN ফ্ল্যাট-আউট ব্যবহার করুন ।",
+about_feat_native_mount_title: "নেটিভ ইমেজ মাউন্ট",
+about_feat_native_mount_body: "MDIOCATTACH + nmount-এর মাধ্যমে/mnt/ps5upload/এ .exfat এবং .ffpkg ছবি সংযুক্ত করুন — কোন তৃতীয় পক্ষের সাহায্যকারীর প্রয়োজন নেই ।",
+about_feat_works_everything_title: "সবকিছু নিয়ে কাজ করে",
+about_feat_works_everything_body: "যে কোনও PS5 পেলোড ELF পাঠান — হোমব্রিউ লোডার, কার্নেল প্যাচ, কাস্টম ইউটিলিটি — এর বেশি :9021 একটি ফাইল-পিকার প্রবাহ সহ ।",
+about_feat_hardware_title: "লাইভ হার্ডওয়্যার ভিউ",
+about_feat_hardware_body: "মডেল, সিরিয়াল, আপটাইম, সিপিইউ ফ্রিকোয়েন্সি, র ‍ ্যাম এবং ফ্যান-থ্রেসহোল্ড কন্ট্রোল — সবই সনি এর ইউআই স্পর্শ না করেই ।",
 };
 
 export default bn;

@@ -17,6 +17,19 @@ use std::path::{Component, Path};
 
 pub const DEFAULT_SHARD_SIZE: usize = 32 * 1024 * 1024; // 32 MiB
 pub const DEFAULT_MAX_SHARD_RETRIES: u32 = 3;
+/// Default resume-on-drop retries for whole-transfer wrappers (folder,
+/// file-list, single-file). One fresh attempt + this many RESUME retries.
+///
+/// Sized to outlast the PAYLOAD's serial transfer-accept loop being briefly
+/// unable to `accept()` a reconnect while it's still draining the dropped
+/// connection (its `SO_RCVTIMEO` is 120s in the worst case of a true network
+/// partition; in the common case — engine closes the socket, or the payload
+/// finishes its current shard write — it frees in seconds). Folder + file-list
+/// uploads previously used only 2 here while single-file used 5, so a single
+/// transient blip killed a multi-hour folder upload that single-file shrugged
+/// off. Paired with the raised backoff cap in `resumable_retry`. A genuinely
+/// dead PS5 still fails fast: `ConnectionRefused` is non-retryable.
+pub const DEFAULT_RESUME_RETRIES: u32 = 6;
 /// Default maximum number of STREAM_SHARD frames outstanding (no ACK yet).
 /// Pipelining past 1 is what hides per-shard RTT on small-file directories.
 /// Set conservatively: 32 small shards (~128 KiB total at 4 KiB each) or a
@@ -1648,7 +1661,11 @@ where
                     }
                     return Err(e);
                 }
-                let backoff_ms = 500u64.saturating_mul(1u64 << attempt.min(4));
+                // 500ms → 1s → 2s → 4s → 8s → 16s (capped). The 16s cap (was
+                // 8s) widens the total retry window so it can outlast the
+                // payload's serial accept loop briefly being unable to take a
+                // reconnect while it drains the dropped connection.
+                let backoff_ms = 500u64.saturating_mul(1u64 << attempt.min(5));
                 eprintln!("[resume] {label} attempt {attempt} failed ({e:#}); retrying in {backoff_ms} ms");
                 prior_failures.push(format!("attempt {attempt}: {e}"));
                 std::thread::sleep(std::time::Duration::from_millis(backoff_ms));

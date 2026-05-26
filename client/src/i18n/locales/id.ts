@@ -1183,6 +1183,14 @@ hw_sensors_last_read: "Terakhir dibaca",
 playlists_recently_run: "Berjalan baru - baru ini",
 playlist_move_up: "Pindahkan daftar putar ke atas",
 playlist_move_down: "Turunkan daftar putar",
+about_feat_fast_transfers_title: "Transfer cepat",
+about_feat_fast_transfers_body: "Protokol biner FTX2 dengan verifikasi pecahan BLAKE3 + optimasi pack - small - files. Menggunakan Lan flat - out Anda.",
+about_feat_native_mount_title: "Dudukan gambar asli",
+about_feat_native_mount_body: "Lampirkan gambar .exfat dan .ffpkg ke /mnt/ps5upload/ melalui MDIOCATTACH + nmount - tidak diperlukan bantuan pihak ketiga.",
+about_feat_works_everything_title: "Bekerja dengan segalanya",
+about_feat_works_everything_body: "Kirim ELF muatan PS5 — pemuat homebrew, tambalan kernel, utilitas khusus — lebih dari :9021 dengan alur pemetik file.",
+about_feat_hardware_title: "Tampilan perangkat keras langsung",
+about_feat_hardware_body: "Model, serial, uptime, frekuensi CPU, Ram, dan kontrol ambang kipas — semua tanpa menyentuh UI Sony.",
 };
 
 export default id;

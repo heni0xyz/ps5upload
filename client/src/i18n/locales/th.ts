@@ -1183,6 +1183,14 @@ hw_sensors_last_read: "อ่านล่าสุด",
 playlists_recently_run: "เรียกใช้เมื่อเร็วๆนี้",
 playlist_move_up: "ย้ายเพลย์ลิสต์ขึ้น",
 playlist_move_down: "ย้ายเพลย์ลิสต์ลง",
+about_feat_fast_transfers_title: "การโอนเงินที่รวดเร็ว",
+about_feat_fast_transfers_body: "โปรโตคอลไบนารี่ FTX2 พร้อมการยืนยันเศษ BLAKE3 + การเพิ่มประสิทธิภาพไฟล์ขนาดเล็กใช้ LAN แบบแฟลตเอ้าท์ของคุณ",
+about_feat_native_mount_title: "ตัวยึดภาพแบบเนทีฟ",
+about_feat_native_mount_body: "แนบภาพ .exfat และ .ffpkg ไปยัง/mnt/ps5upload/ผ่าน MDIOCATTACH + nmount — ไม่จำเป็นต้องมีผู้ช่วยบุคคลที่สาม",
+about_feat_works_everything_title: "ใช้งานได้กับทุกอย่าง",
+about_feat_works_everything_body: "ส่ง PS5 payload ELF ใดๆ — ตัวโหลดโฮมบรูแพทช์เคอร์เนลยูทิลิตี้ที่กำหนดเอง — มากกว่า: 9021 ด้วยการไหลของตัวเลือกไฟล์",
+about_feat_hardware_title: "มุมมองฮาร์ดแวร์สด",
+about_feat_hardware_body: "รุ่น, อนุกรม, เวลาทำงาน, ความถี่ของ CPU, RAM และการควบคุมเกณฑ์พัดลม — ทั้งหมดโดยไม่ต้องสัมผัส UI ของ Sony",
 };
 
 export default th;

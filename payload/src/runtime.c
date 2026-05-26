@@ -2435,10 +2435,25 @@ static void pack_pool_teardown(runtime_tx_entry_t *entry) {
  * Falls back to plain drain if `open` fails, so the socket is never left
  * in a bad read state.
  */
+/*
+ * Multi-file direct shard write. Each call: open the file, write `data_len`
+ * bytes at `write_offset`, close.
+ *
+ * Offset model (changed in 2.16.0): the FIRST shard for a file opens with
+ * O_TRUNC + posix_fallocate(preallocate_bytes), and the caller passes the
+ * file's full expected size as `preallocate_bytes`. Subsequent shards open
+ * O_WRONLY and lseek(SEEK_SET, write_offset) before writing. The pre-2.16.0
+ * model used O_APPEND, which couldn't be combined with prealloc (fallocate
+ * extends file size → O_APPEND writes land past the fallocated region) and
+ * therefore left multi-GB files sparse-growing on UFS — the same metadata-
+ * churn → throughput-collapse failure mode the single-file persistent writer
+ * was fixed against in 2.2.29.
+ */
 static int runtime_write_shard_to_path(runtime_tx_entry_t *entry,
                                         const char *path,
                                         int truncate,
                                         uint64_t preallocate_bytes,
+                                        uint64_t write_offset,
                                         int client_fd,
                                         uint64_t data_len,
                                         unsigned char *out_digest /* BLAKE3_OUT_LEN */) {
@@ -2484,14 +2499,19 @@ static int runtime_write_shard_to_path(runtime_tx_entry_t *entry,
         fprintf(stderr,
                 "[payload2] shard buffer alloc failed (%zu B x2); draining + failing tx\n",
                 (size_t)PS5UPLOAD2_SHARD_IO_BUF);
+        if (entry) entry->last_io_errno = ENOMEM;
         (void)drain_shard_data(client_fd, data_len);
         return -1;
     }
 
     t_open_start = now_us();
-    flags = O_WRONLY | O_CREAT | (truncate ? O_TRUNC : O_APPEND);
+    /* Truncate on first shard; subsequent shards rely on lseek below to
+     * position into the (already preallocated) file. NEVER O_APPEND for the
+     * multi-file path — see the function header. */
+    flags = O_WRONLY | O_CREAT | (truncate ? O_TRUNC : 0);
     fd = open(path, flags, 0666);
     if (fd < 0) {
+        if (entry) entry->last_io_errno = errno;
         free(bufs[0]);
         free(bufs[1]);
         /* Same drain-then-FAIL contract: open() failing while we still
@@ -2500,6 +2520,25 @@ static int runtime_write_shard_to_path(runtime_tx_entry_t *entry,
         fprintf(stderr,
                 "[payload2] shard open %s failed errno=%d; draining + failing tx\n",
                 path, errno);
+        (void)drain_shard_data(client_fd, data_len);
+        return -1;
+    }
+    /* Position the fd at the correct write offset for this shard. For the
+     * first shard of a file truncate==1 and write_offset==0 (open already left
+     * fd at 0; lseek(0) is a harmless no-op). For subsequent shards we MUST
+     * seek explicitly — the file was preallocated to its full size on shard 1
+     * so SEEK_END would jump to that fallocated tail, not the actual data end.
+     * lseek failure here means we'd corrupt the file by writing at the wrong
+     * offset, so bail out (same drain-then-FAIL contract as open). */
+    if (lseek(fd, (off_t)write_offset, SEEK_SET) == (off_t)-1) {
+        int saved = errno;
+        if (entry) entry->last_io_errno = saved;
+        close(fd);
+        free(bufs[0]);
+        free(bufs[1]);
+        fprintf(stderr,
+                "[payload2] shard lseek %s to %llu failed errno=%d; draining + failing tx\n",
+                path, (unsigned long long)write_offset, saved);
         (void)drain_shard_data(client_fd, data_len);
         return -1;
     }
@@ -2530,6 +2569,7 @@ static int runtime_write_shard_to_path(runtime_tx_entry_t *entry,
             fprintf(stderr,
                     "[payload2] posix_fallocate %s: ENOSPC (need %lld B); aborting tx\n",
                     path, (long long)preallocate_bytes);
+            if (entry) entry->last_io_errno = ENOSPC;
             close(fd);
             free(bufs[0]);
             free(bufs[1]);
@@ -2563,7 +2603,11 @@ static int runtime_write_shard_to_path(runtime_tx_entry_t *entry,
                 blake3_hasher_update(&hasher, bufs[0], take);
                 t_hash += (now_us() - th);
             }
-            if (write_full(fd, bufs[0], take) != 0) { rc_ret = -1; break; }
+            if (write_full(fd, bufs[0], take) != 0) {
+                if (entry) entry->last_io_errno = errno;
+                rc_ret = -1;
+                break;
+            }
             remaining -= (uint64_t)take;
         }
         {
@@ -2607,7 +2651,11 @@ static int runtime_write_shard_to_path(runtime_tx_entry_t *entry,
                             : (size_t)remaining;
             if (recv_exact(client_fd, bufs[0], take) != 0) { rc_ret = -1; break; }
             if (hash_enabled) blake3_hasher_update(&hasher, bufs[0], take);
-            if (write_full(fd, bufs[0], take) != 0) { rc_ret = -1; break; }
+            if (write_full(fd, bufs[0], take) != 0) {
+                if (entry) entry->last_io_errno = errno;
+                rc_ret = -1;
+                break;
+            }
             remaining -= (uint64_t)take;
         }
         close(fd);
@@ -2785,6 +2833,7 @@ static int runtime_write_shard_persistent(runtime_tx_entry_t *entry,
              * so the tx aborts. */
             fprintf(stderr, "[payload2] direct persistent: open %s failed errno=%d\n",
                     entry->tmp_path, errno);
+            entry->last_io_errno = errno;
             (void)drain_shard_data(client_fd, data_len);
             return -1;
         }
@@ -2820,6 +2869,7 @@ static int runtime_write_shard_persistent(runtime_tx_entry_t *entry,
                         "[payload2] direct persistent posix_fallocate %s: ENOSPC "
                         "(need %lld B); aborting tx\n",
                         entry->tmp_path, (long long)preallocate_bytes);
+                entry->last_io_errno = ENOSPC;
                 close(fd);
                 (void)drain_shard_data(client_fd, data_len);
                 return -1;
@@ -2880,6 +2930,7 @@ static int runtime_write_shard_persistent(runtime_tx_entry_t *entry,
             fprintf(stderr,
                     "[payload2] direct persistent: sync_buf alloc failed (%zu B); failing tx\n",
                     (size_t)PS5UPLOAD2_SHARD_IO_BUF);
+            entry->last_io_errno = ENOMEM;
             (void)drain_shard_data(client_fd, data_len);
             return -1;
         }
@@ -2896,6 +2947,7 @@ static int runtime_write_shard_persistent(runtime_tx_entry_t *entry,
                 t_hash += (now_us() - th);
             }
             if (write_full(entry->direct_fd, sync_buf, take) != 0) {
+                entry->last_io_errno = errno;
                 rc_ret = -1; break;
             }
             remaining -= (uint64_t)take;
@@ -2985,9 +3037,10 @@ static int runtime_write_shard_data(runtime_tx_entry_t *entry,
     }
     snprintf(path, sizeof(path), "%s/%llu",
              spool_dir, (unsigned long long)shard_seq);
-    /* Spool shard file is always a fresh write; data_len is known, so
-     * preallocate helps reduce fragmentation when shards are large. */
+    /* Spool shard file is always a fresh single-shard write — truncate +
+     * preallocate `data_len`, write at offset 0. */
     return runtime_write_shard_to_path(entry, path, 1, data_len,
+                                        /*write_offset=*/0,
                                         client_fd, data_len, out_digest);
 }
 
@@ -3080,6 +3133,18 @@ struct manifest_index_entry {
     uint32_t path_len;      /* length of the path in bytes */
     uint32_t _reserved;
     uint64_t size;          /* file size in bytes (informational) */
+    /* IN-MEMORY ONLY (not journaled). Per-tx running offset for the next
+     * write into this file's `.ps5up2-tmp`. Lets the multi-file direct write
+     * path posix_fallocate(size) on the first shard + write each subsequent
+     * shard at the correct byte offset, instead of using O_APPEND. The old
+     * O_APPEND model couldn't preallocate (fallocate extends file size, but
+     * O_APPEND writes go to EOF) and caused UFS throughput collapse on multi-
+     * GB files mid-transfer — the same failure mode the single-file persistent
+     * writer was fixed for in 2.2.29. Reset to 0 on every fresh BEGIN_TX
+     * (calloc'd by build_manifest_index) and on resume-rebuild; the resume
+     * reconcile clamps the cursor to a file boundary so a re-sent file always
+     * starts at offset 0 anyway. */
+    uint64_t bytes_written;
 };
 
 /*
@@ -3295,6 +3360,7 @@ static int lookup_manifest_index(const manifest_index_entry_t *idx,
             }
             out->shard_start = s;
             out->shard_count = ec;
+            out->size        = idx[mid].size;
             return 0;
         }
     }
@@ -4002,7 +4068,28 @@ static int handle_packed_shard(runtime_state_t *state, int client_fd,
                     size_t take = rem > sizeof(buf) ? sizeof(buf) : (size_t)rem;
                     if (recv_exact(client_fd, buf, take) != 0) { close(fd); return -1; }
                     if (want_verify) blake3_hasher_update(&hasher, buf, take);
-                    if (write_full(fd, buf, take) != 0) { close(fd); return -1; }
+                    if (write_full(fd, buf, take) != 0) {
+                        /* Disk-full / I/O error writing a packed record. Like
+                         * the pool path above, abort + report instead of a
+                         * bare close (which the app shows as "PS5 crashed").
+                         * JSON body so the engine's extract_payload_error
+                         * lifts the errno into an actionable message. */
+                        int we_p = errno;
+                        char pwf[200];
+                        int pwn = snprintf(pwf, sizeof(pwf),
+                                           "{\"error\":\"fs_write_failed_errno_%d\","
+                                           "\"detail\":\"packed write to destination "
+                                           "failed: %s\"}",
+                                           we_p, strerror(we_p));
+                        close(fd);
+                        runtime_abort_tx_fatal(state, entry);
+                        if (pwn > 0) {
+                            if ((size_t)pwn >= sizeof(pwf)) pwn = (int)sizeof(pwf) - 1;
+                            return send_frame(client_fd, FTX2_FRAME_ERROR, 0,
+                                              trace_id, pwf, (uint64_t)pwn);
+                        }
+                        return -1;
+                    }
                     rem -= take;
                 }
             }
@@ -4192,19 +4279,55 @@ static int handle_stream_shard(runtime_state_t *state, int client_fd,
                     }
                     (void)unlink(tmp_path);
                 }
-                /* First shard of this file truncates + preallocates;
-                 * subsequent shards append. shard_count==1 (the common
-                 * directory case) means the entire file is this shard. */
+                /* Locate the MUTABLE index entry for this file so we can read +
+                 * advance its bytes_written cursor. Binary search by shard_start
+                 * (the value lookup_manifest_index just told us). Falls back to
+                 * NULL on the impossible case of a slot mismatch, in which case
+                 * we degrade gracefully to a no-prealloc, naive offset-from-0
+                 * write — correct for a single-shard file. */
+                manifest_index_entry_t *mut_idx_arr =
+                    (manifest_index_entry_t *)entry->manifest_index;
+                manifest_index_entry_t *idx_mut = NULL;
+                {
+                    uint64_t lo = 0, hi = entry->manifest_index_count;
+                    while (lo < hi) {
+                        uint64_t mid = lo + (hi - lo) / 2;
+                        uint64_t s = mut_idx_arr[mid].shard_start;
+                        if (s < mf.shard_start) lo = mid + 1;
+                        else if (s > mf.shard_start) hi = mid;
+                        else { idx_mut = &mut_idx_arr[mid]; break; }
+                    }
+                }
+                /* New (2.16.0) write model: on the FIRST shard of every multi-
+                 * file file — single-shard OR multi-shard — posix_fallocate the
+                 * full file size up front so subsequent shards land in already-
+                 * allocated blocks. The old code only preallocated single-shard
+                 * files; multi-GB files (game images inside a folder dump) grew
+                 * sparse-append, triggering UFS metadata churn → throughput
+                 * collapse mid-transfer → engine 30 s socket-write timeout →
+                 * connection drop while the serial accept loop is still busy =
+                 * the screenshot's reconnect-refused failures. Subsequent
+                 * shards lseek to the running `bytes_written` cursor instead
+                 * of O_APPEND, since fallocate extends the file size on
+                 * Prospero UFS and O_APPEND would land past the fallocated
+                 * region. */
                 {
                     int is_first = (shard_seq == mf.shard_start);
-                    uint64_t prealloc = 0;
-                    if (is_first && mf.shard_count == 1) {
-                        prealloc = data_len;
+                    uint64_t prealloc = is_first ? mf.size : 0;
+                    uint64_t write_offset = 0;
+                    if (is_first) {
+                        if (idx_mut) idx_mut->bytes_written = 0;
+                    } else if (idx_mut) {
+                        write_offset = idx_mut->bytes_written;
                     }
                     write_ok = runtime_write_shard_to_path(entry, tmp_path,
                                                            is_first, prealloc,
+                                                           write_offset,
                                                            client_fd, data_len,
                                                            want_verify ? computed : NULL);
+                    if (write_ok == 0 && idx_mut) {
+                        idx_mut->bytes_written += data_len;
+                    }
                 }
             } else if (entry) {
                 write_ok = runtime_write_shard_data(entry, shard_seq, client_fd,
@@ -4213,7 +4336,44 @@ static int handle_stream_shard(runtime_state_t *state, int client_fd,
             } else {
                 write_ok = drain_shard_data(client_fd, data_len);
             }
-            if (write_ok != 0) { rc = -1; goto out; }
+            if (write_ok != 0) {
+                /* A direct-write helper failed (disk full / open / alloc /
+                 * RAM pressure) and stashed the cause in
+                 * entry->last_io_errno. Send a JSON ERROR frame — the shape
+                 * the engine's extract_payload_error parses — so the host
+                 * shows an actionable reason (ENOSPC -> "destination out of
+                 * space") instead of a bare EOF, which the desktop app
+                 * otherwise renders as the misleading "your PS5 stopped
+                 * responding / crashed". The tx stays active so a later
+                 * Retry can resume once space is freed. (No entry: nothing
+                 * to report — keep the old silent close.) */
+                if (entry) {
+                    char wfr[200];
+                    int we = entry->last_io_errno;
+                    int wn;
+                    if (we > 0) {
+                        wn = snprintf(wfr, sizeof(wfr),
+                                      "{\"error\":\"fs_write_failed_errno_%d\","
+                                      "\"detail\":\"shard %llu write to "
+                                      "destination failed: %s\"}",
+                                      we, (unsigned long long)shard_seq,
+                                      strerror(we));
+                    } else {
+                        wn = snprintf(wfr, sizeof(wfr),
+                                      "{\"error\":\"fs_write_failed\","
+                                      "\"detail\":\"shard %llu write to "
+                                      "destination failed\"}",
+                                      (unsigned long long)shard_seq);
+                    }
+                    if (wn > 0) {
+                        if ((size_t)wn >= sizeof(wfr)) wn = (int)sizeof(wfr) - 1;
+                        (void)send_frame(client_fd, FTX2_FRAME_ERROR, 0,
+                                         trace_id, wfr, (uint64_t)wn);
+                    }
+                }
+                rc = -1;
+                goto out;
+            }
         } else {
             /* Zero-length shard. */
             if (want_verify) {

@@ -28,6 +28,9 @@ use std::path::Path;
 /// `defaultExcludes` so host-side plan + UI preview agree.
 pub const DEFAULT_EXCLUDES: &[&str] = &[
     ".DS_Store",
+    // macOS AppleDouble sidecars (`._eboot.bin`, `._sce_sys`, …) written on
+    // non-HFS volumes. Prefix wildcard → any basename starting with `._`.
+    "._*",
     "Thumbs.db",
     "desktop.ini",
     "*.esbak",
