@@ -14,6 +14,7 @@ use ftx2_proto::{
 };
 use std::collections::VecDeque;
 use std::path::{Component, Path};
+use std::time::Duration;
 
 pub const DEFAULT_SHARD_SIZE: usize = 32 * 1024 * 1024; // 32 MiB
 pub const DEFAULT_MAX_SHARD_RETRIES: u32 = 3;
@@ -269,6 +270,53 @@ fn send_and_expect(
         );
     }
     Ok(resp)
+}
+
+/// Read-timeout cap for the per-commit ACK wait on multi-file uploads.
+///
+/// The payload's COMMIT_TX handler walks the manifest synchronously —
+/// for the spool-then-apply path it opens / streams / closes / fsync's
+/// each file in the manifest before sending CommitTxAck. A game folder
+/// with ~85k small files routinely takes 10–15 minutes on a healthy
+/// USB drive (PS5 filesystems are bottlenecked on per-inode fsync;
+/// user-reported case 2026-05-27 — Ghost of Yotei, 85,216 files, all
+/// bytes on wire, ACK never made it back before the engine's retry
+/// budget exhausted on what was actually a still-working payload).
+///
+/// At the default 30-second SO_RCVTIMEO the engine timed out long
+/// before the payload finished, then `resumable_retry` would loop
+/// through 7 attempts and finally surface "upload failed" while the
+/// PS5 was still mid-apply. Bumping the per-commit-ACK timeout here
+/// to 30 minutes outlasts realistic worst-case commit times on large
+/// folders, while still surfacing a truly dead PS5 within ~30 min
+/// (vs forever). A genuinely crashed PS5 still surfaces immediately
+/// via TCP RST regardless of this timeout.
+///
+/// A future refinement would have the payload emit progress heartbeats
+/// during the apply loop so the engine's idle-clock could be much
+/// tighter — until then, this is the conservative client-side fix.
+const COMMIT_TX_ACK_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+
+/// Variant of `send_and_expect` for the COMMIT_TX → CommitTxAck round-
+/// trip. Raises the connection's read timeout to `COMMIT_TX_ACK_TIMEOUT`
+/// before sending so the engine doesn't give up on a payload that's
+/// legitimately busy applying tens of thousands of files.
+///
+/// Used by every transfer path that commits — multi-file paths bear
+/// the worst case (the 85k-file user report that motivated this fix),
+/// but a single-file 100 GiB image commit can also take minutes of
+/// fsync time on a slow USB drive, so the longer timeout is applied
+/// uniformly. A truly dead PS5 (panicked, rebooted, unplugged) still
+/// surfaces immediately via TCP RST/FIN regardless of this timeout —
+/// the read timeout only fires when the PS5 is alive but silent.
+///
+/// The connection is dropped by every caller right after this returns
+/// (no transfer path reuses the connection post-commit), so we don't
+/// bother restoring the prior timeout.
+fn send_commit_and_expect_ack(c: &mut Connection, body: &[u8]) -> Result<Vec<u8>> {
+    c.set_io_timeout(COMMIT_TX_ACK_TIMEOUT)
+        .context("raise read timeout for multi-file CommitTxAck wait")?;
+    send_and_expect(c, FrameType::CommitTx, body, FrameType::CommitTxAck)
 }
 
 /// Parse `last_acked_shard` out of a BeginTxAck body. Returns 0 for both
@@ -795,12 +843,7 @@ fn transfer_file_with_flags(
         sender.drain()?;
     }
 
-    let commit_ack = send_and_expect(
-        &mut c,
-        FrameType::CommitTx,
-        &tx_meta_buf(tx_id, 0, b""),
-        FrameType::CommitTxAck,
-    )?;
+    let commit_ack = send_commit_and_expect_ack(&mut c, &tx_meta_buf(tx_id, 0, b""))?;
 
     Ok(TransferResult {
         tx_id_hex,
@@ -931,12 +974,7 @@ fn transfer_file_path_with_flags(
         sender.drain()?;
     }
 
-    let commit_ack = send_and_expect(
-        &mut c,
-        FrameType::CommitTx,
-        &tx_meta_buf(tx_id, 0, b""),
-        FrameType::CommitTxAck,
-    )?;
+    let commit_ack = send_commit_and_expect_ack(&mut c, &tx_meta_buf(tx_id, 0, b""))?;
 
     Ok(TransferResult {
         tx_id_hex,
@@ -1412,12 +1450,7 @@ pub fn transfer_dir_with_flags(
         sender.drain()?;
     }
 
-    let commit_ack = send_and_expect(
-        &mut c,
-        FrameType::CommitTx,
-        &tx_meta_buf(tx_id, 0, b""),
-        FrameType::CommitTxAck,
-    )?;
+    let commit_ack = send_commit_and_expect_ack(&mut c, &tx_meta_buf(tx_id, 0, b""))?;
 
     // `bytes_sent` reflects the full plan, not this call's wire bytes.
     // Rationale: for packed multi-file shards, wire bytes include pack
@@ -1616,12 +1649,7 @@ pub fn transfer_file_list_with_flags(
         sender.drain()?;
     }
 
-    let commit_ack = send_and_expect(
-        &mut c,
-        FrameType::CommitTx,
-        &tx_meta_buf(tx_id, 0, b""),
-        FrameType::CommitTxAck,
-    )?;
+    let commit_ack = send_commit_and_expect_ack(&mut c, &tx_meta_buf(tx_id, 0, b""))?;
 
     Ok(TransferResult {
         tx_id_hex,
@@ -2582,12 +2610,7 @@ pub fn transfer_zip_with_opts(
     }
     drop(mat); // evict any temp cache file before COMMIT
 
-    let commit_ack = send_and_expect(
-        &mut c,
-        FrameType::CommitTx,
-        &tx_meta_buf(tx_id, 0, b""),
-        FrameType::CommitTxAck,
-    )?;
+    let commit_ack = send_commit_and_expect_ack(&mut c, &tx_meta_buf(tx_id, 0, b""))?;
 
     Ok(TransferResult {
         tx_id_hex,
@@ -2911,5 +2934,33 @@ mod retry_classification_tests {
         // already aborted. Retrying can't help.
         let e: anyhow::Error = anyhow::anyhow!("direct_tx_corrupt");
         assert!(!is_retryable_transfer_error(&e));
+    }
+
+    #[test]
+    fn commit_ack_timeout_outlasts_realistic_apply_phase() {
+        // Pins the contract that motivated this constant: a multi-file
+        // commit on a slow USB drive at ~100 fsyncs/sec processes ~36k
+        // files in 6 minutes, ~85k files (user-reported Ghost of Yotei
+        // case) in ~14 minutes. The constant must be comfortably above
+        // those real-world maxima — anything tighter and the engine
+        // gives up on a payload that's still working. The 30-min
+        // ceiling also acts as a sanity check: a payload that hasn't
+        // ACKed in 30 minutes is almost certainly stuck, not just slow.
+        assert!(
+            COMMIT_TX_ACK_TIMEOUT >= Duration::from_secs(15 * 60),
+            "commit ack timeout must outlast a worst-case ~85k-file fsync \
+             apply loop (~14 min); got {:?}",
+            COMMIT_TX_ACK_TIMEOUT,
+        );
+        // Upper-bound assertion: keep this within an hour. Anything
+        // longer and a truly-stuck PS5 holds the upload row forever in
+        // the UI, and the user only finds out via force-quit. A future
+        // payload-side heartbeat would let us tighten this further.
+        assert!(
+            COMMIT_TX_ACK_TIMEOUT <= Duration::from_secs(60 * 60),
+            "commit ack timeout too generous — a stuck PS5 should surface \
+             within an hour at most; got {:?}",
+            COMMIT_TX_ACK_TIMEOUT,
+        );
     }
 }

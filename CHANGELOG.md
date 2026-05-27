@@ -4,6 +4,19 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 2.17.5
+
+- **Huge game-folder uploads no longer fail during the "Finalizing
+  on PS5" wait.** A user-reported 85,000-file upload (Ghost of
+  Yotei) reached 100%, sat on the new "Finalizing on PS5" indicator
+  for 10–15 minutes, and then said "upload failed." The PS5 was
+  actually still committing — the app just stopped waiting too
+  early. The wait window is now long enough to outlast realistic
+  worst-case commit times (30 min cap), with TCP keeping the dead-
+  PS5 case detectable as before.
+
+---
+
 ## 2.17.4
 
 - **The "kstuff-lite (EchoStretch)" entry in the Payloads catalog
