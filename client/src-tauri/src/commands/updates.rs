@@ -262,8 +262,12 @@ async fn fetch_manifest() -> Result<Manifest, String> {
     if !resp.status().is_success() {
         return Err(format!("manifest fetch HTTP {}: {url}", resp.status()));
     }
-    // Bound the body before JSON parsing. `resp.bytes()` would read
-    // unbounded; clamp via content-length + a safety cap.
+    // Bound the body before JSON parsing. The Content-Length pre-check is
+    // only an early-out: content_length() is None for chunked
+    // transfer-encoding, so a Some-only guard is bypassable and
+    // `resp.bytes()` would then buffer the entire body before any cap
+    // fires. Stream with a running-total cap (mirroring update_download)
+    // so an absent Content-Length cannot defeat the limit.
     if let Some(len) = resp.content_length() {
         if len as usize > MANIFEST_MAX_BYTES {
             return Err(format!(
@@ -271,15 +275,17 @@ async fn fetch_manifest() -> Result<Manifest, String> {
             ));
         }
     }
-    let body = resp
-        .bytes()
-        .await
-        .map_err(|e| format!("read manifest body: {e}"))?;
-    if body.len() > MANIFEST_MAX_BYTES {
-        return Err(format!(
-            "manifest body too large after read ({} bytes > {MANIFEST_MAX_BYTES} cap)",
-            body.len()
-        ));
+    let mut stream = resp.bytes_stream();
+    use futures_util::StreamExt;
+    let mut body: Vec<u8> = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| format!("read manifest body: {e}"))?;
+        if body.len().saturating_add(chunk.len()) > MANIFEST_MAX_BYTES {
+            return Err(format!(
+                "manifest body too large (> {MANIFEST_MAX_BYTES} cap)"
+            ));
+        }
+        body.extend_from_slice(&chunk);
     }
     serde_json::from_slice::<Manifest>(&body).map_err(|e| format!("parse manifest: {e}"))
 }

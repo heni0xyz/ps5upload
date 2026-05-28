@@ -116,22 +116,25 @@ fn enumerate_drives() -> Vec<UsbDrive> {
     let user = std::env::var("USER").unwrap_or_else(|_| "root".to_string());
     // Both common locations on modern Linux: /media/$USER (Ubuntu,
     // Debian default) and /run/media/$USER (Fedora, Arch with udisks2).
+    use std::os::unix::fs::MetadataExt;
     let roots = [format!("/media/{user}"), format!("/run/media/{user}")];
     // Also check the legacy bare /media (some distros mount auto-USB
-    // there without per-user subdirectories).
+    // there without per-user subdirectories) and /mnt.
     let alt_roots = ["/media".to_string(), "/mnt".to_string()];
-    for root in roots.iter().chain(alt_roots.iter()) {
+    for (root, is_alt) in roots
+        .iter()
+        .map(|r| (r, false))
+        .chain(alt_roots.iter().map(|r| (r, true)))
+    {
+        // Device id of the root itself, so we can tell a real mountpoint
+        // (different st_dev) from a plain subdirectory (same st_dev).
+        let root_dev = std::fs::metadata(root).map(|m| m.dev()).ok();
         let read = match std::fs::read_dir(root) {
             Ok(r) => r,
             Err(_) => continue,
         };
         for f in read.flatten() {
             let p = f.path();
-            // For /media and /mnt, skip non-mountpoint subdirs (the
-            // user dirs themselves) by checking that the entry is a
-            // dir AND has a different device than its parent. Skip
-            // for /media/$USER and /run/media/$USER (those parents
-            // are user-specific).
             let name = match p.file_name().and_then(|n| n.to_str()) {
                 Some(n) => n.to_string(),
                 None => continue,
@@ -145,6 +148,19 @@ fn enumerate_drives() -> Vec<UsbDrive> {
             };
             if !meta.is_dir() {
                 continue;
+            }
+            // For the bare /media and /mnt roots, only entries that are
+            // actual mountpoints count — a mountpoint's st_dev differs
+            // from its parent root's. This is the device check the old
+            // comment always claimed but never performed; without it,
+            // plain subdirs (other users' /media dirs, ordinary folders)
+            // were surfaced as removable drives. /media/$USER and
+            // /run/media/$USER are exempt: their children are the mounts.
+            if is_alt {
+                match (root_dev, meta.dev()) {
+                    (Some(rd), d) if rd != d => {} // genuine mountpoint
+                    _ => continue,
+                }
             }
             let (free, total) = statvfs_or_zero(&p);
             // Skip suspicious entries with zero capacity — usually

@@ -387,13 +387,13 @@ export default function LibraryScreen() {
           installed, expands inline when it is. Read-only. Mounts
           here because SMP's mounted-image dirs (under /mnt/shadowmnt)
           are exactly the things this Library tab lists. */}
-      <SmpPanel mgmtAddr={host?.trim() ? `${host.trim()}:9114` : null} />
+      <SmpPanel mgmtAddr={host?.trim() ? mgmtAddr(host.trim()) : null} />
 
       {/* Running apps with suspend/resume/kill controls. Auto-hides
           when nothing is running. Wires Phase 18 (app lifecycle RPCs)
           + Phase 33 (app.db query) so each row shows a friendly name. */}
       {host?.trim() && payloadStatus === "up" && (
-        <RunningAppsPanel mgmtAddr={`${host.trim()}:9114`} />
+        <RunningAppsPanel mgmtAddr={mgmtAddr(host.trim())} />
       )}
 
       {entries === null && !loading && !error && (

@@ -8,11 +8,17 @@
  *   t("foo", ...)
  *   useTr()("foo", ...)
  *
- * Then loads `client/src/i18n.ts`, finds every key declared in the
- * `en: {...}` block, and reports which keys aren't referenced by any
- * .tsx/.ts file. With `--apply` it strips those dead keys from EVERY
- * language block in i18n.ts (en + all 17 others), shrinks the
- * `i18n-known-missing.json` allowlist accordingly, and exits.
+ * Then loads `client/src/i18n/locales/en.ts`, finds every key declared
+ * in the English dictionary, and reports which keys aren't referenced by
+ * any .tsx/.ts file. With `--apply` it strips those dead keys from EVERY
+ * per-locale file under `client/src/i18n/locales/*.ts` (en + all 17
+ * others), shrinks the `i18n-known-missing.json` allowlist accordingly,
+ * and exits.
+ *
+ * (Pre-2.x this read a single monolithic `client/src/i18n.ts` with all
+ * languages inline; the repo since split to one file per locale. This
+ * tool follows the same `vm`-extraction approach as i18n-coverage.mjs /
+ * find-orphan-i18n.mjs.)
  *
  * Why static-only extraction:
  * - Dynamically-keyed `tr(\`status_${snap.status}\`, ...)` calls
@@ -29,10 +35,11 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import vm from "node:vm";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const I18N_PATH = path.join(repoRoot, "client/src/i18n.ts");
+const LOCALES_DIR = path.join(repoRoot, "client/src/i18n/locales");
 const ALLOWLIST_PATH = path.join(repoRoot, "scripts/i18n-known-missing.json");
 const SRC_ROOT = path.join(repoRoot, "client/src");
 
@@ -128,29 +135,49 @@ function extractIdentifierCalls(content) {
   return out;
 }
 
+/** Locate the `const <name>: Translations = { ... }` object literal in
+ *  a per-locale file and return its source span. Mirrors the matcher in
+ *  i18n-coverage.mjs / find-orphan-i18n.mjs so all the i18n tools agree
+ *  on the file shape our generator emits. */
+function locateLiteral(src, fp) {
+  const startMatch = src.match(
+    /^const\s+[A-Za-z_][A-Za-z0-9_]*\s*:\s*Translations\s*=\s*/m,
+  );
+  if (!startMatch) {
+    throw new Error(`${fp}: could not find 'const <name>: Translations = ' declaration`);
+  }
+  const startIdx = startMatch.index + startMatch[0].length;
+  const endMatch = src.slice(startIdx).match(/\n};\s*\n\s*export default/);
+  if (!endMatch) {
+    throw new Error(`${fp}: could not find end of literal (};\\nexport default)`);
+  }
+  const literalSrc = src.slice(startIdx, startIdx + endMatch.index + "\n}".length);
+  return { startIdx, endIdx: startIdx + endMatch.index + "\n}".length, literalSrc };
+}
+
+/** All `.ts` locale files under client/src/i18n/locales. */
+function localeFiles() {
+  if (!fs.existsSync(LOCALES_DIR)) {
+    throw new Error(
+      `i18n locales dir not found: ${LOCALES_DIR} (expected one file per locale, e.g. en.ts)`,
+    );
+  }
+  return fs
+    .readdirSync(LOCALES_DIR)
+    .filter((f) => f.endsWith(".ts") && !f.endsWith(".d.ts"))
+    .map((f) => path.join(LOCALES_DIR, f));
+}
+
 function loadEnKeys() {
-  const src = fs.readFileSync(I18N_PATH, "utf8");
-  const start = src.indexOf("\n  en: {");
-  if (start < 0) throw new Error("en block not found");
-  let depth = 1;
-  let i = start + "\n  en: {".length;
-  while (i < src.length) {
-    if (src[i] === "{") depth++;
-    else if (src[i] === "}") {
-      depth--;
-      if (depth === 0) break;
-    }
-    i++;
+  const fp = path.join(LOCALES_DIR, "en.ts");
+  if (!fs.existsSync(fp)) {
+    throw new Error(`locales dir is missing en.ts (English is required): ${fp}`);
   }
-  if (depth !== 0) throw new Error("en block not closed");
-  const block = src.slice(start, i);
-  const keyRe = /^\s+([a-zA-Z0-9_]+)\s*:\s*"/gm;
-  const out = new Set();
-  let m;
-  while ((m = keyRe.exec(block)) !== null) {
-    out.add(m[1]);
-  }
-  return out;
+  const { literalSrc } = locateLiteral(fs.readFileSync(fp, "utf8"), fp);
+  const dict = vm.runInNewContext(`(${literalSrc})`, Object.create(null), {
+    timeout: 1000,
+  });
+  return new Set(Object.keys(dict));
 }
 
 const usedKeys = new Set();
@@ -228,33 +255,43 @@ if (dead.length === 0) {
   process.exit(0);
 }
 
-// ── Apply: strip dead keys from i18n.ts ────────────────────────────
+// ── Apply: strip dead keys from every per-locale file ──────────────
 //
-// i18n.ts has 18 language blocks; each block has many `key: "value"`
-// lines. The keys we want to delete are scattered across those
-// blocks. A single regex per dead-key, applied globally, strips the
-// matching line from anywhere in the file.
+// Each client/src/i18n/locales/<code>.ts holds one language's object
+// with many `key: "value"` lines. The keys we delete are the same set
+// across every locale. A single regex per dead-key, applied globally
+// to each file, strips the matching line wherever it appears.
 //
 // We match the entire line (leading whitespace + key + colon + value
-// + trailing comma + newline) so the source stays well-formatted
-// after pruning. Multi-line strings are not currently used in
-// i18n.ts; if they ever are, this regex will need a more careful
-// matcher.
-
-let src = fs.readFileSync(I18N_PATH, "utf8");
-const before = src.length;
+// + trailing comma + newline) so the source stays well-formatted after
+// pruning. Multi-line string values are not currently used in the
+// locale files; if they ever are, this regex needs a more careful
+// matcher. We only touch the bytes inside the object literal so a key
+// name that happens to collide with text in the file header/footer
+// can't be clobbered.
+let before = 0;
+let after = 0;
 let stripped = 0;
-for (const k of dead) {
-  // Match: leading whitespace, exact key, optional whitespace,
-  // colon, the value (string literal possibly with escaped quotes),
-  // optional trailing comma, newline.
-  const re = new RegExp(`^\\s+${escapeRegex(k)}\\s*:\\s*"(?:\\\\.|[^"\\\\])*"\\s*,?\\s*\\n`, "gm");
-  src = src.replace(re, () => {
-    stripped++;
-    return "";
-  });
+const deadRes = dead.map(
+  (k) => new RegExp(`^\\s+${escapeRegex(k)}\\s*:\\s*"(?:\\\\.|[^"\\\\])*"\\s*,?\\s*\\n`, "gm"),
+);
+for (const fp of localeFiles()) {
+  const orig = fs.readFileSync(fp, "utf8");
+  const { startIdx, endIdx } = locateLiteral(orig, fp);
+  const head = orig.slice(0, startIdx);
+  let body = orig.slice(startIdx, endIdx);
+  const tail = orig.slice(endIdx);
+  before += orig.length;
+  for (const re of deadRes) {
+    body = body.replace(re, () => {
+      stripped++;
+      return "";
+    });
+  }
+  const next = head + body + tail;
+  after += next.length;
+  if (next !== orig) fs.writeFileSync(fp, next, "utf8");
 }
-fs.writeFileSync(I18N_PATH, src, "utf8");
 
 // ── Apply: shrink the allowlist ──────────────────────────────────
 //
@@ -287,7 +324,7 @@ fs.writeFileSync(
 );
 
 process.stdout.write(
-  `[i18n-prune] stripped ${stripped} key-lines (${before - src.length} bytes) and shrunk allowlist by ${allowlistShrunk} entries.\n`,
+  `[i18n-prune] stripped ${stripped} key-lines (${before - after} bytes) across locale files and shrunk allowlist by ${allowlistShrunk} entries.\n`,
 );
 
 function escapeRegex(s) {

@@ -23,6 +23,7 @@ import {
 import { PageHeader, EmptyState } from "../../components";
 import { useTr } from "../../state/lang";
 import { useDocumentVisible } from "../../lib/visibility";
+import { transferAddr } from "../../lib/addr";
 
 /**
  * Live status dashboard. One-pane summary of every signal the app
@@ -69,7 +70,7 @@ export default function DashboardScreen() {
     if (!visible || !host?.trim() || payloadStatus !== "up") return;
     let cancelled = false;
     const tick = async () => {
-      const addr = `${host.trim()}:9113`;
+      const addr = transferAddr(host.trim());
       try {
         const [t, p] = await Promise.all([
           fetchHwTemps(addr).catch(() => null),

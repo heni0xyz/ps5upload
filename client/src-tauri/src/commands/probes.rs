@@ -51,7 +51,12 @@ pub async fn port_check(ip: String, port: u16) -> serde_json::Value {
 #[tauri::command]
 pub async fn payload_check(ip: String) -> serde_json::Value {
     let engine_url = crate::engine::url();
-    let url = format!("{engine_url}/api/ps5/status?addr={ip}:{PS5_MGMT_PORT}");
+    // URL-encode the addr query value like every other engine proxy in
+    // ps5_engine.rs. The renderer-supplied `ip` is free-form; without
+    // encoding a `&`/`#`/space corrupts the query string and the STATUS
+    // round-trip targets the wrong address.
+    let addr = crate::commands::ps5_engine::urlencoding(&format!("{ip}:{PS5_MGMT_PORT}"));
+    let url = format!("{engine_url}/api/ps5/status?addr={addr}");
     let client = match reqwest::Client::builder()
         .timeout(Duration::from_secs(5))
         .build()

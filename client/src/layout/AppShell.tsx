@@ -18,6 +18,7 @@ import { powerTick } from "../api/ps5";
 import { CommandPalette } from "../components/CommandPalette";
 import { ShortcutsOverlay } from "../components/ShortcutsOverlay";
 import { useWindowStatePersistence } from "../lib/windowState";
+import { mgmtAddr } from "../lib/addr";
 import { installPlayTimeAccumulator } from "../state/playTime";
 
 /** Background status polling for the engine + payload dots in the
@@ -259,7 +260,7 @@ export default function AppShell() {
     } else if (sch.action === "power_tick") {
       const host = useConnectionStore.getState().host;
       if (host?.trim()) {
-        void powerTick(`${host.trim()}:9114`).catch(() => {
+        void powerTick(mgmtAddr(host.trim())).catch(() => {
           // best-effort
         });
         pushNotification("info", `Scheduled: ${sch.label}`, {

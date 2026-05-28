@@ -8,6 +8,7 @@ import {
   Filter,
 } from "lucide-react";
 import { klogChunk } from "../../api/ps5";
+import { mgmtAddr } from "../../lib/addr";
 import { useConnectionStore } from "../../state/connection";
 import { Button, EmptyState } from "../../components";
 import { useTr } from "../../state/lang";
@@ -124,7 +125,7 @@ export default function KernelLogPanel() {
   const tick = useCallback(async () => {
     if (!host?.trim() || payloadStatus !== "up") return;
     try {
-      const chunk = await klogChunk(`${host.trim()}:9114`, 16 * 1024);
+      const chunk = await klogChunk(mgmtAddr(host.trim()), 16 * 1024);
       if (chunk && chunk.length > 0) {
         setEntries((prev) => {
           const newLines = chunk

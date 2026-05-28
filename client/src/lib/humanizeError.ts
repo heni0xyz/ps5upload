@@ -341,6 +341,12 @@ export function humanizePs5Error(
   if (/0x80B2_?1401/i.test(raw)) {
     return "PS5's ShellUI install path rejected the request (0x80B21401). Usually paired with another tier failure on FW 9.60 when the firmware point lacks the BGFT registers we depend on. Try the latest payload from Connection → Send payload, or install via the PS5's own Debug Settings panel.";
   }
+  // ─── 0x80B2_2101 — earlier download still queued ───────────────────
+  // Must precede the generic 0x80B2_xxxx wildcard below, which would
+  // otherwise shadow this specific, actionable case (0x80B2 + "2101").
+  if (/0x80B22101/i.test(raw)) {
+    return "Earlier download for the same content is still queued on the PS5. Open the PS5's notification panel, clear it, then retry the install.";
+  }
   if (/\b0x80B2[0-9A-Fa-f]{4}\b/i.test(raw)) {
     // Other 0x80B2_xxxx — PlayGo errors, not pkg-format errors.
     // Don't blame the file.
@@ -426,17 +432,15 @@ export function humanizePs5Error(
   if (/0x80990039|0x80A30026|out of (free )?space/i.test(raw)) {
     return "Out of free space on the PS5. Settings → Storage → Free up space, then retry.";
   }
-  if (/0x80B22101/i.test(raw)) {
-    return "Earlier download for the same content is still queued on the PS5. Open the PS5's notification panel, clear it, then retry the install.";
-  }
   if (/0x80B64002/i.test(raw)) {
     return "Title blocked by PS5 parental / content controls. Adjust the user's restrictions in PS5 Settings → Users and Accounts → Family Management before retrying.";
   }
   if (/0x80020005/i.test(raw)) {
     return "PS5 install daemon couldn't reach our process (ESRCH = no such process). Usually means the payload hasn't elevated yet — kstuff/etaHEN may not be loaded. Re-send the payload from Connection → Send payload, then retry.";
   }
-  // 0x80B2116F and 0x80B21401 handled above (must precede the
-  // generic 0x80B2 wildcard at line ~322).
+  // 0x80B2116F, 0x80B21401, and 0x80B22101 handled above (each must
+  // precede the generic 0x80B2 wildcard, which would otherwise shadow
+  // them).
 
   // ─── Generic 0x80990xxx fallback — Sony's BGFT family ──────────────
   // We've mapped the codes seen most often; any remaining one in this

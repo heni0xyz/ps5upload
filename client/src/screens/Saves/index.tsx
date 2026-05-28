@@ -349,7 +349,7 @@ export default function SavesScreen() {
               <SaveThumbnail
                 titleId={title_id}
                 userId={entries[0]?.user_id ?? 0}
-                mgmtAddr={host?.trim() ? `${host.trim()}:9114` : null}
+                mgmtAddr={host?.trim() ? mgmtAddr(host.trim()) : null}
               />
               <h3 className="text-sm font-semibold">{title_id}</h3>
               <span className="text-[11px] text-[var(--color-muted)]">

@@ -41,6 +41,7 @@ import { useConnectionStore } from "../../state/connection";
 import { PageHeader, Button, EmptyState } from "../../components";
 import { useTr } from "../../state/lang";
 import { formatBytes } from "../../lib/format";
+import { mgmtAddr } from "../../lib/addr";
 
 interface DirNode {
   name: string;
@@ -79,7 +80,7 @@ export default function DiskUsageScreen() {
     // paint the wrong folder. Capture host+path and bail if either changed.
     const token = `${host.trim()}::${path}`;
     const isStale = () => `${host.trim()}::${path}` !== token;
-    const addr = `${host.trim()}:9114`;
+    const addr = mgmtAddr(host.trim());
     setLoading(true);
     setError(null);
     try {

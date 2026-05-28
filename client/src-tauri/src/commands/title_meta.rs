@@ -99,16 +99,22 @@ pub async fn title_meta_fetch(url: String) -> Result<String, String> {
         }
     }
 
-    let body = resp
-        .bytes()
-        .await
-        .map_err(|e| format!("title-meta read body: {e}"))?;
-    if body.len() > MAX_BODY_BYTES {
-        return Err(format!(
-            "title-meta body too large after read ({} > {MAX_BODY_BYTES} cap)",
-            body.len()
-        ));
+    // The Content-Length check above is only an early-out: it is None for
+    // chunked transfer-encoding, and `resp.bytes()` would then buffer the
+    // whole body before the post-read cap fires. Stream with a running
+    // total so a no-Content-Length response can't defeat the cap.
+    let mut stream = resp.bytes_stream();
+    use futures_util::StreamExt;
+    let mut body: Vec<u8> = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| format!("title-meta read body: {e}"))?;
+        if body.len().saturating_add(chunk.len()) > MAX_BODY_BYTES {
+            return Err(format!(
+                "title-meta body too large (> {MAX_BODY_BYTES} cap)"
+            ));
+        }
+        body.extend_from_slice(&chunk);
     }
 
-    String::from_utf8(body.to_vec()).map_err(|e| format!("title-meta body not utf-8: {e}"))
+    String::from_utf8(body).map_err(|e| format!("title-meta body not utf-8: {e}"))
 }

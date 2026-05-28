@@ -1,29 +1,40 @@
 name: publish
 
-# Manual-dispatch sibling of release.yml.
+# The release artifact builder. Fires automatically on every `vX.Y.Z`
+# tag push (the normal release path, driven by scripts/release.sh) and
+# can also be dispatched by hand for the same tag.
 #
-# Purpose: bypass-path for when release.yml gets wedged. GitHub's
-# tag-push trigger occasionally lands a release.yml run in an
-# uncancellable pre-queue state (e.g. during a partial Actions
-# outage), and the only API answer is "wait for it to transition";
-# meanwhile new tag pushes don't fire fresh runs. publish.yml is a
-# separate file -> separate workflow_id -> separate concurrency
-# namespace -> none of the stuck-state lives here.
+# Dual trigger, on purpose:
+#   * push: tags  -> the tag push from a release cuts the GitHub Release
+#                    with no extra step to remember. (`ci` deliberately
+#                    ignores tags via `tags-ignore`, so this is the only
+#                    workflow that reacts to a tag.)
+#   * workflow_dispatch -> manual override. The predecessor `release.yml`
+#                    was deleted because GitHub's tag-push trigger can
+#                    land a run in an uncancellable pre-queue state
+#                    during an Actions outage, and new tag pushes won't
+#                    fire fresh runs while it's wedged. Keeping a manual
+#                    dispatch here means that even if a tag-push run
+#                    wedges, you can still ship by re-dispatching:
+#                      gh workflow run publish.yml -f tag=v2.17.0
+#                    (or the Actions UI "Run workflow" button).
 #
 # See https://github.com/orgs/community/discussions/51410 for the
-# upstream symptom + the "create+merge a PR to nudge repo activity"
-# workaround when a queued workflow_id won't accept cancel/dispatch.
+# upstream wedge symptom + the "create+merge a PR to nudge repo
+# activity" workaround when a queued workflow_id won't accept
+# cancel/dispatch.
 #
-# How to use:
-#   gh workflow run publish.yml -f tag=v2.17.0
-# or via the Actions UI: "Run workflow" -> enter the version tag.
-#
-# Security note: every interpolation of `github.event.inputs.tag`
-# into a shell run-block goes through `env: INPUT_TAG:` indirection.
-# Action `with:` parameters and YAML-level keys (concurrency.group,
-# checkout ref) are not shell contexts and are safe by construction.
+# Tag resolution: `github.event.inputs.tag || github.ref_name` — the
+# dispatch input when present, otherwise the pushed tag's name. Every
+# interpolation of that value into a shell run-block goes through
+# `env: INPUT_TAG:` indirection. Action `with:` parameters and
+# YAML-level keys (concurrency.group, checkout ref) are not shell
+# contexts and are safe by construction. The `Resolve tag` step also
+# regex-validates the tag before anything downstream consumes it.
 # See https://securitylab.github.com/research/github-actions-untrusted-input/
 on:
+  push:
+    tags: ['v*']
   workflow_dispatch:
     inputs:
       tag:
@@ -39,7 +50,7 @@ permissions:
 # to be a reliable manual override even while release.yml is still
 # trying to recover.
 concurrency:
-  group: publish-${{ github.event.inputs.tag }}
+  group: publish-${{ github.event.inputs.tag || github.ref_name }}
   cancel-in-progress: true
 
 env:
@@ -52,7 +63,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: ${{ github.event.inputs.tag }}
+          ref: ${{ github.event.inputs.tag || github.ref_name }}
 
       - uses: actions/setup-node@v5
         with:
@@ -135,7 +146,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: ${{ github.event.inputs.tag }}
+          ref: ${{ github.event.inputs.tag || github.ref_name }}
 
       - name: Setup Node
         uses: actions/setup-node@v5
@@ -339,12 +350,12 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: ${{ github.event.inputs.tag }}
+          ref: ${{ github.event.inputs.tag || github.ref_name }}
 
       - name: Resolve tag
         id: tag
         env:
-          INPUT_TAG: ${{ github.event.inputs.tag }}
+          INPUT_TAG: ${{ github.event.inputs.tag || github.ref_name }}
         run: |
           raw_tag="$INPUT_TAG"
           if ! echo "$raw_tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([-+._A-Za-z0-9]*)?$'; then

@@ -123,7 +123,15 @@ pub fn read_central_directory_with_progress(
     file.read_exact(&mut cd_buf)
         .context("read central directory")?;
 
-    let mut entries: Vec<CentralDirEntry> = Vec::with_capacity(total_entries as usize);
+    // `total_entries` is attacker-controlled on the ZIP64 path (a raw u64
+    // straight from the ZIP64 EOCD record), so never feed it to
+    // with_capacity unclamped: a crafted count near u64::MAX makes the
+    // allocation exceed isize::MAX and panics with "capacity overflow"
+    // before the bounds-checked walk below ever runs. The true entry
+    // count can't exceed cd_buf.len() / CDFH_FIXED_LEN, so clamp the
+    // hint to that. The walk loop tolerates an under/over-reported count.
+    let entry_cap = (total_entries as usize).min(cd_buf.len() / CDFH_FIXED_LEN + 1);
+    let mut entries: Vec<CentralDirEntry> = Vec::with_capacity(entry_cap);
     let mut cursor = 0usize;
     // The CDFH count from EOCD is advisory in spec — some real-world
     // zippers (notably old InfoZip with bit-3 streaming) under-report it.
@@ -263,7 +271,14 @@ fn locate_central_directory(file: &mut std::fs::File, file_len: u64) -> Result<(
         );
     }
     let zip64_eocd_off = u64_le(&locator_bytes, 8);
-    if zip64_eocd_off + 56 > file_len {
+    // Checked add: zip64_eocd_off is an untrusted u64 from the locator;
+    // a near-u64::MAX value would wrap `+ 56` and slip past this guard
+    // in release builds (and panic in debug). Mirrors the cd_offset
+    // guard at the top of read_central_directory_with_progress.
+    if zip64_eocd_off
+        .checked_add(56)
+        .is_none_or(|end| end > file_len)
+    {
         bail!("ZIP64 EOCD offset {zip64_eocd_off} runs past end of file");
     }
 

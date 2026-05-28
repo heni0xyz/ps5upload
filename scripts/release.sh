@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # One-shot release helper. Cuts a `vX.Y.Z` tagged release without
-# force-pushing main and without double-triggering the CI + release
+# force-pushing main and without double-triggering the CI + publish
 # workflows.
 #
 # Usage
@@ -19,14 +19,18 @@
 #      (everything was already synced).
 #   4. Create annotated tag `vX.Y.Z` at the (possibly new) HEAD.
 #   5. Push main first (triggers ci once on the release commit), then
-#      push the tag (triggers release once on the same commit).
+#      push the tag (triggers publish.yml once on the same commit).
 #
 # Why this matters
 #   Pushing main and tag separately means two distinct workflow triggers
-#   against the same SHA: ci validates the code, release builds artifacts.
-#   No overlap, no force-push, no dup runs. Force-pushing main right
-#   before tagging (what we did manually before) is what caused the
-#   earlier double-fire.
+#   against the same SHA: ci validates the code (it ignores tags via
+#   `tags-ignore`), and publish.yml builds + uploads the release
+#   artifacts (it triggers on `push: tags`). No overlap, no force-push,
+#   no dup runs. Force-pushing main right before tagging (what we did
+#   manually before) is what caused the earlier double-fire.
+#
+#   If a tag-push publish run ever wedges (GitHub Actions outage), fall
+#   back to the manual override: `gh workflow run publish.yml -f tag=vX.Y.Z`.
 
 set -euo pipefail
 

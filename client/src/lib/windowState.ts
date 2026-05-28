@@ -119,6 +119,15 @@ export function useWindowStatePersistence() {
         const w = getCurrentWindow();
         cleanupResize = await w.onResized(schedulePersist);
         cleanupMove = await w.onMoved(schedulePersist);
+        // If the effect was torn down (unmount, StrictMode double-invoke,
+        // HMR) while the awaits above were in flight, the cleanup closure
+        // already ran with both handles still null and tore down nothing.
+        // Detach immediately so the listeners attached post-cleanup don't
+        // leak.
+        if (cancelled) {
+          cleanupResize?.();
+          cleanupMove?.();
+        }
       } catch {
         // No-op
       }

@@ -415,10 +415,16 @@ pub fn download_to_local(
         if let Err(e) = fs::rename(&part_path, &local_path) {
             // EXDEV / cross-device — bytes ARE on disk, just at
             // the wrong path. Tell the user where they landed.
-            let cross_device = matches!(
-                e.raw_os_error(),
-                Some(n) if n == 18 /* EXDEV on Linux+macOS */
-            );
+            // The errno differs per OS: EXDEV is 18 on Linux/macOS, but
+            // Windows' MoveFileExW reports a cross-volume move as
+            // ERROR_NOT_SAME_DEVICE (17). cfg-gate so the diagnostic
+            // fires on every host (and so we don't collide with Unix
+            // EEXIST=17).
+            #[cfg(windows)]
+            const CROSS_DEVICE_ERRNO: i32 = 17; // ERROR_NOT_SAME_DEVICE
+            #[cfg(not(windows))]
+            const CROSS_DEVICE_ERRNO: i32 = 18; // EXDEV
+            let cross_device = e.raw_os_error() == Some(CROSS_DEVICE_ERRNO);
             if cross_device {
                 anyhow::bail!(
                     "downloaded {} bytes to {}, but couldn't promote to {} (cross-filesystem rename refused) — the file IS on disk at the .part path; rename it manually",

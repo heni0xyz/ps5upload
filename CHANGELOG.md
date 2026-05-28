@@ -4,6 +4,46 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 2.18.6
+
+A correctness + hardening sweep — 16 fixes found by a deep multi-agent
+audit across the engine, desktop app, and tooling, plus a release-pipeline
+fix so new versions publish automatically.
+
+- **Releases now publish on their own.** Tagging a release used to need a
+  separate manual "publish" step that was easy to forget (v2.18.5 was
+  tagged but never published because of it). The publish workflow now
+  fires automatically on the version tag, with the manual trigger kept as
+  a fallback.
+- **Hostile/corrupt `.zip` files can no longer crash the preview.** A
+  crafted ZIP64 archive could make the engine abort while inspecting it
+  (a huge declared entry count, or an overflowing offset). Both are now
+  clamped/checked.
+- **Windows: `.ffpkg` extraction can't escape the chosen folder.** A
+  malicious archive entry named like `C:evil.exe` could write outside the
+  destination on Windows. Such names are now rejected.
+- **IPv6 PS5 addresses work.** The address helper used to mangle IPv6
+  literals (e.g. `fe80::1` became `fe80`), breaking every call to an
+  IPv6-only console. IPv6 is now handled and bracketed correctly.
+- **Several panels stop silently failing when you paste an `ip:port`.**
+  The Saves thumbnails, Library panels, Disk Usage, Dashboard sensors, and
+  Kernel Log now go through the canonical address helper, so a host typed
+  with a port no longer produces a broken `ip:port:9114`.
+- **Destructive menu items show as red again.** Delete/uninstall items in
+  overflow menus referenced a non-existent color and rendered like normal
+  items.
+- **Better error guidance for stuck PS5 downloads** (`0x80B22101`) — the
+  specific "clear the notification and retry" message is shown instead of
+  a generic one.
+- **Windows update/metadata fetches are memory-bounded even without a
+  Content-Length**, the cross-device "file is still on disk" message now
+  shows on Windows, the keep-awake toggle can't abort config loading, the
+  Linux USB-drive picker no longer lists fixed/network mounts, archive
+  uploads correctly clear their resume marker, a window-listener leak is
+  closed, and the i18n prune tool works against the current locale layout.
+
+---
+
 ## 2.18.5
 
 - **`.zip` uploads — much faster scanning, with a live progress count.**

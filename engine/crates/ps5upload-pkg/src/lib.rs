@@ -165,6 +165,25 @@ fn is_safe_child_name(name: &str) -> bool {
     if Path::new(name).is_absolute() {
         return false;
     }
+    // Windows drive-relative names like "C:evil.txt" are NOT absolute
+    // (Path::is_absolute() is false — there's a drive prefix but no root),
+    // yet PathBuf::join with a drive-prefixed component *replaces* the
+    // whole path, so dest.join("C:evil.txt") escapes `dest` on Windows.
+    // A colon never legitimately appears in a PS5/UFS asset filename.
+    if name.contains(':') {
+        return false;
+    }
+    // Belt-and-suspenders, cross-platform: the name must resolve to
+    // exactly one ordinary path component. This rejects any Prefix,
+    // RootDir, CurDir, or ParentDir component on every host, not just
+    // the specific cases enumerated above.
+    let mut comps = Path::new(name).components();
+    if !matches!(
+        (comps.next(), comps.next()),
+        (Some(std::path::Component::Normal(_)), None)
+    ) {
+        return false;
+    }
     true
 }
 

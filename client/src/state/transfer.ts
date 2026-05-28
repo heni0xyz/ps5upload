@@ -414,10 +414,14 @@ export const useTransferStore = create<TransferState>((set) => {
           // Tx is committed on the payload — the tx_id we persisted at
           // start can be evicted, since there's nothing to resume. A
           // lingering record would make a subsequent upload-of-same-
-          // folder's Resume click look up a committed tx_id, which the
+          // source's Resume click look up a committed tx_id, which the
           // payload's journal may or may not still carry (depending on
-          // eviction pressure). Forget proactively.
-          if (isFolder) {
+          // eviction pressure). Forget proactively. Archives persist a
+          // resume tx_id at start too (the remember/lookup block is
+          // gated on `isFolder || isArchive`), so they must be evicted
+          // here as well — otherwise a re-upload of the same .zip
+          // "resumes" against a committed tx.
+          if (isFolder || isArchive) {
             void resumeTxidForget(host, srcPath, dest);
           }
           // Persist this host's measured throughput so the next upload

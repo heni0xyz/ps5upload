@@ -127,7 +127,7 @@ export function OverflowMenu({
                 "flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors " +
                 "disabled:cursor-not-allowed disabled:opacity-50 " +
                 (item.destructive
-                  ? "text-[var(--color-danger)] hover:bg-[var(--color-danger-soft)]"
+                  ? "text-[var(--color-bad)] hover:bg-[var(--color-bad-soft)]"
                   : "text-[var(--color-text)] hover:bg-[var(--color-surface-3)]")
               }
             >

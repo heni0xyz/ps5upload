@@ -1183,7 +1183,7 @@ pub async fn pkg_install_cancel(session: String) -> Result<JsonValue, String> {
 /// Tiny URL-encode that handles the characters we feed into query strings
 /// (slashes, colons, spaces). We don't take a dep on the `urlencoding`
 /// crate — a 15-char allow-set is plenty.
-fn urlencoding(s: &str) -> String {
+pub(crate) fn urlencoding(s: &str) -> String {
     s.chars()
         .map(|c| {
             if c.is_ascii_alphanumeric() || "-_.~".contains(c) {

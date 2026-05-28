@@ -32,16 +32,24 @@ export const useKeepAwakeStore = create<KeepAwakeState>((set, get) => ({
   lastError: null,
 
   async setEnabled(on) {
-    const resp = await invoke<KeepAwakeResp>("keep_awake_set", { enabled: on });
-    window.localStorage.setItem(
-      STORAGE_KEY,
-      resp.enabled ? "on" : "off"
-    );
-    set({
-      enabled: resp.enabled,
-      supported: resp.supported,
-      lastError: resp.error ?? null,
-    });
+    // Guard the invoke like syncFromBackend does: an IPC rejection
+    // (running outside the Tauri runtime, command-resolution failure)
+    // must not propagate. Two callers are fire-and-forget — the
+    // Settings checkbox onChange and hydrateFromUserConfig — so an
+    // unguarded throw here would surface as an unhandledrejection and,
+    // in hydration, abort the remaining config restore. Route failures
+    // to lastError and return normally.
+    try {
+      const resp = await invoke<KeepAwakeResp>("keep_awake_set", { enabled: on });
+      window.localStorage.setItem(STORAGE_KEY, resp.enabled ? "on" : "off");
+      set({
+        enabled: resp.enabled,
+        supported: resp.supported,
+        lastError: resp.error ?? null,
+      });
+    } catch (e) {
+      set({ lastError: e instanceof Error ? e.message : String(e) });
+    }
   },
 
   async syncFromBackend() {
