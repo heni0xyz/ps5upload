@@ -4,6 +4,21 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 2.18.7
+
+- **Choose where a `.zip` unpacks.** When you pick a `.zip`, the Upload
+  screen now asks **"Where should the .zip unpack?"** with two options,
+  each showing a live preview of where the files will land:
+  - **Put everything in a new folder named after the zip** (the default,
+    unchanged from before) — best for a plain `.zip` of loose game files.
+  - **Extract the contents straight into the destination** — no wrapper
+    folder. Use this when the `.zip` already contains the game's own
+    folder (e.g. `CUSA12345/`), so it doesn't end up double-nested.
+  The choice applies to one-shot uploads, queued uploads, and mirroring
+  to other consoles alike.
+
+---
+
 ## 2.18.6
 
 A correctness + hardening sweep — 16 fixes found by a deep multi-agent

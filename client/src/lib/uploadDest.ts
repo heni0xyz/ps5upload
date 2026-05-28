@@ -38,10 +38,22 @@ export function resolveUploadDest(
    *  `<destRoot>/MyGame`, not `<destRoot>/MyGame.zip`. (The archive is
    *  decompressed host-side; only its contents reach the PS5.) */
   isArchive = false,
+  /** For an archive, whether to wrap its contents in a folder named after
+   *  the zip (`true`, the default — `<destRoot>/MyGame/...`) or extract
+   *  them straight into the destination (`false` — `<destRoot>/...`).
+   *  Ignored for non-archive sources, which always suffix their basename.
+   *  The "flat" option is for zips that already wrap the game in its own
+   *  top-level folder, where the default would double-nest. */
+  archiveIntoSubfolder = true,
 ): { destRoot: string; dest: string } {
   const vol = volume ?? "/data";
   const sub = subpath.replace(/^\/+|\/+$/g, "");
   const destRoot = sub ? `${vol}/${sub}` : vol;
+  // Flat-extract: the archive's contents land directly in destRoot with no
+  // wrapper folder, so the final target IS the destination root.
+  if (isArchive && !archiveIntoSubfolder) {
+    return { destRoot, dest: destRoot };
+  }
   const raw = basename(sourcePath);
   const name = isArchive ? raw.replace(/\.zip$/i, "") : raw;
   const dest = name ? `${destRoot}/${name}` : destRoot;

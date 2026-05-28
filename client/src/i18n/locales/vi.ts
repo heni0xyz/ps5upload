@@ -1237,6 +1237,12 @@ install_register_path_appinst: "(đang xử lý AppInstUtil — không có đèn
   upload_scanning_archive_title_with_count: "Scanning archive… {count} entries",
   upload_scanning_archive_hint: "Reading the .zip central directory and parsing embedded game metadata. Upload buttons will enable when this finishes.",
   upload_disabled_scanning: "Scanning game folder — wait for the scan to finish, then this button enables.",
+upload_zip_extract_subfolder_label: "Đặt mọi thứ vào một thư mục mới được đặt tên theo zip",
+upload_zip_extract_subfolder_desc: "Tạo thư mục đó trong đích và trích xuất các tệp bên trong nó. Tốt nhất cho một tệp .zip đơn giản của các tệp trò chơi lỏng lẻo.",
+upload_zip_extract_flat_label: "Trích xuất nội dung thẳng vào điểm đến",
+upload_zip_extract_flat_desc: "Thả các tệp trực tiếp vào đích mà không có thư mục trình bao bọc. Chọn tùy chọn này khi .zip đã chứa thư mục riêng của trò chơi (ví dụ: CUSA12345/).",
+upload_zip_extract_heading: "Giải nén .zip nên ở đâu?",
+upload_zip_extract_lands_at: "Đất tại:",
 };
 
 export default vi;

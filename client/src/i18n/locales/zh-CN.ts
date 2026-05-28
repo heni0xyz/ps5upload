@@ -1243,6 +1243,12 @@ install_register_path_appinst: "（过程中AppInstUtil —无ShellUI闪存）",
   upload_scanning_archive_title_with_count: "Scanning archive… {count} entries",
   upload_scanning_archive_hint: "Reading the .zip central directory and parsing embedded game metadata. Upload buttons will enable when this finishes.",
   upload_disabled_scanning: "Scanning game folder — wait for the scan to finish, then this button enables.",
+upload_zip_extract_subfolder_label: "将所有内容放入以ZIP命名的新文件夹中",
+upload_zip_extract_subfolder_desc: "在目标中创建该文件夹并解压缩其中的文件。最适合简单的.zip松散游戏文件。",
+upload_zip_extract_flat_label: "将内容直接提取到目的地",
+upload_zip_extract_flat_desc: "将文件直接拖放到没有包装文件夹的目标中。如果.zip已包含游戏自己的文件夹（例如CUSA12345/） ，请选择此项。",
+upload_zip_extract_heading: ".zip解压缩包应该放在哪里？",
+upload_zip_extract_lands_at: "落地点：",
 };
 
 export default zh_CN;

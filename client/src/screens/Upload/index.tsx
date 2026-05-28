@@ -111,6 +111,15 @@ export default function UploadScreen() {
 
   const [dropActive, setDropActive] = useState(false);
 
+  // For a `.zip` source: wrap its contents in a folder named after the
+  // zip ("subfolder", the default) or extract them straight into the
+  // chosen destination ("flat"). Only surfaced for archives; ignored
+  // otherwise. Sticky across sources within a session.
+  const [archiveExtractMode, setArchiveExtractMode] = useState<
+    "subfolder" | "flat"
+  >("subfolder");
+  const archiveIntoSubfolder = archiveExtractMode === "subfolder";
+
   // Subscribe to the webview's drag-drop events. Tauri delivers the paths
   // already resolved to the host filesystem, so we only need to stat one
   // to decide file-vs-folder and route to the right picker.
@@ -191,6 +200,7 @@ export default function UploadScreen() {
       destinationSubpath,
       source.path,
       source.kind === "archive",
+      archiveIntoSubfolder,
     );
     const addr = `${host}:${PS5_PAYLOAD_PORT}`;
     const displayName =
@@ -307,6 +317,7 @@ export default function UploadScreen() {
       destinationSubpath,
       source.path,
       source.kind === "archive",
+      archiveIntoSubfolder,
     );
     const addr = `${host}:${PS5_PAYLOAD_PORT}`;
 
@@ -391,6 +402,8 @@ export default function UploadScreen() {
           zipInspectEntries={zipInspectEntries}
           mountAfterUpload={mountAfterUpload}
           mountReadOnly={mountReadOnly}
+          archiveExtractMode={archiveExtractMode}
+          onSetArchiveExtractMode={setArchiveExtractMode}
           destinationVolume={destinationVolume}
           destinationSubpath={destinationSubpath}
           availableVolumes={availableVolumes}
@@ -494,6 +507,8 @@ function Step2Options(props: {
   zipInspectEntries: number | null;
   mountAfterUpload: boolean;
   mountReadOnly: boolean;
+  archiveExtractMode: "subfolder" | "flat";
+  onSetArchiveExtractMode: (m: "subfolder" | "flat") => void;
   destinationVolume: string | null;
   destinationSubpath: string;
   availableVolumes: Volume[];
@@ -521,6 +536,8 @@ function Step2Options(props: {
     zipInspectEntries,
     mountAfterUpload,
     mountReadOnly,
+    archiveExtractMode,
+    onSetArchiveExtractMode,
     destinationVolume,
     destinationSubpath,
     availableVolumes,
@@ -689,6 +706,16 @@ function Step2Options(props: {
         <ZipArchiveCard info={source.zipInfo} />
       )}
 
+      {source.kind === "archive" && (
+        <ArchiveExtractModeCard
+          mode={archiveExtractMode}
+          onChange={onSetArchiveExtractMode}
+          destinationVolume={destinationVolume}
+          destinationSubpath={destinationSubpath}
+          sourcePath={source.path}
+        />
+      )}
+
       <FolderDiffSlot
         source={source}
         destinationVolume={destinationVolume}
@@ -716,6 +743,7 @@ function Step2Options(props: {
             destinationSubpath,
             source.path,
             source.kind === "archive",
+            archiveExtractMode === "subfolder",
           ).dest
         }
       />
@@ -809,6 +837,7 @@ function Step2Options(props: {
       <MirrorToRosterButton
         sourceKind={source.kind}
         srcPath={source.path}
+        archiveIntoSubfolder={archiveExtractMode === "subfolder"}
         destinationVolume={destinationVolume}
         destinationSubpath={destinationSubpath}
         excludes={excludes.filter((e) => e.enabled).map((e) => e.pattern)}
@@ -826,12 +855,14 @@ function Step2Options(props: {
 function MirrorToRosterButton({
   sourceKind,
   srcPath,
+  archiveIntoSubfolder,
   destinationVolume,
   destinationSubpath,
   excludes,
 }: {
   sourceKind: PickedSource["kind"];
   srcPath: string;
+  archiveIntoSubfolder: boolean;
   destinationVolume: string | null;
   destinationSubpath: string;
   excludes: string[];
@@ -857,15 +888,16 @@ function MirrorToRosterButton({
     try {
       const { startTransferDir, startTransferFile, startTransferZip, waitForJob } =
         await import("../../api/ps5");
-      const rawLeaf =
-        srcPath.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? "";
-      // Archives extract into a folder named after the zip, minus `.zip`.
-      const leaf =
-        sourceKind === "archive" ? rawLeaf.replace(/\.zip$/i, "") : rawLeaf;
-      const dest =
-        `${destinationVolume}` +
-        (destinationSubpath ? `/${destinationSubpath}` : "") +
-        `/${leaf}`;
+      // Same path rule as the one-shot upload, so a mirror lands exactly
+      // where the primary PS5 got it — including the archive subfolder /
+      // flat-extract choice.
+      const { dest } = resolveUploadDest(
+        destinationVolume,
+        destinationSubpath,
+        srcPath,
+        sourceKind === "archive",
+        archiveIntoSubfolder,
+      );
       const tasks = others.map(async (p) => {
         const addr = `${p.host}:${PS5_PAYLOAD_PORT}`;
         try {
@@ -1903,6 +1935,124 @@ function ZipArchiveCard({ info }: { info: ZipInspect }) {
             )}
           </div>
         </div>
+      </div>
+    </section>
+  );
+}
+
+/** Lets the user choose how a `.zip` lands on the PS5: wrapped in a
+ *  folder named after the archive, or extracted straight into the
+ *  destination. Shows a live preview of the resulting path for each
+ *  choice so the outcome is unambiguous before they upload. */
+function ArchiveExtractModeCard({
+  mode,
+  onChange,
+  destinationVolume,
+  destinationSubpath,
+  sourcePath,
+}: {
+  mode: "subfolder" | "flat";
+  onChange: (m: "subfolder" | "flat") => void;
+  destinationVolume: string | null;
+  destinationSubpath: string;
+  sourcePath: string;
+}) {
+  const tr = useTr();
+  const subfolderDest = resolveUploadDest(
+    destinationVolume,
+    destinationSubpath,
+    sourcePath,
+    true,
+    true,
+  ).dest;
+  const flatDest = resolveUploadDest(
+    destinationVolume,
+    destinationSubpath,
+    sourcePath,
+    true,
+    false,
+  ).dest;
+
+  const options: {
+    value: "subfolder" | "flat";
+    label: string;
+    desc: string;
+    preview: string;
+  }[] = [
+    {
+      value: "subfolder",
+      label: tr(
+        "upload_zip_extract_subfolder_label",
+        "Put everything in a new folder named after the zip",
+      ),
+      desc: tr(
+        "upload_zip_extract_subfolder_desc",
+        "Creates that folder in the destination and extracts the files inside it. Best for a plain .zip of loose game files.",
+      ),
+      preview: `${subfolderDest}/…`,
+    },
+    {
+      value: "flat",
+      label: tr(
+        "upload_zip_extract_flat_label",
+        "Extract the contents straight into the destination",
+      ),
+      desc: tr(
+        "upload_zip_extract_flat_desc",
+        "Drops the files directly into the destination with no wrapper folder. Choose this when the .zip already contains the game's own folder (e.g. CUSA12345/).",
+      ),
+      preview: `${flatDest}/…`,
+    },
+  ];
+
+  return (
+    <section className="mb-4 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-5">
+      <div className="mb-3 flex items-center gap-2 text-sm font-medium">
+        <FileArchive size={16} className="text-[var(--color-muted)]" />
+        {tr("upload_zip_extract_heading", "Where should the .zip unpack?")}
+      </div>
+      <div className="flex flex-col gap-2">
+        {options.map((opt) => {
+          const selected = mode === opt.value;
+          return (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => onChange(opt.value)}
+              className={
+                "flex items-start gap-3 rounded-md border p-3 text-left transition-colors " +
+                (selected
+                  ? "border-[var(--color-accent)] bg-[var(--color-accent)]/5"
+                  : "border-[var(--color-border)] hover:bg-[var(--color-surface-3)]")
+              }
+            >
+              <span
+                className={
+                  "mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border " +
+                  (selected
+                    ? "border-[var(--color-accent)]"
+                    : "border-[var(--color-border)]")
+                }
+              >
+                {selected && (
+                  <span className="h-2 w-2 rounded-full bg-[var(--color-accent)]" />
+                )}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-medium text-[var(--color-text)]">
+                  {opt.label}
+                </span>
+                <span className="mt-0.5 block text-xs text-[var(--color-muted)]">
+                  {opt.desc}
+                </span>
+                <span className="mt-1 block truncate font-mono text-[11px] text-[var(--color-muted)]">
+                  {tr("upload_zip_extract_lands_at", "Lands at:")}{" "}
+                  <span className="text-[var(--color-text)]">{opt.preview}</span>
+                </span>
+              </span>
+            </button>
+          );
+        })}
       </div>
     </section>
   );

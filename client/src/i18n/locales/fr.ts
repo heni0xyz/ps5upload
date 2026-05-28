@@ -1236,6 +1236,12 @@ install_register_path_appinst: "(en cours AppInstUtil — pas de flash ShellUI)"
   upload_scanning_archive_title_with_count: "Scanning archive… {count} entries",
   upload_scanning_archive_hint: "Reading the .zip central directory and parsing embedded game metadata. Upload buttons will enable when this finishes.",
   upload_disabled_scanning: "Scanning game folder — wait for the scan to finish, then this button enables.",
+upload_zip_extract_subfolder_label: "Mettez tout dans un nouveau dossier nommé d'après le code postal",
+upload_zip_extract_subfolder_desc: "Crée ce dossier dans la destination et extrait les fichiers qu'il contient. Idéal pour un simple .zip de fichiers de jeu en vrac.",
+upload_zip_extract_flat_label: "Extraire le contenu directement dans la destination",
+upload_zip_extract_flat_desc: "Dépose les fichiers directement dans la destination sans dossier d'emballage. Choisissez cette option lorsque le .zip contient déjà le dossier du jeu (par exemple CUSA12345/).",
+upload_zip_extract_heading: "Où le .zip doit-il être déballé ?",
+upload_zip_extract_lands_at: "Terrains à :",
 };
 
 export default fr;

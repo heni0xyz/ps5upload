@@ -1235,6 +1235,12 @@ install_register_path_appinst: "(AppInstUtil dalam proses — tanpa flash ShellU
   upload_scanning_archive_title_with_count: "Scanning archive… {count} entries",
   upload_scanning_archive_hint: "Reading the .zip central directory and parsing embedded game metadata. Upload buttons will enable when this finishes.",
   upload_disabled_scanning: "Scanning game folder — wait for the scan to finish, then this button enables.",
+upload_zip_extract_subfolder_label: "Masukkan semuanya ke dalam folder baru yang diberi nama sesuai zip",
+upload_zip_extract_subfolder_desc: "Membuat folder itu di tujuan dan mengekstrak file di dalamnya. Cocok untuk .zip biasa dari file game yang longgar.",
+upload_zip_extract_flat_label: "Ekstrak isinya langsung ke tujuan",
+upload_zip_extract_flat_desc: "Menjatuhkan file langsung ke tujuan tanpa folder pembungkus. Pilih ini ketika .zip sudah berisi folder game sendiri (misalnya CUSA12345 /).",
+upload_zip_extract_heading: "Di mana .zip harus dibongkar?",
+upload_zip_extract_lands_at: "Mendarat di:",
 };
 
 export default id;

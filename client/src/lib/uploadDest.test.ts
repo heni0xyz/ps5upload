@@ -74,6 +74,47 @@ describe("resolveUploadDest", () => {
     expect(dest).toBe("/data/homebrew/MyGame");
   });
 
+  it("wraps an archive in a zip-named subfolder when archiveIntoSubfolder is true", () => {
+    // Explicit default: contents land under <destRoot>/<zipname>.
+    const { destRoot, dest } = resolveUploadDest(
+      "/data",
+      "homebrew",
+      "/Users/me/MyGame.zip",
+      true,
+      true,
+    );
+    expect(destRoot).toBe("/data/homebrew");
+    expect(dest).toBe("/data/homebrew/MyGame");
+  });
+
+  it("extracts an archive flat into destRoot when archiveIntoSubfolder is false", () => {
+    // Flat mode: the zip's contents drop straight into the destination,
+    // no wrapper folder — dest IS destRoot. For zips that already carry
+    // the game's own top-level folder.
+    const { destRoot, dest } = resolveUploadDest(
+      "/data",
+      "homebrew",
+      "/Users/me/MyGame.zip",
+      true,
+      false,
+    );
+    expect(destRoot).toBe("/data/homebrew");
+    expect(dest).toBe("/data/homebrew");
+  });
+
+  it("ignores archiveIntoSubfolder for non-archive sources", () => {
+    // The flat flag only applies to archives; a folder always suffixes
+    // its basename regardless.
+    const { dest } = resolveUploadDest(
+      "/data",
+      "homebrew",
+      "/Users/me/my-folder",
+      false,
+      false,
+    );
+    expect(dest).toBe("/data/homebrew/my-folder");
+  });
+
   it("keeps a .zip name verbatim when the source is NOT an archive", () => {
     // Defensive: the same path uploaded as a plain file (isArchive omitted)
     // keeps its extension.

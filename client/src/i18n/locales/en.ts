@@ -1328,6 +1328,12 @@ first_run_cancel: "Cancel",
 playlists_recently_run: "Recently run",
 playlist_move_up: "Move playlist up",
 playlist_move_down: "Move playlist down",
+upload_zip_extract_subfolder_label: "Put everything in a new folder named after the zip",
+upload_zip_extract_subfolder_desc: "Creates that folder in the destination and extracts the files inside it. Best for a plain .zip of loose game files.",
+upload_zip_extract_flat_label: "Extract the contents straight into the destination",
+upload_zip_extract_flat_desc: "Drops the files directly into the destination with no wrapper folder. Choose this when the .zip already contains the game's own folder (e.g. CUSA12345/).",
+upload_zip_extract_heading: "Where should the .zip unpack?",
+upload_zip_extract_lands_at: "Lands at:",
 };
 
 export default en;

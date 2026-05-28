@@ -1235,6 +1235,12 @@ install_register_path_appinst: "(в процессе AppInstUtil — нет вс
   upload_scanning_archive_title_with_count: "Scanning archive… {count} entries",
   upload_scanning_archive_hint: "Reading the .zip central directory and parsing embedded game metadata. Upload buttons will enable when this finishes.",
   upload_disabled_scanning: "Scanning game folder — wait for the scan to finish, then this button enables.",
+upload_zip_extract_subfolder_label: "Поместите все в новую папку, названную в честь почтового индекса",
+upload_zip_extract_subfolder_desc: "Создает эту папку в месте назначения и извлекает файлы из нее. Лучше всего подходит для простого архива .zip со свободными файлами игр.",
+upload_zip_extract_flat_label: "Извлеките содержимое прямо в пункт назначения",
+upload_zip_extract_flat_desc: "Перетаскивание файлов непосредственно в место назначения без папки обёртки. Выберите это, когда .zip уже содержит собственную папку игры (например, CUSA12345/).",
+upload_zip_extract_heading: "Где распаковать .zip?",
+upload_zip_extract_lands_at: "Земельные участки по адресу:",
 };
 
 export default ru;

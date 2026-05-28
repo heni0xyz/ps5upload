@@ -1235,6 +1235,12 @@ install_register_path_appinst: "(In-process AppInstUtil — কোনও ShellUI
   upload_scanning_archive_title_with_count: "Scanning archive… {count} entries",
   upload_scanning_archive_hint: "Reading the .zip central directory and parsing embedded game metadata. Upload buttons will enable when this finishes.",
   upload_disabled_scanning: "Scanning game folder — wait for the scan to finish, then this button enables.",
+upload_zip_extract_subfolder_label: "জিপের নামানুসারে একটি নতুন ফোল্ডারে সবকিছু রাখুন",
+upload_zip_extract_subfolder_desc: "গন্তব্যে সেই ফোল্ডারটি তৈরি করে এবং এর ভিতরে থাকা ফাইলগুলি বের করে । আলগা গেম ফাইলগুলির একটি সাধারণ .zip এর জন্য সেরা ।",
+upload_zip_extract_flat_label: "সরাসরি বিষয়বস্তুগুলি গন্তব্যস্থলে এক্সট্র্যাক্ট করুন",
+upload_zip_extract_flat_desc: "কোনও মোড়ানো ফোল্ডার ছাড়াই ফাইলগুলি সরাসরি গন্তব্যে ফেলে দেয় । .zip-এ ইতিমধ্যে গেমের নিজস্ব ফোল্ডার থাকলে এটি বেছে নিন (যেমন CUSA12345/) ।",
+upload_zip_extract_heading: ".zip কোথায় আনপ্যাক করা উচিত?",
+upload_zip_extract_lands_at: "এ জমি:",
 };
 
 export default bn;

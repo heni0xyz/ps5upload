@@ -1236,6 +1236,12 @@ install_register_path_appinst: "(इन — प्रोसेस AppInstUtil �
   upload_scanning_archive_title_with_count: "Scanning archive… {count} entries",
   upload_scanning_archive_hint: "Reading the .zip central directory and parsing embedded game metadata. Upload buttons will enable when this finishes.",
   upload_disabled_scanning: "Scanning game folder — wait for the scan to finish, then this button enables.",
+upload_zip_extract_subfolder_label: "सब कुछ ज़िप के नाम पर एक नए फ़ोल्डर में रखें",
+upload_zip_extract_subfolder_desc: "गंतव्य में उस फ़ोल्डर को बनाता है और उसके अंदर की फ़ाइलों को निकालता है। ढीली गेम फ़ाइलों के एक सादे .zip के लिए सबसे अच्छा।",
+upload_zip_extract_flat_label: "सामग्री को सीधे डेस्टिनेशन में निकालें",
+upload_zip_extract_flat_desc: "फ़ाइलों को बिना रैपर फ़ोल्डर के सीधे डेस्टिनेशन में गिरा देता है। इसे तब चुनें जब .zip में पहले से ही गेम का अपना फ़ोल्डर हो (जैसे CUSA12345 /)।",
+upload_zip_extract_heading: ".zip को कहाँ अनपैक करना चाहिए?",
+upload_zip_extract_lands_at: "यहाँ लैंड करें:",
 };
 
 export default hi;

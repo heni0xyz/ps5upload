@@ -1236,6 +1236,12 @@ install_register_path_appinst: "(in-process AppInstUtil — ShellUI 플래시 �
   upload_scanning_archive_title_with_count: "Scanning archive… {count} entries",
   upload_scanning_archive_hint: "Reading the .zip central directory and parsing embedded game metadata. Upload buttons will enable when this finishes.",
   upload_disabled_scanning: "Scanning game folder — wait for the scan to finish, then this button enables.",
+upload_zip_extract_subfolder_label: "모든 것을 zip의 이름을 따서 명명된 새 폴더에 넣습니다.",
+upload_zip_extract_subfolder_desc: "대상에 해당 폴더를 만들고 그 안에 있는 파일을 추출합니다. 느슨한 게임 파일의 일반 .zip에 가장 적합합니다.",
+upload_zip_extract_flat_label: "콘텐츠를 목적지로 바로 추출합니다.",
+upload_zip_extract_flat_desc: "래퍼 폴더 없이 파일을 대상에 직접 놓습니다. .zip에 게임 자체 폴더 (예: CUSA12345/) 가 이미 있는 경우 이 옵션을 선택하십시오.",
+upload_zip_extract_heading: ".zip은 어디에 압축을 풀어야 합니까?",
+upload_zip_extract_lands_at: "랜드 위치:",
 };
 
 export default ko;
