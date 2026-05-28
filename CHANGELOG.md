@@ -4,6 +4,25 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 2.18.4
+
+- **Hotfix for "engine request failed" on huge folder deletes/copies.**
+  Deleting (or copying / moving) a folder with tens of thousands of
+  files on the PS5 surfaced as `engine request failed: error sending
+  request for url (http://127.0.0.1:19113/api/ps5/fs/delete)` after
+  about a minute — even though the operation was still running and
+  eventually succeeded on the console. Cause: the desktop app's
+  HTTP client to its own embedded engine had a 60-second ceiling
+  that wasn't long enough for big-tree operations (the PS5 needs
+  many minutes to walk and unlink tens of thousands of inodes).
+  v2.18.4 raises the ceiling to one hour for the three destructive
+  endpoints (`fs/delete`, `fs/copy`, `fs/move`), matching the
+  engine's own internal deadline. Other endpoints stay at 60 s so
+  a wedged sidecar still surfaces fast.
+- No payload changes needed; this is a desktop-app-only fix.
+
+---
+
 ## 2.18.3
 
 - **Hotfix for multi-file upload crash.** A user reported uploading a

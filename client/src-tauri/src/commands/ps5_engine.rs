@@ -27,9 +27,11 @@ type JsonValue = serde_json::Value;
 ///
 /// `connect_timeout` is short because the engine is local (loopback);
 /// 2s is generous for "is the local sidecar up." `timeout` (60s) covers
-/// the slowest expected payload-side operation; long-running endpoints
-/// (multi-GB file copy) stream their own progress, so the request itself
-/// returns quickly with a job_id.
+/// the slowest expected payload-side operation for the "fast" trio of
+/// endpoints (status, list-dir, volumes, etc.).
+///
+/// Long-running destructive endpoints (fs_delete, fs_copy, fs_move) go
+/// through `http_client_long` instead — see its rationale below.
 fn http_client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     CLIENT.get_or_init(|| {
@@ -38,6 +40,31 @@ fn http_client() -> &'static reqwest::Client {
             .timeout(Duration::from_secs(60))
             .build()
             .expect("failed to build engine HTTP client")
+    })
+}
+
+/// Long-deadline HTTP client for the destructive-trio endpoints
+/// (fs_delete, fs_copy, fs_move). The engine's handler for those holds
+/// the HTTP request open for the entire payload-side run with a 1-hour
+/// deadline of its own — deleting tens of thousands of files on PS5
+/// UFS (e.g. a 46k-file game folder) routinely takes many minutes,
+/// well past the 60 s ceiling on `http_client`. Pre-v2.18.4 those
+/// requests timed out client-side with a misleading "engine request
+/// failed: error sending request" message while the engine continued
+/// running and the operation actually succeeded.
+///
+/// Match the engine's own deadline so a real wedge still surfaces as
+/// a timeout (eventually) rather than hanging forever. The
+/// connect_timeout stays short — if the local sidecar isn't there,
+/// fail fast regardless of which endpoint family.
+fn http_client_long() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(2))
+            .timeout(Duration::from_secs(60 * 60))
+            .build()
+            .expect("failed to build long-deadline engine HTTP client")
     })
 }
 
@@ -64,7 +91,22 @@ async fn get_json(url: &str) -> Result<JsonValue, String> {
 }
 
 async fn post_json(url: &str, body: &JsonValue) -> Result<JsonValue, String> {
-    let resp = http_client()
+    post_json_with_client(http_client(), url, body).await
+}
+
+/// `post_json` variant that uses the long-deadline client. Use for the
+/// destructive trio (fs_delete, fs_copy, fs_move) whose payload-side
+/// runs routinely exceed `http_client`'s 60 s ceiling on large trees.
+async fn post_json_long(url: &str, body: &JsonValue) -> Result<JsonValue, String> {
+    post_json_with_client(http_client_long(), url, body).await
+}
+
+async fn post_json_with_client(
+    client: &reqwest::Client,
+    url: &str,
+    body: &JsonValue,
+) -> Result<JsonValue, String> {
+    let resp = client
         .post(url)
         .json(body)
         .send()
@@ -321,7 +363,7 @@ pub struct FsChmodReq {
 pub async fn ps5_fs_delete(req: FsPathReq) -> Result<JsonValue, String> {
     let base = engine::url();
     let url = format!("{base}/api/ps5/fs/delete");
-    post_json(
+    post_json_long(
         &url,
         &serde_json::json!({
             "addr": req.addr,
@@ -336,7 +378,7 @@ pub async fn ps5_fs_delete(req: FsPathReq) -> Result<JsonValue, String> {
 pub async fn ps5_fs_move(req: FsMoveReq) -> Result<JsonValue, String> {
     let base = engine::url();
     let url = format!("{base}/api/ps5/fs/move");
-    post_json(
+    post_json_long(
         &url,
         &serde_json::json!({
             "addr": req.addr,
@@ -352,7 +394,7 @@ pub async fn ps5_fs_move(req: FsMoveReq) -> Result<JsonValue, String> {
 pub async fn ps5_fs_copy(req: FsMoveReq) -> Result<JsonValue, String> {
     let base = engine::url();
     let url = format!("{base}/api/ps5/fs/copy");
-    post_json(
+    post_json_long(
         &url,
         &serde_json::json!({
             "addr": req.addr,
