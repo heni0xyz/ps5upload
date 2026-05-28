@@ -372,6 +372,14 @@ export const useUploadQueueStore = create<QueueState>((set, get) => {
         // primary user-reported pain point (huge folders) so this
         // path matters most. commitMsPerFile is left undefined until
         // P3's APPLY_PROGRESS frames give us the apply-time signal.
+        //
+        // Known bias (same as transfer.ts): `snap.elapsed_ms`
+        // includes the post-100% PS5 commit phase, so a 50-min
+        // upload that was 30 min transfer + 20 min apply records as
+        // ~55 MiB/s instead of the actual ~90 MiB/s transfer rate.
+        // The next banner estimate is then conservatively long, which
+        // is the right direction for UX. Sharper accounting waits for
+        // P3 APPLY_PROGRESS — see review notes surface C1.
         if (finalBytes > 0 && elapsedMs > 0) {
           const throughputMibps =
             finalBytes / 1024 / 1024 / (elapsedMs / 1000);

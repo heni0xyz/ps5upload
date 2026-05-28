@@ -364,7 +364,7 @@ fn send_begin_and_expect_ack(c: &mut Connection, body: &[u8]) -> Result<Vec<u8>>
 /// bother restoring the prior timeout.
 fn send_commit_and_expect_ack(c: &mut Connection, body: &[u8]) -> Result<Vec<u8>> {
     c.set_io_timeout(COMMIT_TX_ACK_TIMEOUT)
-        .context("raise read timeout for multi-file CommitTxAck wait")?;
+        .context("raise read timeout for CommitTxAck wait")?;
     send_and_expect(c, FrameType::CommitTx, body, FrameType::CommitTxAck)
 }
 
@@ -844,6 +844,12 @@ fn transfer_file_with_flags(
     })?;
 
     let mut c = Connection::connect(&cfg.addr)?;
+    // Single-file path: manifest body is ~1 KB (file_count=1, tiny `files`
+    // array). The connection's default 30-second read timeout for the
+    // BeginTxAck wait is fine — the long `send_begin_and_expect_ack`
+    // helper exists for the multi-file paths whose manifests can run
+    // into tens of MB (v2.17.7 fix). See that helper's docstring for
+    // the rationale on the asymmetry.
     let begin_ack = send_and_expect(
         &mut c,
         FrameType::BeginTx,
@@ -971,6 +977,12 @@ fn transfer_file_path_with_flags(
     })?;
 
     let mut c = Connection::connect(&cfg.addr)?;
+    // Single-file path: manifest body is ~1 KB (file_count=1, tiny `files`
+    // array). The connection's default 30-second read timeout for the
+    // BeginTxAck wait is fine — the long `send_begin_and_expect_ack`
+    // helper exists for the multi-file paths whose manifests can run
+    // into tens of MB (v2.17.7 fix). See that helper's docstring for
+    // the rationale on the asymmetry.
     let begin_ack = send_and_expect(
         &mut c,
         FrameType::BeginTx,

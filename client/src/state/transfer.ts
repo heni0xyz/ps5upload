@@ -419,6 +419,18 @@ export const useTransferStore = create<TransferState>((set) => {
           // requires the per-file APPLY_PROGRESS frames coming in P3
           // (design doc §4). Once those land, this is the natural
           // recording site.
+          //
+          // Known bias: `snap.elapsed_ms` is the engine's *full*
+          // elapsed time, which INCLUDES the post-100% PS5 commit
+          // phase. For multi-file uploads (e.g. a 169k-file folder
+          // with ~20 min of apply on top of ~30 min transfer) this
+          // under-reports raw throughput by ~40%. The next upload's
+          // banner will then over-estimate transfer time — which is
+          // the conservative direction (over-promise wait, not
+          // under-promise) so the bias is acceptable shipped. Proper
+          // fix lands with P3, when APPLY_PROGRESS gives us a clean
+          // apply-start timestamp to subtract. See review notes
+          // surface C1.
           const recordedBytes = snap.bytes_sent ?? 0;
           const recordedElapsedMs = snap.elapsed_ms ?? 0;
           if (recordedBytes > 0 && recordedElapsedMs > 0) {

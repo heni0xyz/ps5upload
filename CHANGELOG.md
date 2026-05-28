@@ -4,6 +4,19 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 2.17.8
+
+- Internal cleanup pass after the 2.17.3 → 2.17.7 rapid-fire shipping.
+  No user-visible behaviour changes — comments and inline rationale
+  brought in line with reality (the commit-timeout helper now covers
+  both single- and multi-file paths, the begin-timeout helper covers
+  only multi-file as designed, throughput recording's known bias is
+  documented, and the unused `MAX_AGE_MS` constant carries an explicit
+  "reserved for P3" note so future readers don't try to wire it
+  without context).
+
+---
+
 ## 2.17.7
 
 - **Uploading very large game folders no longer fails before the
