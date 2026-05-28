@@ -67,6 +67,23 @@ fn tx_meta_body(tx_id: [u8; 16], kind: u32, extra: &[u8]) -> Vec<u8> {
     buf
 }
 
+/// Swap a transfer-port address (`ip:9113`) for the matching mgmt-port
+/// address (`ip:9114`). The transfer-style do_transfer / do_transfer_dir
+/// / do_transfer_zip flows verify success post-commit by calling
+/// `do_query_tx`, but QueryTx is a mgmt-port frame and the lab tool
+/// was previously passing the same transfer-port addr through —
+/// resulting in a `wrong_port` Error frame and a non-zero exit code
+/// on what was actually a successful upload (observed during the
+/// v2.17.7 huge-folder verification run). Engine binary has its own
+/// `mgmt_addr_for` helper; this is the lab-only inline copy since
+/// ps5upload-core doesn't export the engine version.
+fn to_mgmt_addr(transfer_addr: &str) -> String {
+    match transfer_addr.rsplit_once(':') {
+        Some((host, _)) => format!("{host}:9114"),
+        None => format!("{transfer_addr}:9114"),
+    }
+}
+
 fn expect_frame(conn: &mut Connection, expected: FrameType) -> Result<Vec<u8>> {
     let (hdr, body) = conn.recv_frame()?;
     let ft = hdr.frame_type().unwrap_or(FrameType::Error);
@@ -211,7 +228,13 @@ fn do_transfer(addr: &str, tx_id_hex: &str, dest: &str, file_path: &str) -> Resu
         r.shards_sent, r.bytes_sent, r.tx_id_hex
     );
     println!("commit_ack: {}", r.commit_ack_body);
-    do_query_tx(addr, tx_id_hex)
+    // QueryTx is a mgmt-port frame; the transfer flows above use the
+    // :9113 transfer-port addr to drive the upload, so we swap to
+    // the matching :9114 mgmt addr for the post-commit verification
+    // step. Without the swap the payload returned `wrong_port` and
+    // the lab tool exited non-zero on actually-successful uploads
+    // (v2.17.7-era observed bug).
+    do_query_tx(&to_mgmt_addr(addr), tx_id_hex)
 }
 
 fn do_transfer_dir(addr: &str, tx_id_hex: &str, dest_root: &str, src_dir: &str) -> Result<()> {
@@ -223,7 +246,13 @@ fn do_transfer_dir(addr: &str, tx_id_hex: &str, dest_root: &str, src_dir: &str) 
         r.shards_sent, r.bytes_sent, r.tx_id_hex
     );
     println!("commit_ack: {}", r.commit_ack_body);
-    do_query_tx(addr, tx_id_hex)
+    // QueryTx is a mgmt-port frame; the transfer flows above use the
+    // :9113 transfer-port addr to drive the upload, so we swap to
+    // the matching :9114 mgmt addr for the post-commit verification
+    // step. Without the swap the payload returned `wrong_port` and
+    // the lab tool exited non-zero on actually-successful uploads
+    // (v2.17.7-era observed bug).
+    do_query_tx(&to_mgmt_addr(addr), tx_id_hex)
 }
 
 fn do_saves(addr: &str) -> Result<()> {
@@ -259,7 +288,13 @@ fn do_transfer_zip(addr: &str, tx_id_hex: &str, dest_root: &str, zip_path: &str)
         r.shards_sent, r.bytes_sent, r.tx_id_hex
     );
     println!("commit_ack: {}", r.commit_ack_body);
-    do_query_tx(addr, tx_id_hex)
+    // QueryTx is a mgmt-port frame; the transfer flows above use the
+    // :9113 transfer-port addr to drive the upload, so we swap to
+    // the matching :9114 mgmt addr for the post-commit verification
+    // step. Without the swap the payload returned `wrong_port` and
+    // the lab tool exited non-zero on actually-successful uploads
+    // (v2.17.7-era observed bug).
+    do_query_tx(&to_mgmt_addr(addr), tx_id_hex)
 }
 
 fn do_send_shard(addr: &str, tx_id_hex: &str, shard_seq: u64) -> Result<()> {

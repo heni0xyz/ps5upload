@@ -4,6 +4,16 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 2.17.9
+
+- Internal lab tool fix only. The `ps5upload-lab transfer-dir`
+  command's post-commit verification step was calling the wrong
+  PS5 port and showing a spurious error after every successful
+  multi-file upload. The fix lives in the developer lab tool;
+  no user-facing change.
+
+---
+
 ## 2.17.8
 
 - Internal cleanup pass after the 2.17.3 → 2.17.7 rapid-fire shipping.
