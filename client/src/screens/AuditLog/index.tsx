@@ -55,7 +55,8 @@ export default function AuditLogScreen() {
         </p>
       ) : (
         <div className="max-h-[calc(100vh-12rem)] overflow-y-auto rounded-md border border-[var(--color-border)] bg-[var(--color-surface)]">
-          <table className="w-full text-xs">
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[480px] text-xs">
             <thead className="sticky top-0 bg-[var(--color-surface-2)] text-[10px] uppercase tracking-wide text-[var(--color-muted)]">
               <tr>
                 <th className="px-2 py-1 text-left">
@@ -92,6 +93,7 @@ export default function AuditLogScreen() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
     </div>

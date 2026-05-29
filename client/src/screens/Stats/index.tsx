@@ -361,7 +361,8 @@ function TopTransfers({
       <h3 className="mb-3 text-sm font-semibold">
         {tr("stats_top_transfers", undefined, "Fastest transfers")}
       </h3>
-      <table className="w-full text-xs">
+      <div className="overflow-x-auto">
+      <table className="w-full min-w-[420px] text-xs">
         <thead className="text-[var(--color-muted)]">
           <tr>
             <th className="px-1 py-0.5 text-left">{tr("stats_label", undefined, "Label")}</th>
@@ -385,6 +386,7 @@ function TopTransfers({
           ))}
         </tbody>
       </table>
+      </div>
     </section>
   );
 }

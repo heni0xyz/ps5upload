@@ -323,7 +323,7 @@ export default function KernelLogPanel() {
               </button>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-x-3 gap-y-1 md:grid-cols-3">
+          <div className="grid grid-cols-1 gap-x-3 gap-y-1 sm:grid-cols-2 md:grid-cols-3">
             {(Object.keys(CATEGORY_LABEL) as Category[]).map((cat) => {
               const count = counts[cat] ?? 0;
               const hidden = hiddenCats.has(cat);

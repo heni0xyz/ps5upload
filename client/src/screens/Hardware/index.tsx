@@ -710,7 +710,7 @@ function FanThresholdCard({
         )}
       </header>
 
-      <div className="mb-3 grid grid-cols-3 gap-2">
+      <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
         {FAN_PRESETS.map((p) => {
           const active = lastSetC === p.c;
           return (

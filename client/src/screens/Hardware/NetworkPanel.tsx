@@ -61,7 +61,8 @@ export default function NetworkPanel({ mgmtAddr }: { mgmtAddr: string }) {
         </div>
       )}
       {data && data.interfaces.length > 0 && (
-        <table className="w-full text-xs">
+        <div className="overflow-x-auto">
+        <table className="w-full min-w-[420px] text-xs">
           <thead className="text-[var(--color-muted)]">
             <tr>
               <th className="px-1 py-0.5 text-left">
@@ -94,6 +95,7 @@ export default function NetworkPanel({ mgmtAddr }: { mgmtAddr: string }) {
             ))}
           </tbody>
         </table>
+        </div>
       )}
     </section>
   );

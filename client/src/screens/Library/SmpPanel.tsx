@@ -535,7 +535,8 @@ function AutotuneSubsection({
       <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-muted)]">
         {title}
       </div>
-      <table className="w-full text-[10px]">
+      <div className="overflow-x-auto">
+      <table className="w-full min-w-[360px] text-[10px]">
         <thead>
           <tr className="text-left text-[var(--color-muted)]">
             <th className="px-1 py-0.5">{targetLabel}</th>
@@ -576,6 +577,7 @@ function AutotuneSubsection({
           })}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }
