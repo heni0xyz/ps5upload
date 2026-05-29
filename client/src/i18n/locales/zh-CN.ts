@@ -1249,6 +1249,8 @@ upload_zip_extract_flat_label: "将内容直接提取到目的地",
 upload_zip_extract_flat_desc: "将文件直接拖放到没有包装文件夹的目标中。如果.zip已包含游戏自己的文件夹（例如CUSA12345/） ，请选择此项。",
 upload_zip_extract_heading: ".zip解压缩包应该放在哪里？",
 upload_zip_extract_lands_at: "落地点：",
+nav_open_aria: "打开导航",
+nav_close_aria: "关闭导航",
 };
 
 export default zh_CN;

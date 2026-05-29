@@ -1243,6 +1243,8 @@ upload_zip_extract_flat_label: "Trích xuất nội dung thẳng vào điểm đ
 upload_zip_extract_flat_desc: "Thả các tệp trực tiếp vào đích mà không có thư mục trình bao bọc. Chọn tùy chọn này khi .zip đã chứa thư mục riêng của trò chơi (ví dụ: CUSA12345/).",
 upload_zip_extract_heading: "Giải nén .zip nên ở đâu?",
 upload_zip_extract_lands_at: "Đất tại:",
+nav_open_aria: "Mở phần điều hướng",
+nav_close_aria: "Đóng menu điều hướng",
 };
 
 export default vi;

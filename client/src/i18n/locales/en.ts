@@ -1334,6 +1334,8 @@ upload_zip_extract_flat_label: "Extract the contents straight into the destinati
 upload_zip_extract_flat_desc: "Drops the files directly into the destination with no wrapper folder. Choose this when the .zip already contains the game's own folder (e.g. CUSA12345/).",
 upload_zip_extract_heading: "Where should the .zip unpack?",
 upload_zip_extract_lands_at: "Lands at:",
+nav_open_aria: "Open navigation",
+nav_close_aria: "Close navigation",
 };
 
 export default en;

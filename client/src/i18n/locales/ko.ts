@@ -1242,6 +1242,8 @@ upload_zip_extract_flat_label: "콘텐츠를 목적지로 바로 추출합니다
 upload_zip_extract_flat_desc: "래퍼 폴더 없이 파일을 대상에 직접 놓습니다. .zip에 게임 자체 폴더 (예: CUSA12345/) 가 이미 있는 경우 이 옵션을 선택하십시오.",
 upload_zip_extract_heading: ".zip은 어디에 압축을 풀어야 합니까?",
 upload_zip_extract_lands_at: "랜드 위치:",
+nav_open_aria: "내비게이션 열기",
+nav_close_aria: "탐색 메뉴 닫기",
 };
 
 export default ko;

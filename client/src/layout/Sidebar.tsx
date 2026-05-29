@@ -120,7 +120,13 @@ const items: NavItem[] = [
   { to: "/about", key: "about", fallback: "About", icon: Info },
 ];
 
-export default function Sidebar() {
+export default function Sidebar({
+  onNavigate,
+}: {
+  /** Called when a nav item is tapped — used by the mobile drawer to
+   *  close itself after navigation. No-op on desktop (inline sidebar). */
+  onNavigate?: () => void;
+} = {}) {
   const { theme, toggleTheme } = useThemeStore();
   const tr = useTr();
   const errorCount = useLogsStore(
@@ -182,6 +188,7 @@ export default function Sidebar() {
               )}
               <NavLink
                 to={to}
+                onClick={onNavigate}
                 className={({ isActive }) =>
                   clsx(
                     "group flex items-center gap-2.5 rounded-md px-3 py-1.5 text-sm transition-colors",

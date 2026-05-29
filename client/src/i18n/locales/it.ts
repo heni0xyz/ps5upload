@@ -1241,6 +1241,8 @@ upload_zip_extract_flat_label: "Estrarre il contenuto direttamente nella destina
 upload_zip_extract_flat_desc: "Rilascia i file direttamente nella destinazione senza cartella wrapper. Scegli questa opzione quando il file .zip contiene già la cartella del gioco (ad es. CUSA12345/).",
 upload_zip_extract_heading: "Dove deve essere decompresso il file .zip?",
 upload_zip_extract_lands_at: "Atterra a:",
+nav_open_aria: "Apri la navigazione",
+nav_close_aria: "Chiudi navigazione",
 };
 
 export default it;

@@ -1244,6 +1244,8 @@ upload_zip_extract_flat_label: "將內容直接擷取到目的地",
 upload_zip_extract_flat_desc: "將文件直接拖放到沒有包裝文件夾的目標中。當.zip壓縮檔已包含遊戲自己的資料夾時，請選擇此選項（例如CUSA12345/）。",
 upload_zip_extract_heading: ".zip解壓縮檔應該放在哪裡？",
 upload_zip_extract_lands_at: "落地點：",
+nav_open_aria: "開啟主選單",
+nav_close_aria: "關閉導覽",
 };
 
 export default zh_TW;

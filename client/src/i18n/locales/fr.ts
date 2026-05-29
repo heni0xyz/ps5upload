@@ -1242,6 +1242,8 @@ upload_zip_extract_flat_label: "Extraire le contenu directement dans la destinat
 upload_zip_extract_flat_desc: "Dépose les fichiers directement dans la destination sans dossier d'emballage. Choisissez cette option lorsque le .zip contient déjà le dossier du jeu (par exemple CUSA12345/).",
 upload_zip_extract_heading: "Où le .zip doit-il être déballé ?",
 upload_zip_extract_lands_at: "Terrains à :",
+nav_open_aria: "Ouvrir la navigation",
+nav_close_aria: "Fermer le menu",
 };
 
 export default fr;

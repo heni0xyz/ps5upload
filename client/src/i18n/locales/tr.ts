@@ -1241,6 +1241,8 @@ upload_zip_extract_flat_label: "İçeriği doğrudan hedefe çıkarın",
 upload_zip_extract_flat_desc: "Sarıcı klasörü olmadan dosyaları doğrudan hedefe bırakır. .zip zaten oyunun kendi klasörünü içeriyorsa bunu seçin (örn. CUSA12345 /).",
 upload_zip_extract_heading: ".zip nerede açılmalıdır?",
 upload_zip_extract_lands_at: "Lands at:",
+nav_open_aria: "Navigasyonu Aç",
+nav_close_aria: "Gezinme menüsünü kapat",
 };
 
 export default tr;

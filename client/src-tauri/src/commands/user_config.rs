@@ -35,11 +35,28 @@ static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
 /// platform-aware (`$HOME` on Unix, `%USERPROFILE%` on Windows) so we
 /// don't have to build our own fallback chain.
 fn user_config_path(app: &AppHandle) -> Result<PathBuf, String> {
-    let home = app
-        .path()
-        .home_dir()
-        .map_err(|e| format!("cannot resolve home dir: {e}"))?;
-    Ok(home.join(".ps5upload").join("settings.json"))
+    // Mobile (Android/iOS): `home_dir()` resolves to external storage
+    // (e.g. /storage/emulated/0), where writing a dotfile is denied under
+    // scoped storage (the "mkdir .ps5upload: Permission denied" we hit on
+    // first launch). Use the app-private config dir instead — always
+    // writable, no permission prompt, and not world-readable.
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        let dir = app
+            .path()
+            .app_config_dir()
+            .map_err(|e| format!("cannot resolve app config dir: {e}"))?;
+        return Ok(dir.join("settings.json"));
+    }
+    // Desktop: the user-facing mirror lives at `~/.ps5upload/settings.json`.
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        let home = app
+            .path()
+            .home_dir()
+            .map_err(|e| format!("cannot resolve home dir: {e}"))?;
+        Ok(home.join(".ps5upload").join("settings.json"))
+    }
 }
 
 fn ensure_parent(path: &Path) -> Result<(), String> {

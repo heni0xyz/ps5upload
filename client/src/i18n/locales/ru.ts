@@ -1241,6 +1241,8 @@ upload_zip_extract_flat_label: "Извлеките содержимое прям
 upload_zip_extract_flat_desc: "Перетаскивание файлов непосредственно в место назначения без папки обёртки. Выберите это, когда .zip уже содержит собственную папку игры (например, CUSA12345/).",
 upload_zip_extract_heading: "Где распаковать .zip?",
 upload_zip_extract_lands_at: "Земельные участки по адресу:",
+nav_open_aria: "Откройте меню навигации",
+nav_close_aria: "Закрыть навигацию",
 };
 
 export default ru;

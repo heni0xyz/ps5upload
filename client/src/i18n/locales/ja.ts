@@ -1242,6 +1242,8 @@ upload_zip_extract_flat_label: "コンテンツを目的地に直接抽出する
 upload_zip_extract_flat_desc: "ラッパーフォルダなしでファイルを直接宛先にドロップします。.zipにゲーム独自のフォルダがすでに含まれている場合に選択します（例： CUSA 12345 /）。",
 upload_zip_extract_heading: ".zipファイルはどこに展開すべきですか？",
 upload_zip_extract_lands_at: "着地場所：",
+nav_open_aria: "ナビゲーションを開く",
+nav_close_aria: "ナビゲーションを閉じる",
 };
 
 export default ja;

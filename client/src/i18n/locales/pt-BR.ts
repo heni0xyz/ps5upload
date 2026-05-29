@@ -1241,6 +1241,8 @@ upload_zip_extract_flat_label: "Extraia o conteúdo diretamente para o destino",
 upload_zip_extract_flat_desc: "Coloca os arquivos diretamente no destino sem a pasta wrapper. Escolha esta opção quando o .zip já contiver a própria pasta do jogo (por exemplo, CUSA12345/).",
 upload_zip_extract_heading: "Onde o .zip deve ser descompactado?",
 upload_zip_extract_lands_at: "Terrenos em:",
+nav_open_aria: "Abrir o menu de navegação",
+nav_close_aria: "Fechar navegação",
 };
 
 export default pt_BR;

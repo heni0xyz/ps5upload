@@ -1241,6 +1241,8 @@ upload_zip_extract_flat_label: "Ekstrak isinya langsung ke tujuan",
 upload_zip_extract_flat_desc: "Menjatuhkan file langsung ke tujuan tanpa folder pembungkus. Pilih ini ketika .zip sudah berisi folder game sendiri (misalnya CUSA12345 /).",
 upload_zip_extract_heading: "Di mana .zip harus dibongkar?",
 upload_zip_extract_lands_at: "Mendarat di:",
+nav_open_aria: "buka <ph id=\"mtc_1\" equiv-text=\"base64:Jmx0O2FwcCBjZj0ibmF2aSImZ3Q7\"/>navigasi<ph id=\"mtc_2\" equiv-text=\"base64:Jmx0Oy9hcHAmZ3Q7\"/>",
+nav_close_aria: "tutup <ph id=\"mtc_1\" equiv-text=\"base64:Jmx0O2FwcCBjZj0ibmF2aSImZ3Q7\"/>Navi<ph id=\"mtc_2\" equiv-text=\"base64:Jmx0Oy9hcHAmZ3Q7\"/>",
 };
 
 export default id;

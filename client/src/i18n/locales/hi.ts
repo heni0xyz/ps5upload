@@ -1242,6 +1242,8 @@ upload_zip_extract_flat_label: "सामग्री को सीधे डे
 upload_zip_extract_flat_desc: "फ़ाइलों को बिना रैपर फ़ोल्डर के सीधे डेस्टिनेशन में गिरा देता है। इसे तब चुनें जब .zip में पहले से ही गेम का अपना फ़ोल्डर हो (जैसे CUSA12345 /)।",
 upload_zip_extract_heading: ".zip को कहाँ अनपैक करना चाहिए?",
 upload_zip_extract_lands_at: "यहाँ लैंड करें:",
+nav_open_aria: "नेविगेशन मेनू को खोलें",
+nav_close_aria: "नेविगेशन मेनू को बंद करें",
 };
 
 export default hi;

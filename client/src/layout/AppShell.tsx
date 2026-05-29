@@ -1,5 +1,6 @@
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Menu } from "lucide-react";
 import Sidebar from "./Sidebar";
 import StatusBar from "./StatusBar";
 import ActivityBar from "./ActivityBar";
@@ -20,6 +21,7 @@ import { ShortcutsOverlay } from "../components/ShortcutsOverlay";
 import { useWindowStatePersistence } from "../lib/windowState";
 import { mgmtAddr } from "../lib/addr";
 import { installPlayTimeAccumulator } from "../state/playTime";
+import { useTr } from "../state/lang";
 
 /** Background status polling for the engine + payload dots in the
  *  status bar. Runs for the lifetime of the app so the indicators
@@ -290,10 +292,57 @@ export default function AppShell() {
     );
     return () => window.clearInterval(pruneTimer);
   }, []);
+  // Mobile nav drawer open/closed. Only consulted below the md
+  // breakpoint; on desktop the sidebar is always inline.
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const tr = useTr();
+
   return (
     <div className="flex h-full flex-col bg-[var(--color-surface)] text-[var(--color-text)]">
+      {/* Mobile top bar — only below the md breakpoint, where the fixed
+          240px sidebar would otherwise eat most of a phone screen. The
+          hamburger opens the sidebar as a slide-in drawer. */}
+      <div className="flex items-center gap-2 border-b border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 md:hidden">
+        <button
+          type="button"
+          aria-label={tr("nav_open_aria", "Open navigation")}
+          onClick={() => setMobileNavOpen(true)}
+          className="rounded-md p-1.5 text-[var(--color-text)] hover:bg-[var(--color-surface-3)]"
+        >
+          <Menu size={20} />
+        </button>
+        <img
+          src="/logo-square.png"
+          alt=""
+          aria-hidden
+          className="h-6 w-6 rounded"
+        />
+        <span className="text-sm font-semibold">PS5Upload</span>
+      </div>
+
       <div className="flex min-h-0 flex-1">
-        <Sidebar />
+        {/* Desktop: inline sidebar. Hidden on phones — the drawer below
+            takes over so content gets the full width. */}
+        <div className="hidden md:flex">
+          <Sidebar />
+        </div>
+
+        {/* Mobile drawer: scrim + slide-in sidebar. The scrim and any nav
+            item (via Sidebar's onNavigate) close it. */}
+        {mobileNavOpen && (
+          <div className="fixed inset-0 z-50 md:hidden">
+            <button
+              type="button"
+              aria-label={tr("nav_close_aria", "Close navigation")}
+              onClick={() => setMobileNavOpen(false)}
+              className="absolute inset-0 bg-black/50"
+            />
+            <div className="absolute inset-y-0 left-0 max-w-[85%] shadow-xl">
+              <Sidebar onNavigate={() => setMobileNavOpen(false)} />
+            </div>
+          </div>
+        )}
+
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
           <div className="flex-1 overflow-auto">
             <Outlet />

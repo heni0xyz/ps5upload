@@ -1241,6 +1241,8 @@ upload_zip_extract_flat_label: "แยกเนื้อหาตรงไปย
 upload_zip_extract_flat_desc: "วางไฟล์ลงในปลายทางโดยตรงโดยไม่มีโฟลเดอร์ห่อเลือกสิ่งนี้เมื่อ .zip มีโฟลเดอร์ของเกมอยู่แล้ว (เช่น CUSA12345 /)",
 upload_zip_extract_heading: "ควรแกะ .zip ตรงไหน?",
 upload_zip_extract_lands_at: "ลงจอดที่:",
+nav_open_aria: "เปิดเมนูการนำทาง",
+nav_close_aria: "ปิดการนำทาง",
 };
 
 export default th;

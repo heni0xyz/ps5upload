@@ -1242,6 +1242,8 @@ upload_zip_extract_flat_label: "Extrahieren Sie den Inhalt direkt in das Ziel",
 upload_zip_extract_flat_desc: "Legt die Dateien ohne Wrapper-Ordner direkt an das Ziel ab. Wählen Sie diese Option, wenn die .zip-Datei bereits den eigenen Ordner des Spiels enthält (z. B. CUSA12345/).",
 upload_zip_extract_heading: "Wo soll die .zip ausgepackt werden?",
 upload_zip_extract_lands_at: "Landet bei:",
+nav_open_aria: "Navigation öffnen",
+nav_close_aria: "Navigation schließen",
 };
 
 export default de;
