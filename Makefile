@@ -440,7 +440,8 @@ android-build: android-deps payload setup-client
 	@test -d $(ANDROID_GEN_DIR) || $(MAKE) android-init
 	@echo "Building Android APK (debug, $(ANDROID_TARGET))..."
 	@cd $(CLIENT_DIR) && $(ANDROID_ENV) npx tauri android build --debug --apk --target $(ANDROID_TARGET)
-	@echo "✓ APK built: $(ANDROID_APK)"
+	@apk=$$(find "$(ANDROID_GEN_DIR)/app/build/outputs/apk" -name 'app-*-debug.apk' -print -quit 2>/dev/null); \
+		echo "✓ APK built: $${apk:-under $(ANDROID_GEN_DIR)/app/build/outputs/apk}"
 
 run-android: android-deps payload setup-client
 	@test -d $(ANDROID_GEN_DIR) || $(MAKE) android-init

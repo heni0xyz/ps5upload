@@ -28,9 +28,12 @@ apk_dir="client/src-tauri/gen/android/app/build/outputs/apk"
 
 # Tauri emits the universal release APK as *-release-unsigned.apk. Fall
 # back to any release apk if a future Tauri renames it.
-unsigned="$(find "$apk_dir" -name '*-release-unsigned.apk' | head -n1)"
+# `-print -quit` (not `| head`) so `find` is never SIGPIPE-killed when the
+# reader closes early — under `set -o pipefail` that 141 would abort the
+# whole script. -quit stops at the first match.
+unsigned="$(find "$apk_dir" -name '*-release-unsigned.apk' -print -quit)"
 if [ -z "$unsigned" ]; then
-  unsigned="$(find "$apk_dir" -name '*release*.apk' ! -name '*-signed.apk' | head -n1)"
+  unsigned="$(find "$apk_dir" -name '*release*.apk' ! -name '*-signed.apk' -print -quit)"
 fi
 if [ -z "$unsigned" ]; then
   echo "::error::no release APK found under $apk_dir"

@@ -19,11 +19,21 @@ import { isTauriEnv } from "./tauriEnv";
 import type { NotificationLevel } from "../state/notifications";
 
 // ── Foreground tracking ───────────────────────────────────────────────
-// Tracked as TWO independent signals — focus and visibility — because a
-// single last-event-wins boolean is wrong: a `visibilitychange` reporting
-// the window still-visible would clobber a prior `blur`, making a
-// visible-but-unfocused window look "foreground" and wrongly suppress the
-// OS mirror. `appIsForeground()` ANDs them, matching its contract.
+// Two signals — focus and visibility — combined carefully so the gate is
+// right on BOTH desktop and mobile:
+//   * Desktop: window focus/blur fire reliably, so a visible-but-unfocused
+//     window (e.g. side-by-side) should count as background → use
+//     visibility AND focus.
+//   * Android/iOS WebView: window focus/blur are unreliable (often never
+//     fire) and document.hasFocus() can read false even in the
+//     foreground, while `visibilitychange` is the authoritative signal.
+//     Letting the focus term veto visibility there would make a
+//     foregrounded app look "backgrounded" and fire a redundant banner
+//     while the user is looking at the in-app inbox.
+// Resolution: only let focus participate once a focus/blur event has
+// actually been observed (proving the platform reports it); until then,
+// trust visibility alone.
+let focusObserved = false;
 let windowFocused =
   typeof document !== "undefined" && typeof document.hasFocus === "function"
     ? document.hasFocus()
@@ -36,9 +46,11 @@ let documentVisible =
 if (typeof window !== "undefined") {
   window.addEventListener("focus", () => {
     windowFocused = true;
+    focusObserved = true;
   });
   window.addEventListener("blur", () => {
     windowFocused = false;
+    focusObserved = true;
   });
 }
 if (typeof document !== "undefined") {
@@ -47,10 +59,13 @@ if (typeof document !== "undefined") {
   });
 }
 
-/** Whether the app window currently has focus AND is visible. The OS
- *  mirror only fires when this is false (app backgrounded/unfocused). */
+/** Whether the app is in the foreground. The OS mirror only fires when
+ *  this is false (app backgrounded/unfocused). Visibility is always
+ *  required; focus is ANDed in only on platforms that actually report
+ *  focus/blur (desktop), so an Android WebView that never fires focus
+ *  isn't wrongly treated as backgrounded. */
 export function appIsForeground(): boolean {
-  return windowFocused && documentVisible;
+  return documentVisible && (focusObserved ? windowFocused : true);
 }
 
 // ── Permission ────────────────────────────────────────────────────────
