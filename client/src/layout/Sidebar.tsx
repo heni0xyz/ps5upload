@@ -143,7 +143,7 @@ export default function Sidebar({
   }, []);
 
   return (
-    <aside className="flex w-60 shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface-2)]">
+    <aside className="flex w-60 shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface-2)] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)]">
       {/* Brand header — compact, logo + name + version in a single
           row. Subtle border below separates it from the nav. */}
       <div className="flex items-center gap-2.5 border-b border-[var(--color-border)] px-4 py-4">

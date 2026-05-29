@@ -302,7 +302,7 @@ export default function AppShell() {
       {/* Mobile top bar — only below the md breakpoint, where the fixed
           240px sidebar would otherwise eat most of a phone screen. The
           hamburger opens the sidebar as a slide-in drawer. */}
-      <div className="flex items-center gap-2 border-b border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 md:hidden">
+      <div className="flex items-center gap-2 border-b border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 pb-2 pt-[calc(env(safe-area-inset-top)_+_0.5rem)] md:hidden">
         <button
           type="button"
           aria-label={tr("nav_open_aria", "Open navigation")}
