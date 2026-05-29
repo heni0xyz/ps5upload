@@ -1244,6 +1244,9 @@ upload_zip_extract_heading: "Wo soll die .zip ausgepackt werden?",
 upload_zip_extract_lands_at: "Landet bei:",
 nav_open_aria: "Navigation öffnen",
 nav_close_aria: "Navigation schließen",
+notifications: "Benachrichtigungen",
+os_notify_label: "System Benachrichtigungen anzeigen",
+os_notify_hint: "Spiegeln Sie In-App-Benachrichtigungen (Übertragung abgeschlossen, Fehler usw.) in die Benachrichtigungszentrale Ihres Betriebssystems — aber nur, wenn sich die App im Hintergrund befindet, sodass Sie nicht zweimal benachrichtigt werden. Möglicherweise werden Sie aufgefordert, die Erlaubnis zur Benachrichtigung zu erteilen.",
 };
 
 export default de;

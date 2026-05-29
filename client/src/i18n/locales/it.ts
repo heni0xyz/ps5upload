@@ -1243,6 +1243,9 @@ upload_zip_extract_heading: "Dove deve essere decompresso il file .zip?",
 upload_zip_extract_lands_at: "Atterra a:",
 nav_open_aria: "Apri la navigazione",
 nav_close_aria: "Chiudi navigazione",
+notifications: "Notifiche",
+os_notify_label: "Mostra le notifiche di sistema",
+os_notify_hint: "Esegui il mirroring delle notifiche in-app (trasferimento effettuato, errori, ecc.) nel centro notifiche del tuo sistema operativo, ma solo quando l'app è in background, in modo da non ricevere la notifica due volte. Potrebbe esserti chiesto di concedere l'autorizzazione alla notifica.",
 };
 
 export default it;

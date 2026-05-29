@@ -1251,6 +1251,9 @@ upload_zip_extract_heading: ".zip解压缩包应该放在哪里？",
 upload_zip_extract_lands_at: "落地点：",
 nav_open_aria: "打开导航",
 nav_close_aria: "关闭导航",
+notifications: "消息",
+os_notify_label: "系统通知",
+os_notify_hint: "将应用内通知（传输完成、错误等）镜像到操作系统的通知中心，但仅当应用处于后台时，您才会收到两次通知。您可能会被要求授予通知权限。",
 };
 
 export default zh_CN;

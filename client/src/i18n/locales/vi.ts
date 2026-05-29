@@ -1245,6 +1245,9 @@ upload_zip_extract_heading: "Giải nén .zip nên ở đâu?",
 upload_zip_extract_lands_at: "Đất tại:",
 nav_open_aria: "Mở phần điều hướng",
 nav_close_aria: "Đóng menu điều hướng",
+notifications: "Thông báo",
+os_notify_label: "Thông báo của hệ thống",
+os_notify_hint: "Phản chiếu thông báo trong ứng dụng (đã hoàn tất chuyển khoản, lỗi, v.v.) đến trung tâm thông báo của hệ điều hành — nhưng chỉ khi ứng dụng ở chế độ nền, vì vậy bạn sẽ không được thông báo hai lần. Quý vị có thể được yêu cầu cấp quyền thông báo.",
 };
 
 export default vi;

@@ -1243,6 +1243,9 @@ upload_zip_extract_heading: "Di mana .zip harus dibongkar?",
 upload_zip_extract_lands_at: "Mendarat di:",
 nav_open_aria: "buka <ph id=\"mtc_1\" equiv-text=\"base64:Jmx0O2FwcCBjZj0ibmF2aSImZ3Q7\"/>navigasi<ph id=\"mtc_2\" equiv-text=\"base64:Jmx0Oy9hcHAmZ3Q7\"/>",
 nav_close_aria: "tutup <ph id=\"mtc_1\" equiv-text=\"base64:Jmx0O2FwcCBjZj0ibmF2aSImZ3Q7\"/>Navi<ph id=\"mtc_2\" equiv-text=\"base64:Jmx0Oy9hcHAmZ3Q7\"/>",
+notifications: "Notifikasi",
+os_notify_label: "Tampilkan notifikasi sistem.",
+os_notify_hint: "Cerminkan pemberitahuan dalam aplikasi (transfer selesai, kesalahan, dll.) ke pusat pemberitahuan sistem operasi Anda — tetapi hanya ketika aplikasi ada di latar belakang, sehingga Anda tidak diberi tahu dua kali. Anda mungkin diminta untuk memberikan izin notifikasi.",
 };
 
 export default id;

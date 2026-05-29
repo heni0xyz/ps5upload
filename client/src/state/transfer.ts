@@ -12,6 +12,7 @@ import {
   resumeTxidRemember,
   resumeTxidForget,
   generateTxIdHex,
+  toastPush,
   type JobSnapshot,
   type PlannedFile,
   type ReconcileMode,
@@ -197,6 +198,9 @@ export const useTransferStore = create<TransferState>((set) => {
       // each time — no Resume UX on single files today, so persisting
       // a tx_id would just create surprise skip-behavior on re-upload.
       const host = hostFromAddr(addr);
+      // Friendly name for the PS5-side toasts (start + complete).
+      const uploadName =
+        srcPath.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || "files";
       let txId: string | null = null;
       if (isFolder || isArchive) {
         const persistedMode =
@@ -313,6 +317,15 @@ export const useTransferStore = create<TransferState>((set) => {
           bytesFinalized: 0,
         },
       });
+
+      // Tell the PS5 itself that an upload started — a styled toast on the
+      // console UI. Best-effort over the mgmt port (responsive even during
+      // a transfer); a matching "complete" toast fires on done.
+      if (host) {
+        void toastPush(mgmtAddr(host), "Upload started", {
+          subtitle: uploadName,
+        }).catch(() => {});
+      }
 
       // Trailing-window rate smoother. Shared with the queue runner via
       // lib/rollingRate so the two surfaces never disagree on what
@@ -469,6 +482,12 @@ export const useTransferStore = create<TransferState>((set) => {
                 mountWarnings.length > 0 ? mountWarnings : undefined,
             },
           });
+          // Matching "complete" toast on the PS5 itself.
+          if (host) {
+            void toastPush(mgmtAddr(host), "Upload complete", {
+              subtitle: uploadName,
+            }).catch(() => {});
+          }
         } else if (snap.status === "failed") {
           set({
             phase: {
@@ -568,4 +587,4 @@ export const useTransferStore = create<TransferState>((set) => {
  *  uses `indexOf` — collapses a double-suffix `ip:port:port` to the
  *  leftmost colon. For resume-txid lookup that's strictly safer (a
  *  legacy double-suffix record won't fragment further). */
-import { hostOf as hostFromAddr } from "../lib/addr";
+import { hostOf as hostFromAddr, mgmtAddr } from "../lib/addr";

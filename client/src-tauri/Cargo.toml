@@ -18,6 +18,10 @@ tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-shell = "2"
+# Native OS notifications (system tray/center) — mirrors the in-app
+# notification inbox to the desktop notification center and the Android
+# notification shade. Cross-platform (macOS/Windows/Linux/Android/iOS).
+tauri-plugin-notification = "2"
 # Single-instance enforcement. Without it, double-clicking the desktop
 # icon (or launching from a second shortcut) starts a second desktop
 # process. Both probe :19113, the second's orphan-reaper kills the

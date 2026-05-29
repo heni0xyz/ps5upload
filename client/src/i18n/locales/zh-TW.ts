@@ -1246,6 +1246,9 @@ upload_zip_extract_heading: ".zip解壓縮檔應該放在哪裡？",
 upload_zip_extract_lands_at: "落地點：",
 nav_open_aria: "開啟主選單",
 nav_close_aria: "關閉導覽",
+notifications: "通知",
+os_notify_label: "系統通知",
+os_notify_hint: "將應用程式內通知(傳輸完成、錯誤等)鏡像至作業系統的通知中心，但僅限於應用程式位於背景時，因此您不會收到兩次通知。您可能會被要求授予通知權限。",
 };
 
 export default zh_TW;

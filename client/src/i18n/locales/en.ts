@@ -418,7 +418,7 @@ playlist_step_up: "Move up",
 playlist_step_down: "Move down",
 playlist_step_remove: "Remove step",
 playlist_add_step: "Add step",
-keep_awake_on: "Keep the computer awake",
+keep_awake_on: "Keep the computer awake while PS5 Upload is open",
 queue_title: "Upload queue",
 queue_retry_failed: "Retry failed",
 queue_stop: "Stop",
@@ -1336,6 +1336,9 @@ upload_zip_extract_heading: "Where should the .zip unpack?",
 upload_zip_extract_lands_at: "Lands at:",
 nav_open_aria: "Open navigation",
 nav_close_aria: "Close navigation",
+notifications: "Notifications",
+os_notify_label: "Show system notifications",
+os_notify_hint: "Mirror in-app notifications (transfer done, errors, etc.) to your operating system's notification center — but only when the app is in the background, so you're not notified twice. You may be asked to grant notification permission.",
 };
 
 export default en;

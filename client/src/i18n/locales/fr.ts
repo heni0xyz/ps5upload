@@ -1244,6 +1244,9 @@ upload_zip_extract_heading: "Où le .zip doit-il être déballé ?",
 upload_zip_extract_lands_at: "Terrains à :",
 nav_open_aria: "Ouvrir la navigation",
 nav_close_aria: "Fermer le menu",
+notifications: "Notifications",
+os_notify_label: "Afficher les notifications dans la barre des tâches",
+os_notify_hint: "Mettez en miroir les notifications dans l'application (transfert effectué, erreurs, etc.) dans le centre de notification de votre système d'exploitation, mais uniquement lorsque l'application est en arrière-plan, afin de ne pas être averti deux fois. Vous pouvez être invité à accorder l'autorisation de notification.",
 };
 
 export default fr;

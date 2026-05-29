@@ -1244,6 +1244,9 @@ upload_zip_extract_heading: "¿Dónde debe desempaquetarse el archivo .zip?",
 upload_zip_extract_lands_at: "Terrenos en:",
 nav_open_aria: "Open Navigation Menu",
 nav_close_aria: "Close Navigation Menu",
+notifications: "Notificaciones",
+os_notify_label: "Notificaciones del sistema",
+os_notify_hint: "Refleja las notificaciones en la aplicación (transferencia realizada, errores, etc.) en el centro de notificaciones de tu sistema operativo, pero solo cuando la aplicación esté en segundo plano, para que no se te notifique dos veces. Es posible que se le pida que otorgue permiso de notificación.",
 };
 
 export default es;

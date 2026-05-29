@@ -1244,6 +1244,9 @@ upload_zip_extract_heading: ".zip은 어디에 압축을 풀어야 합니까?",
 upload_zip_extract_lands_at: "랜드 위치:",
 nav_open_aria: "내비게이션 열기",
 nav_close_aria: "탐색 메뉴 닫기",
+notifications: "토",
+os_notify_label: "시스템 알림Comment",
+os_notify_hint: "앱 내 알림 (전송 완료, 오류 등) 을 운영 체제의 알림 센터로 미러링하지만 앱이 백그라운드에 있는 경우에만 미러링하므로 두 번 알림을 받지 않습니다. 알림 권한을 부여하라는 메시지가 표시될 수 있습니다.",
 };
 
 export default ko;

@@ -1243,6 +1243,9 @@ upload_zip_extract_heading: ".zip nerede açılmalıdır?",
 upload_zip_extract_lands_at: "Lands at:",
 nav_open_aria: "Navigasyonu Aç",
 nav_close_aria: "Gezinme menüsünü kapat",
+notifications: "Bildirimler",
+os_notify_label: "Sistem Bildirimleri",
+os_notify_hint: "Uygulama içi bildirimleri (aktarım yapıldı, hatalar vb.) işletim sisteminizin bildirim merkezine yansıtın. Ancak yalnızca uygulama arka planda olduğunda iki kez bildirim almazsınız. Bildirim izni vermeniz istenebilir.",
 };
 
 export default tr;

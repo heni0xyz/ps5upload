@@ -88,6 +88,10 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
+        // Native OS notifications. The renderer mirrors important in-app
+        // inbox entries to the system notification center / Android shade
+        // (see lib/osNotify.ts). Works on every platform.
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             // Spawn the Rust engine binary as a sidecar. On failure we log and
             // keep the window open so the user can see diagnostic info — the

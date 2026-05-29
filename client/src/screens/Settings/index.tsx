@@ -14,12 +14,14 @@ import {
   Moon,
   MoonStar,
   Gauge,
+  Bell,
 } from "lucide-react";
 import { useThemeStore, type Theme } from "../../state/theme";
 
 import { PageHeader } from "../../components";
 
 import { useKeepAwakeStore } from "../../state/keepAwake";
+import { useNotificationsStore } from "../../state/notifications";
 import { useLangStore, useTr, LANGUAGES } from "../../state/lang";
 import { useUploadSettingsStore } from "../../state/uploadSettings";
 import { userConfigPath } from "../../state/userConfig";
@@ -69,6 +71,8 @@ function Section({
 export default function SettingsScreen() {
   const { enabled, supported, lastError, setEnabled, syncFromBackend } =
     useKeepAwakeStore();
+  const osNotifyEnabled = useNotificationsStore((s) => s.osNotifyEnabled);
+  const setOsNotifyEnabled = useNotificationsStore((s) => s.setOsNotifyEnabled);
   const lang = useLangStore((s) => s.lang);
   const setLang = useLangStore((s) => s.setLang);
   const tr = useTr();
@@ -134,13 +138,17 @@ export default function SettingsScreen() {
             <div>
               <div className="flex items-center gap-2 font-medium">
                 <SleepIcon size={14} />
-                {tr("keep_awake_on", undefined, "Keep the computer awake")}
+                {tr(
+                  "keep_awake_on",
+                  undefined,
+                  "Keep the computer awake while PS5 Upload is open",
+                )}
               </div>
               <div className="mt-0.5 text-xs text-[var(--color-muted)]">
                 {tr(
                   "keep_awake_hint",
                   undefined,
-                  "Blocks display and system sleep while the app is running so long uploads don't get interrupted.",
+                  "Uploads, downloads, and installs already keep the computer awake automatically. Turn this on to also block sleep while the app is open but idle.",
                 )}
               </div>
               {!supported && (
@@ -157,6 +165,34 @@ export default function SettingsScreen() {
                   {lastError}
                 </div>
               )}
+            </div>
+          </label>
+        </Section>
+
+        <Section title={tr("notifications", undefined, "Notifications")}>
+          <label className="flex items-start gap-3 text-sm">
+            <input
+              type="checkbox"
+              checked={osNotifyEnabled}
+              onChange={(e) => setOsNotifyEnabled(e.target.checked)}
+              className="mt-0.5 accent-[var(--color-accent)]"
+            />
+            <div>
+              <div className="flex items-center gap-2 font-medium">
+                <Bell size={14} />
+                {tr(
+                  "os_notify_label",
+                  undefined,
+                  "Show system notifications",
+                )}
+              </div>
+              <div className="mt-0.5 text-xs text-[var(--color-muted)]">
+                {tr(
+                  "os_notify_hint",
+                  undefined,
+                  "Mirror in-app notifications (transfer done, errors, etc.) to your operating system's notification center — but only when the app is in the background, so you're not notified twice. You may be asked to grant notification permission.",
+                )}
+              </div>
             </div>
           </label>
         </Section>

@@ -1,5 +1,7 @@
 import { create } from "zustand";
 
+import { appIsForeground, sendOsNotification } from "../lib/osNotify";
+
 /**
  * Persistent notification inbox.
  *
@@ -49,10 +51,21 @@ interface NotificationsState {
   unreadCount: () => number;
   /** Drop entries older than `maxAgeMs`. Returns the number pruned. */
   pruneOlderThan: (maxAgeMs: number) => number;
+  /** Whether to mirror inbox entries to the OS notification center.
+   *  Persisted; default on. */
+  osNotifyEnabled: boolean;
+  setOsNotifyEnabled: (enabled: boolean) => void;
 }
 
 const STORAGE_KEY = "ps5upload.notifications.v1";
 const MAX_ENTRIES = 64;
+const OS_NOTIFY_KEY = "ps5upload.osNotify.v1";
+
+function loadOsNotifyEnabled(): boolean {
+  if (typeof window === "undefined") return true;
+  // Default ON; only an explicit "0" disables it.
+  return window.localStorage.getItem(OS_NOTIFY_KEY) !== "0";
+}
 
 function loadInitial(): Notification[] {
   if (typeof window === "undefined") return [];
@@ -106,6 +119,13 @@ export const useNotificationsStore = create<NotificationsState>((set, get) => ({
     const next = [entry, ...get().entries].slice(0, MAX_ENTRIES);
     set({ entries: next });
     persist(next);
+    // Mirror to the OS notification center / Android shade — but only
+    // when the app isn't in the foreground, so the user doesn't get a
+    // redundant system banner while looking at the in-app inbox.
+    // Fire-and-forget: osNotify no-ops outside Tauri and swallows errors.
+    if (get().osNotifyEnabled && !appIsForeground()) {
+      void sendOsNotification(level, title, extras?.body);
+    }
     return entry.id;
   },
   markAllRead: () => {
@@ -123,6 +143,13 @@ export const useNotificationsStore = create<NotificationsState>((set, get) => ({
     persist(next);
   },
   unreadCount: () => get().entries.filter((e) => !e.read).length,
+  osNotifyEnabled: loadOsNotifyEnabled(),
+  setOsNotifyEnabled: (enabled) => {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(OS_NOTIFY_KEY, enabled ? "1" : "0");
+    }
+    set({ osNotifyEnabled: enabled });
+  },
   pruneOlderThan: (maxAgeMs) => {
     const cutoff = Date.now() - maxAgeMs;
     const before = get().entries.length;

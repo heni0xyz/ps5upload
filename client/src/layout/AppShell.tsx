@@ -14,7 +14,12 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { isTauriEnv, safeUnlisten } from "../lib/tauriEnv";
 import { useDocumentVisible } from "../lib/visibility";
 import { useScheduleRunner } from "../state/schedules";
-import { pushNotification, runNotificationAutoPrune } from "../state/notifications";
+import {
+  pushNotification,
+  runNotificationAutoPrune,
+  useNotificationsStore,
+} from "../state/notifications";
+import { ensureOsNotificationPermission } from "../lib/osNotify";
 import { powerTick } from "../api/ps5";
 import { CommandPalette } from "../components/CommandPalette";
 import { ShortcutsOverlay } from "../components/ShortcutsOverlay";
@@ -296,6 +301,15 @@ export default function AppShell() {
   // breakpoint; on desktop the sidebar is always inline.
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const tr = useTr();
+
+  // Request OS notification permission once at startup (unless the user
+  // disabled the mirror), so the macOS prompt / Android 13+
+  // POST_NOTIFICATIONS dialog appears up front rather than mid-transfer.
+  useEffect(() => {
+    if (useNotificationsStore.getState().osNotifyEnabled) {
+      void ensureOsNotificationPermission();
+    }
+  }, []);
 
   return (
     <div className="flex h-full flex-col bg-[var(--color-surface)] text-[var(--color-text)]">
