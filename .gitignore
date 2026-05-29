@@ -190,3 +190,8 @@ TODO.local.md
 
 # Tauri mobile generated projects (regenerate with: tauri android init / ios init)
 client/src-tauri/gen/
+
+# Locally-built/signed Android APK artifacts (release flow produces these)
+PS5Upload-android.apk
+PS5Upload-android.apk.idsig
+*.idsig

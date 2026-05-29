@@ -4,6 +4,17 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 2.19.1
+
+- **Android: fixed the engine showing red.** On the 2.19.0 Android build
+  the app couldn't reach its own built-in engine, so the status bar
+  showed **engine** in red and transfers couldn't start. Release Android
+  builds block plain-HTTP loopback traffic by default; the app now
+  permits it for its own local engine only (everything else stays
+  blocked). Desktop builds were never affected.
+
+---
+
 ## 2.19.0
 
 The notifications-everywhere release — plus the first Android build.

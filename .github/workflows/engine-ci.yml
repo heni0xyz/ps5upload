@@ -463,6 +463,12 @@ jobs:
         working-directory: client
         run: npx tauri icon src-tauri/icons/sources/macos_squircle_1024.png
 
+      # Keep the manifest patch in the build-verification path too, so a
+      # regression in android-fix-cleartext.sh is caught by CI (release
+      # parity; the loopback config is harmless for the debug build).
+      - name: Allow loopback cleartext for the in-process engine
+        run: bash scripts/release/android-fix-cleartext.sh
+
       - name: Build debug APK (aarch64)
         working-directory: client
         run: npx tauri android build --debug --apk --target aarch64

@@ -435,6 +435,8 @@ android-init: android-deps setup-client
 	@cd $(CLIENT_DIR) && $(ANDROID_ENV) npx tauri android init
 	@echo "Applying app icon from $(ANDROID_ICON_SRC) (matches the desktop icon)..."
 	@cd $(CLIENT_DIR) && $(ANDROID_ENV) npx tauri icon $(ANDROID_ICON_SRC) >/dev/null
+	@echo "Allowing loopback cleartext so the in-process engine is reachable..."
+	@bash scripts/release/android-fix-cleartext.sh
 
 android-build: android-deps payload setup-client
 	@test -d $(ANDROID_GEN_DIR) || $(MAKE) android-init

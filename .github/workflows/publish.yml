@@ -422,6 +422,13 @@ jobs:
         working-directory: client
         run: npx tauri icon src-tauri/icons/sources/macos_squircle_1024.png
 
+      # Release APKs set usesCleartextTraffic=false, which blocks the
+      # renderer's loopback fetch to the in-process engine (engine shows
+      # "red"). Add a loopback-only network-security-config so 127.0.0.1
+      # is reachable while all other traffic stays cleartext-forbidden.
+      - name: Allow loopback cleartext for the in-process engine
+        run: bash scripts/release/android-fix-cleartext.sh
+
       - name: Build release APK (arm64 + armv7)
         working-directory: client
         run: npx tauri android build --apk --target aarch64 --target armv7
