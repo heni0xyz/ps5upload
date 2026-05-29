@@ -261,15 +261,12 @@ pub async fn payload_send(ip: String, path: String, port: Option<u16>) -> serde_
 /// magic (`\x1f\x8b`) isn't ELF magic so the bundler skips it. At
 /// runtime we decompress once into the app's local-data dir and reuse
 /// the extracted `.elf` on subsequent sends.
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+///
+/// Embedded on EVERY platform including mobile: the payload is just
+/// bytes streamed to the PS5 over the network, identical regardless of
+/// host OS. (Only the engine *binary* — a host executable — is excluded
+/// from the mobile build; that one runs in-process instead.)
 const EMBEDDED_PAYLOAD_GZ: &[u8] = include_bytes!(env!("PS5UPLOAD_PAYLOAD_GZ_BYTES"));
-// Mobile (Phase 0): the payload isn't bundled into the app yet (build.rs
-// skips the embed on Android/iOS). An empty slice keeps the bundled-send
-// code paths compiling; sending the *bundled* payload degrades to a
-// clear failure until mobile payload bundling lands. Picking a payload
-// from device storage still works via the normal file-send path.
-#[cfg(any(target_os = "android", target_os = "ios"))]
-const EMBEDDED_PAYLOAD_GZ: &[u8] = &[];
 
 /// Serialises concurrent calls to `find_bundled_payload`. Tauri serves
 /// commands on an async runtime, so two parallel mounts of the
@@ -553,6 +550,39 @@ mod payload_send_tests {
     use super::*;
     use std::path::{Path, PathBuf};
     use tokio::net::TcpListener;
+
+    /// The embedded PS5 payload must decompress to a real ELF — this is
+    /// exactly what "Send payload / helper" streams to the console. This
+    /// guards the class of bug where a build embeds an empty/placeholder
+    /// gz: the mobile build briefly stubbed `EMBEDDED_PAYLOAD_GZ` to
+    /// `&[]`, which surfaced to users as a gunzip failure on send. Since
+    /// every target now `include_bytes!`s the same file, this one test
+    /// covers desktop and mobile alike.
+    #[test]
+    fn embedded_payload_decompresses_to_elf() {
+        use std::io::Read;
+        assert!(
+            !EMBEDDED_PAYLOAD_GZ.is_empty(),
+            "embedded payload gz is empty — build.rs must embed \
+             payload/ps5upload.elf.gz on EVERY target (incl. android/ios)",
+        );
+        let mut elf = Vec::new();
+        flate2::read::GzDecoder::new(EMBEDDED_PAYLOAD_GZ)
+            .read_to_end(&mut elf)
+            .expect("embedded payload gz must gunzip cleanly");
+        assert!(
+            elf.starts_with(&[0x7f, b'E', b'L', b'F']),
+            "decompressed payload must be an ELF (magic 7f 45 4c 46); got {:02x?}",
+            elf.get(..4),
+        );
+        // Sanity floor: the real payload is ~1 MB. Anything tiny means a
+        // stub slipped through the embed.
+        assert!(
+            elf.len() > 100_000,
+            "decompressed payload suspiciously small ({} bytes) — likely a stub",
+            elf.len(),
+        );
+    }
 
     fn tempdir() -> PathBuf {
         let mut p = std::env::temp_dir();

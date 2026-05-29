@@ -94,3 +94,33 @@ describe("portOf", () => {
     expect(portOf("")).toBeNull();
   });
 });
+
+describe("IPv6 addressing", () => {
+  it("keeps a bare IPv6 literal intact in hostOf (no truncation)", () => {
+    // Pre-fix this returned "fe80" — the first colon was treated as a
+    // port separator, mangling every IPv6 mgmt/transfer address.
+    expect(hostOf("fe80::1")).toBe("fe80::1");
+    expect(hostOf("2001:db8::5")).toBe("2001:db8::5");
+  });
+  it("extracts the inner host from a bracketed IPv6", () => {
+    expect(hostOf("[fe80::1]")).toBe("fe80::1");
+    expect(hostOf("[fe80::1]:9114")).toBe("fe80::1");
+  });
+  it("brackets an IPv6 literal when composing host:port", () => {
+    expect(withPort("fe80::1", 9114)).toBe("[fe80::1]:9114");
+    expect(mgmtAddr("2001:db8::5")).toBe("[2001:db8::5]:9114");
+    expect(transferAddr("fe80::1")).toBe("[fe80::1]:9113");
+    expect(loaderAddr("fe80::1")).toBe("[fe80::1]:9021");
+  });
+  it("re-brackets a bracketed IPv6 when swapping the port", () => {
+    expect(mgmtAddr("[fe80::1]:9113")).toBe("[fe80::1]:9114");
+  });
+  it("leaves IPv4 unbracketed", () => {
+    expect(mgmtAddr("192.168.1.50")).toBe("192.168.1.50:9114");
+  });
+  it("portOf reads a bracketed IPv6 port and null for a bare literal", () => {
+    expect(portOf("[fe80::1]:9114")).toBe(9114);
+    expect(portOf("[fe80::1]")).toBeNull();
+    expect(portOf("fe80::1")).toBeNull();
+  });
+});

@@ -23,16 +23,6 @@ use std::path::{Path, PathBuf};
 fn main() {
     tauri_build::build();
 
-    // Mobile (Android/iOS): the engine is linked as a library and runs
-    // in-process (see engine.rs `#[cfg(mobile)]` start), so there is no
-    // sidecar binary to embed and no payload bundled into the app. Skip
-    // all the include_bytes! path wiring below — the env vars it emits
-    // are only consumed by the desktop `#[cfg(desktop)]` engine module.
-    let target_os_early = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
-    if target_os_early == "android" || target_os_early == "ios" {
-        return;
-    }
-
     let manifest_dir =
         PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set"));
     // manifest_dir is client/src-tauri; go up twice to the repo root.
@@ -41,9 +31,34 @@ fn main() {
         .and_then(|p| p.parent())
         .expect("repo-root resolution");
 
+    let target_os = std::env::var("CARGO_CFG_TARGET_OS").expect("CARGO_CFG_TARGET_OS not set");
+
+    // ── PS5 payload (ps5upload.elf.gz): embedded on EVERY platform ──
+    // It's just bytes streamed to the PS5 over the network, so the host
+    // OS is irrelevant — probes.rs include_bytes! it via this env var on
+    // desktop AND mobile, so "send payload/helper" works everywhere. We
+    // embed the gzip (not the raw ELF) so linuxdeploy doesn't choke on
+    // the payload's PS5 sprx deps when bundling the Linux AppImage.
+    let payload_gz = repo_root.join("payload").join("ps5upload.elf.gz");
+    require_file(&payload_gz, "payload gzip", "make -C payload all");
+    println!(
+        "cargo:rustc-env=PS5UPLOAD_PAYLOAD_GZ_BYTES={}",
+        payload_gz.display()
+    );
+    println!("cargo:rerun-if-changed={}", payload_gz.display());
+
+    // ── Engine binary: DESKTOP ONLY ──
+    // On mobile the engine is linked as a library and runs in-process
+    // (engine_mobile.rs); there's no sidecar binary to embed, and
+    // PS5UPLOAD_ENGINE_BYTES is only consumed by the desktop engine
+    // module. Bail out here on Android/iOS — the payload above is the
+    // only thing those targets need from this script.
+    if target_os == "android" || target_os == "ios" {
+        return;
+    }
+
     let target = std::env::var("TARGET").expect("TARGET not set");
     let host = std::env::var("HOST").expect("HOST not set");
-    let target_os = std::env::var("CARGO_CFG_TARGET_OS").expect("CARGO_CFG_TARGET_OS not set");
 
     let engine_name = if target_os == "windows" {
         "ps5upload-engine.exe"
@@ -99,25 +114,17 @@ fn main() {
             (false, false) => engine_target_path,
         }
     };
-    let payload_gz = repo_root.join("payload").join("ps5upload.elf.gz");
-
     let engine_build_hint = format!("cargo build --release -p ps5upload-engine --target {target}");
     require_file(&engine_path, "engine binary", &engine_build_hint);
-    require_file(&payload_gz, "payload gzip", "make -C payload all");
 
-    // Absolute paths emitted as env vars so `include_bytes!(env!("…"))`
-    // in src/ can pull them in at compile time. Also emit
-    // `rerun-if-changed` so touching either file re-triggers the build.
+    // Absolute path emitted as an env var so `include_bytes!(env!("…"))`
+    // in engine.rs can pull the engine binary in at compile time. Also
+    // emit `rerun-if-changed` so rebuilding the engine re-triggers this.
     println!(
         "cargo:rustc-env=PS5UPLOAD_ENGINE_BYTES={}",
         engine_path.display()
     );
     println!("cargo:rerun-if-changed={}", engine_path.display());
-    println!(
-        "cargo:rustc-env=PS5UPLOAD_PAYLOAD_GZ_BYTES={}",
-        payload_gz.display()
-    );
-    println!("cargo:rerun-if-changed={}", payload_gz.display());
 }
 
 fn require_file(path: &Path, label: &str, how_to_build: &str) {
