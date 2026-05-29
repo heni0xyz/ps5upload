@@ -55,6 +55,10 @@ ANDROID_JAVA_HOME  ?= $(shell /usr/libexec/java_home -v 17 2>/dev/null || echo "
 ANDROID_NDK_HOME   ?= $(shell ls -d "$(ANDROID_HOME)"/ndk/* 2>/dev/null | sort -V | tail -1)
 ANDROID_GEN_DIR    := $(CLIENT_DIR)/src-tauri/gen/android
 ANDROID_APK        := $(ANDROID_GEN_DIR)/app/build/outputs/apk/universal/debug/app-universal-debug.apk
+# App-icon source (relative to CLIENT_DIR). `tauri android init` seeds
+# placeholder launcher icons; we re-apply ours so the Android icon matches
+# the desktop app icon. gen/ is gitignored, so this runs at init time.
+ANDROID_ICON_SRC   := src-tauri/icons/sources/macos_squircle_1024.png
 # Env preamble shared by the android recipes.
 ANDROID_ENV = JAVA_HOME="$(ANDROID_JAVA_HOME)" ANDROID_HOME="$(ANDROID_HOME)" NDK_HOME="$(ANDROID_NDK_HOME)"
 
@@ -429,6 +433,8 @@ android-deps:
 android-init: android-deps setup-client
 	@echo "Scaffolding Android project (tauri android init)..."
 	@cd $(CLIENT_DIR) && $(ANDROID_ENV) npx tauri android init
+	@echo "Applying app icon from $(ANDROID_ICON_SRC) (matches the desktop icon)..."
+	@cd $(CLIENT_DIR) && $(ANDROID_ENV) npx tauri icon $(ANDROID_ICON_SRC) >/dev/null
 
 android-build: android-deps payload setup-client
 	@test -d $(ANDROID_GEN_DIR) || $(MAKE) android-init

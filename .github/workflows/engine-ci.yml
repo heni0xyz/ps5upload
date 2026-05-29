@@ -457,6 +457,12 @@ jobs:
         working-directory: client
         run: npx tauri android init
 
+      # `android init` seeds placeholder launcher icons; re-apply ours so
+      # the Android app icon matches the desktop app icon.
+      - name: Apply app icon
+        working-directory: client
+        run: npx tauri icon src-tauri/icons/sources/macos_squircle_1024.png
+
       - name: Build debug APK (aarch64)
         working-directory: client
         run: npx tauri android build --debug --apk --target aarch64
