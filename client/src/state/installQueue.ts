@@ -117,6 +117,12 @@ export interface InstallQueueItem {
      *  "appinst"  — sceAppInstUtilInstallByPackage succeeded (Sony's
      *               high-level install API; bypasses our direct BGFT
      *               calls but ends up in the same Sony installer).
+     *  "appinst-local" — sceAppInstUtilAppInstallPkg succeeded (2.20.2;
+     *               Sony's dedicated local-disk installer). Reads the
+     *               staged .pkg off PS5 disk with no URI parse and no
+     *               PlayGo HTTP pre-flight, so it sidesteps the FW 9.60+
+     *               process-context reject (0x80B22404) that the HTTP
+     *               stream path hits. Only reachable for staged installs.
      *  "none"     — Register hasn't been attempted yet, or BGFT is
      *               unavailable on this firmware. */
     registerPath:
@@ -124,6 +130,7 @@ export interface InstallQueueItem {
       | "intdebug"
       | "regular"
       | "appinst"
+      | "appinst-local"
       | "tier0-worker"
       | "none"
       | "";
@@ -1032,6 +1039,14 @@ export const useInstallQueue = create<InstallQueueState>((set, get) => ({
       // Only retry on 0x80020023 EAGAIN ("Sony's daemon momentarily
       // busy, try again in a few seconds"). 2 attempts × 5s.
       const RETRYABLE = new Set([0x80020023]);
+      // PlayGo HTTP-fetch process-context reject. On FW 9.60+ Sony's
+      // installer whitelists ShellUI's process for the install-side HTTP
+      // fetch and rejects ours, so stream-mode (HTTP) installs fail with
+      // this code regardless of retries. It's NOT transient — the cure is
+      // to switch to a staged (local-disk) install, which reads bytes off
+      // PS5 disk and never takes the gated HTTP path. Handled below by
+      // auto-falling-back stream → stage rather than surfacing as failed.
+      const PLAYGO_HTTP_REJECT = 0x80b22404;
       const MAX_ATTEMPTS = 2;
       const BACKOFF_MS = 5000;
       let attempt = 0;
@@ -1098,6 +1113,7 @@ export const useInstallQueue = create<InstallQueueState>((set, get) => ({
         rawRegPath === "intdebug" ||
         rawRegPath === "regular" ||
         rawRegPath === "appinst" ||
+        rawRegPath === "appinst-local" ||
         rawRegPath === "tier0-worker" ||
         rawRegPath === "none"
           ? rawRegPath
@@ -1127,6 +1143,60 @@ export const useInstallQueue = create<InstallQueueState>((set, get) => ({
       const taskId = startResp.task_id ?? null;
       const startErr = startResp.err_code ?? 0;
       if (startErr !== 0 || !sessionId || taskId === null) {
+        // ── Auto-fallback: stream → stage on PlayGo HTTP reject ──────
+        // A stream-mode install that fails with 0x80B22404 hit Sony's
+        // FW 9.60+ process-context gate on the HTTP fetch — no number of
+        // retries on the same path will land it (see PLAYGO_HTTP_REJECT).
+        // The staged path (upload to PS5 disk → sceAppInstUtilAppInstallPkg)
+        // never takes the gated HTTP path, so it's the correct recovery.
+        // Re-queue THIS item as a staged install instead of surfacing a
+        // dead-end error + asking the user to click "Retry as staged
+        // install" by hand. The guard `installMethod === "stream"` is
+        // also the loop-breaker: the re-queued item runs as "stage", so a
+        // (very unlikely) second 0x80B22404 from the local installer can't
+        // re-enter this branch. Split sets are excluded — staging would
+        // double the wire time on 50GB+ uploads, and their install call
+        // already originates from ShellUI (Tier-2 HTTP is fine for them).
+        const tier1 = startResp.shellui_err ?? 0;
+        const tier2 = startResp.appinst_err ?? 0;
+        const hitPlayGoReject =
+          startErr === PLAYGO_HTTP_REJECT ||
+          tier1 === PLAYGO_HTTP_REJECT ||
+          tier2 === PLAYGO_HTTP_REJECT;
+        if (
+          hitPlayGoReject &&
+          next.installMethod === "stream" &&
+          !next.isSplit
+        ) {
+          console.info(
+            `install ${next.id}: 0x80B22404 (PlayGo HTTP reject) on stream — auto-switching to staged install`,
+          );
+          const items = get().items.map((it) =>
+            it.id === next.id
+              ? {
+                  ...it,
+                  installMethod: "stage" as InstallMethod,
+                  status: "pending" as InstallStatus,
+                  phase: "idle" as InstallPhase,
+                  bytesDownloaded: 0,
+                  errCode: 0,
+                  errMessage: null,
+                  sessionId: null,
+                  taskId: null,
+                  startedAt: null,
+                  finishedAt: null,
+                  stagingPath: null,
+                  stagingBytes: 0,
+                }
+              : it,
+          );
+          set({ items });
+          persist(items);
+          // Back to the loop head — it re-picks this now-pending item
+          // and runs the staging upload + local-disk install path.
+          continue;
+        }
+
         // Augment the failure message with diagnostic context that
         // points at the most likely root cause.
         const baseMsg =

@@ -52,10 +52,10 @@ use ps5upload_core::{
     connection::Connection,
     download::{download_to_local, enumerate_download_set, DownloadKind},
     fs_ops::{
-        app_launch, app_register, app_unregister, fs_copy_with_op_id, fs_delete_with_op_id,
-        fs_mkdir, fs_mount, fs_move_with_timeout, fs_op_cancel, fs_op_status, fs_read, fs_unmount,
-        list_dir, reconcile, walk_local_inventory, DirListing, ListDirOptions, MountResult,
-        ReconcileFile, ReconcileMode, ReconcilePlan, RegisterResult,
+        app_launch, app_list_registered, app_register, app_unregister, fs_copy_with_op_id,
+        fs_delete_with_op_id, fs_mkdir, fs_mount, fs_move_with_timeout, fs_op_cancel, fs_op_status,
+        fs_read, fs_unmount, list_dir, reconcile, walk_local_inventory, DirListing, ListDirOptions,
+        MountResult, ReconcileFile, ReconcileMode, ReconcilePlan, RegisterResult,
     },
     game_meta::parse_param_json_bytes,
     hw::{
@@ -2096,6 +2096,234 @@ async fn ps5_game_icon(
     }
 }
 
+// ─── Installed-apps inventory ─────────────────────────────────────────
+//
+// Lists every title the PS5 has metadata for (enumerated from
+// /user/appmeta/<title_id>/ — Sony's per-title metadata cache), tagged by
+// HOW it got there so the UI can group them:
+//
+//   origin="registered" — registered/mounted by ps5upload from a game
+//                          folder, .exfat/.ffpkg image, or upload. We
+//                          KNOW these: app_list_registered() reports them
+//                          (they carry a /user/app/<id>/mount.lnk tracker)
+//                          with the source path + whether a disk image
+//                          backs them. Uninstalling unmounts our nullfs.
+//   origin="pkg"        — installed from a .pkg through Sony's installer
+//                          (AppInstUtil), or shipped with the console.
+//                          No mount.lnk; Sony owns the app.db row + mount.
+//                          NPXS-prefixed titles in this group (e.g. a Store
+//                          fakepkg the user installed) carry system=true so
+//                          the UI flags them as dangerous to uninstall — but
+//                          they still belong to the "installed from package"
+//                          group, since that's how they got there.
+//
+// Why filesystem enumeration and not Sony's app.db: dlopen'ing
+// libSceSqlite hangs on FW 9.60 (see register.c), so app.db is off-limits.
+// /user/appmeta is the safe, firmware-stable source — and it's where the
+// cover art (icon0.png) lives, served by /api/ps5/app-icon below.
+
+#[derive(Debug, serde::Serialize)]
+struct InstalledApp {
+    title_id: String,
+    title_name: String,
+    /// "registered" | "pkg" | "system" — see module comment above.
+    origin: String,
+    /// Only meaningful for origin=="registered": backed by a mounted
+    /// disk image (.exfat/.ffpkg) vs a plain folder registration.
+    image_backed: bool,
+    /// Only meaningful for origin=="registered": the source path we
+    /// registered the title from (empty otherwise).
+    source: String,
+    /// True for NPXS-prefixed system apps — the UI greys these and
+    /// requires a stronger confirm before uninstalling.
+    system: bool,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct InstalledAppsResponse {
+    titles: Vec<InstalledApp>,
+    /// True if app_list_registered() failed (e.g. older payload) — the
+    /// UI then can't reliably tag the "registered" group, so it shows
+    /// everything under "installed" with a soft note rather than erroring.
+    registered_unavailable: bool,
+}
+
+/// PS5 title-ids are 4 uppercase letters + 5 digits (PPSA01234, NPXS39041,
+/// CUSA00123, …). Used to filter stray non-title entries out of the
+/// /user/appmeta listing.
+fn looks_like_title_id(name: &str) -> bool {
+    let b = name.as_bytes();
+    b.len() == 9
+        && b[..4].iter().all(|c| c.is_ascii_uppercase())
+        && b[4..].iter().all(|c| c.is_ascii_digit())
+}
+
+/// Best-effort title name from /user/appmeta/<title_id>/param.json. Returns
+/// None on any failure (no param.json — common for system apps — bad JSON,
+/// path denied); the caller falls back to the bare title_id.
+fn appmeta_title_name(addr: &str, title_id: &str) -> Option<String> {
+    let path = format!("/user/appmeta/{title_id}/param.json");
+    let bytes = fs_read(addr, &path, 0, 256 * 1024).ok()?;
+    let meta = parse_param_json_bytes(&bytes).ok()?;
+    meta.title.filter(|t| !t.trim().is_empty())
+}
+
+/// GET /api/ps5/apps/installed?addr=IP:MGMT_PORT
+async fn ps5_apps_installed(
+    State(state): State<AppState>,
+    Query(q): Query<AddrQuery>,
+) -> impl IntoResponse {
+    let addr = mgmt_addr_or_default(q.addr, &state.default_ps5_addr);
+    let result: Result<InstalledAppsResponse, anyhow::Error> =
+        tokio::task::spawn_blocking(move || {
+            // Group B: titles WE registered/mounted (folder / image / upload).
+            // Best-effort — if the payload can't report them, we degrade to
+            // "everything is a pkg/system install" rather than failing.
+            let (reg_map, registered_unavailable) = match app_list_registered(&addr) {
+                Ok(r) => {
+                    let m: std::collections::HashMap<String, _> = r
+                        .apps
+                        .into_iter()
+                        .map(|a| (a.title_id.clone(), a))
+                        .collect();
+                    (m, false)
+                }
+                Err(e) => {
+                    crate::log_warn!("apps/installed: app_list_registered failed: {e:#}");
+                    (std::collections::HashMap::new(), true)
+                }
+            };
+
+            // Full installed set: every /user/appmeta/<title_id>/ dir.
+            let listing = list_dir(
+                &addr,
+                "/user/appmeta",
+                ListDirOptions {
+                    offset: 0,
+                    limit: 512,
+                },
+            )?;
+
+            let mut titles: Vec<InstalledApp> = Vec::new();
+            for e in listing.entries {
+                if !looks_like_title_id(&e.name) {
+                    continue;
+                }
+                let tid = e.name;
+                let system = tid.starts_with("NPXS");
+                if let Some(reg) = reg_map.get(&tid) {
+                    // Prefer the registered title_name; if it's empty or just
+                    // the id (older registrations stored id-as-name), try
+                    // param.json for a friendlier label.
+                    let name = if reg.title_name.trim().is_empty() || reg.title_name == tid {
+                        appmeta_title_name(&addr, &tid).unwrap_or_else(|| tid.clone())
+                    } else {
+                        reg.title_name.clone()
+                    };
+                    titles.push(InstalledApp {
+                        title_id: tid.clone(),
+                        title_name: name,
+                        origin: "registered".to_string(),
+                        image_backed: reg.image_backed,
+                        source: reg.src.clone(),
+                        system,
+                    });
+                } else {
+                    let name = appmeta_title_name(&addr, &tid).unwrap_or_else(|| tid.clone());
+                    titles.push(InstalledApp {
+                        title_id: tid.clone(),
+                        title_name: name,
+                        // Always "pkg" for non-registered titles — including
+                        // NPXS system-id fakepkgs the user installed. The
+                        // `system` flag (below) is what the UI guards on, not
+                        // a separate origin bucket.
+                        origin: "pkg".to_string(),
+                        image_backed: false,
+                        source: String::new(),
+                        system,
+                    });
+                }
+            }
+            // Stable order: registered first, then package installs; within
+            // packages, system-flagged (dangerous) titles sort last; alpha
+            // within each tier so the grid doesn't reshuffle between refreshes.
+            titles.sort_by(|a, b| {
+                fn rank(t: &InstalledApp) -> u8 {
+                    match (t.origin.as_str(), t.system) {
+                        ("registered", _) => 0,
+                        ("pkg", false) => 1,
+                        _ => 2, // pkg + system (e.g. Store fakepkg)
+                    }
+                }
+                rank(a).cmp(&rank(b)).then_with(|| {
+                    a.title_name
+                        .to_lowercase()
+                        .cmp(&b.title_name.to_lowercase())
+                })
+            });
+            Ok(InstalledAppsResponse {
+                titles,
+                registered_unavailable,
+            })
+        })
+        .await
+        .map_err(anyhow::Error::from)
+        .and_then(|inner| inner);
+    match result {
+        Ok(v) => (StatusCode::OK, Json(v)).into_response(),
+        Err(e) => json_err(StatusCode::BAD_GATEWAY, format!("{e:#}")).into_response(),
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct AppIconQuery {
+    addr: Option<String>,
+    title_id: String,
+}
+
+/// GET /api/ps5/app-icon?addr=IP:MGMT_PORT&title_id=PPSA01234
+///
+/// Streams /user/appmeta/<title_id>/icon0.png as image/png — the cover
+/// art for an installed title. Mirrors /api/ps5/game-icon but keyed by
+/// title_id instead of folder path. 404 on any miss so `<img onerror>`
+/// can fall back to a placeholder.
+async fn ps5_app_icon(
+    State(state): State<AppState>,
+    Query(q): Query<AppIconQuery>,
+) -> impl IntoResponse {
+    // title_id is interpolated into a filesystem path, so validate hard:
+    // PS5 title-ids are [A-Za-z0-9_] only. This blocks `..` / `/` traversal
+    // outright rather than relying solely on the payload's is_path_allowed.
+    if q.title_id.is_empty()
+        || q.title_id.len() > 16
+        || !q
+            .title_id
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || c == b'_')
+    {
+        return (StatusCode::BAD_REQUEST, "invalid title_id").into_response();
+    }
+    let addr = mgmt_addr_or_default(q.addr, &state.default_ps5_addr);
+    let icon_path = format!("/user/appmeta/{}/icon0.png", q.title_id);
+    let result: Result<Vec<u8>, anyhow::Error> =
+        tokio::task::spawn_blocking(move || fs_read(&addr, &icon_path, 0, 2 * 1024 * 1024))
+            .await
+            .map_err(anyhow::Error::from)
+            .and_then(|inner| inner);
+    match result {
+        Ok(bytes) if !bytes.is_empty() => (
+            StatusCode::OK,
+            [
+                (header::CONTENT_TYPE, "image/png"),
+                (header::CACHE_CONTROL, "private, max-age=300"),
+            ],
+            bytes,
+        )
+            .into_response(),
+        _ => (StatusCode::NOT_FOUND, "no icon").into_response(),
+    }
+}
+
 /// GET /api/ps5/volumes?addr=IP:PORT — enumerate mounted PS5 storage volumes.
 async fn ps5_volumes(
     State(state): State<AppState>,
@@ -4050,6 +4278,8 @@ async fn run(cfg: EngineConfig) -> anyhow::Result<()> {
         .route("/api/ps5/fs/mkdir", post(ps5_fs_mkdir))
         .route("/api/ps5/game-meta", get(ps5_game_meta))
         .route("/api/ps5/game-icon", get(ps5_game_icon))
+        .route("/api/ps5/apps/installed", get(ps5_apps_installed))
+        .route("/api/ps5/app-icon", get(ps5_app_icon))
         .route("/api/transfer/file", post(transfer_file_handler))
         .route("/api/transfer/dir", post(transfer_dir_handler))
         .route("/api/transfer/zip", post(transfer_zip_handler))

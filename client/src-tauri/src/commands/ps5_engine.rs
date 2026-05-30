@@ -152,6 +152,21 @@ pub async fn ps5_volumes(addr: Option<String>) -> Result<JsonValue, String> {
     get_json(&url).await
 }
 
+/// List every installed title on the PS5, tagged by origin (registered/
+/// mounted by us vs installed from a .pkg) with a system flag. Proxies
+/// GET /api/ps5/apps/installed. Cover art is fetched separately by the
+/// renderer via an <img> pointing at /api/ps5/app-icon (see app_icon_url
+/// in the TS layer) — same cross-client pattern as game-icon.
+#[tauri::command]
+pub async fn ps5_apps_installed(addr: Option<String>) -> Result<JsonValue, String> {
+    let base = engine::url();
+    let url = match addr {
+        Some(a) => format!("{base}/api/ps5/apps/installed?addr={}", urlencoding(&a)),
+        None => format!("{base}/api/ps5/apps/installed"),
+    };
+    get_json(&url).await
+}
+
 #[tauri::command]
 pub async fn ps5_list_dir(
     path: String,

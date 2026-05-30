@@ -4,6 +4,23 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 2.20.2
+
+- **Package install now works on firmware 9.60+.** Installing a `.pkg`
+  no longer fails (or knocks the payload offline) on consoles where
+  Sony's installer rejects the streamed install. Both **Stream** and
+  **Upload & install** complete reliably, and the app falls back from
+  Stream to Upload automatically when needed.
+- **New: Installed Apps screen.** See everything installed on your PS5
+  with cover art, grouped by how it got there — installed from a
+  package vs. mounted/registered from a folder or disc image — and
+  uninstall any title in a click. Works on desktop and Android.
+- **Android: SD cards and USB-OTG drives now show up.** The in-app file
+  picker lists removable storage alongside internal storage, so you can
+  upload a game straight from a memory card or a plugged-in USB drive.
+
+---
+
 ## 2.20.1
 
 - **Android setup is clearer.** The app now proactively explains the

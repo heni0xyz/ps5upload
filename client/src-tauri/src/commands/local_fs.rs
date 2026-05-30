@@ -57,21 +57,46 @@ pub async fn local_storage_roots() -> Result<Vec<String>, String> {
     #[cfg(target_os = "android")]
     {
         let mut roots: Vec<String> = Vec::new();
+        fn push_unique(roots: &mut Vec<String>, p: String) {
+            if !p.is_empty() && !roots.contains(&p) {
+                roots.push(p);
+            }
+        }
+
+        // Primary shared storage first — the common case.
         let primary = "/storage/emulated/0";
         if std::path::Path::new(primary).exists() {
-            roots.push(primary.to_string());
+            push_unique(&mut roots, primary.to_string());
         }
+
+        // Authoritative removable-volume enumeration via
+        // StorageManager.getStorageVolumes() → getDirectory(). This is
+        // what surfaces SD cards and auto-mounted USB-OTG drives with
+        // their real, app-readable paths — a blind /storage scan misses
+        // them because stat() is denied on a removable mount until the
+        // framework has surfaced the volume. All-files access
+        // (MANAGE_EXTERNAL_STORAGE) covers reading them; there is no
+        // separate SD/OTG permission to request.
+        for dir in android::storage_volume_dirs() {
+            push_unique(&mut roots, dir);
+        }
+
+        // Fallback scan of /storage for anything the framework list
+        // didn't return. Lenient on purpose: include every non-pseudo
+        // entry rather than gating on is_dir(), since a removable mount
+        // can exist as a /storage entry while its stat() still EACCES's
+        // until first real access. A genuinely unreadable root simply
+        // errors when the user opens it, which beats hiding it.
         if let Ok(rd) = std::fs::read_dir("/storage") {
             for e in rd.flatten() {
                 let name = e.file_name().to_string_lossy().into_owned();
                 if name == "emulated" || name == "self" {
                     continue;
                 }
-                if e.path().is_dir() {
-                    roots.push(e.path().to_string_lossy().into_owned());
-                }
+                push_unique(&mut roots, e.path().to_string_lossy().into_owned());
             }
         }
+
         if roots.is_empty() {
             roots.push("/sdcard".to_string());
         }
@@ -264,5 +289,77 @@ mod android {
         )
         .map_err(|e| format!("startActivity: {e}"))?;
         Ok(())
+    }
+
+    /// Real, app-readable directory path for every mounted storage volume
+    /// (primary + SD card + auto-mounted USB-OTG), via
+    /// `StorageManager.getStorageVolumes()` → `StorageVolume.getDirectory()`.
+    ///
+    /// Best-effort: returns whatever it can and an empty vec on any failure
+    /// (older API where `getDirectory()` doesn't exist, no volumes, JNI
+    /// hiccup) — the caller falls back to scanning /storage. CRUCIALLY it
+    /// clears any pending Java exception before returning, so a failed call
+    /// never leaves this thread faulted for later JNI use.
+    ///
+    /// `getStorageVolumes()` is API 24+; `getDirectory()` is API 30+ (the
+    /// same floor as our all-files-access flow). On API 24–29 the first
+    /// `getDirectory()` throws, we early-return [], and the /storage scan
+    /// covers those devices.
+    pub fn storage_volume_dirs() -> Vec<String> {
+        let Ok(vm) = vm() else {
+            return Vec::new();
+        };
+        let Ok(mut env) = vm.attach_current_thread() else {
+            return Vec::new();
+        };
+        let ctx = ndk_context::android_context();
+        let context = unsafe { JObject::from_raw(ctx.context().cast()) };
+        let result = collect_volume_dirs(&mut env, &context);
+        // Never hand the thread back with a pending exception.
+        let _ = env.exception_clear();
+        result.unwrap_or_default()
+    }
+
+    fn collect_volume_dirs(
+        env: &mut jni::JNIEnv,
+        context: &JObject,
+    ) -> Result<Vec<String>, jni::errors::Error> {
+        // sm = context.getSystemService(Context.STORAGE_SERVICE /* "storage" */)
+        let svc = env.new_string("storage")?;
+        let sm = env
+            .call_method(
+                context,
+                "getSystemService",
+                "(Ljava/lang/String;)Ljava/lang/Object;",
+                &[JValue::Object(&svc)],
+            )?
+            .l()?;
+        // List<StorageVolume> vols = sm.getStorageVolumes()
+        let list = env
+            .call_method(&sm, "getStorageVolumes", "()Ljava/util/List;", &[])?
+            .l()?;
+        let n = env.call_method(&list, "size", "()I", &[])?.i()?;
+        let mut out: Vec<String> = Vec::new();
+        for i in 0..n {
+            let vol = env
+                .call_method(&list, "get", "(I)Ljava/lang/Object;", &[JValue::Int(i)])?
+                .l()?;
+            // File dir = vol.getDirectory()  — null when the volume isn't
+            // in a state with a usable path (unmounted, ejecting, …).
+            let dir = env
+                .call_method(&vol, "getDirectory", "()Ljava/io/File;", &[])?
+                .l()?;
+            if dir.is_null() {
+                continue;
+            }
+            let path_obj = env
+                .call_method(&dir, "getAbsolutePath", "()Ljava/lang/String;", &[])?
+                .l()?;
+            let s: String = env.get_string(&JString::from(path_obj))?.into();
+            if !s.is_empty() {
+                out.push(s);
+            }
+        }
+        Ok(out)
     }
 }

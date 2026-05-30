@@ -1339,6 +1339,41 @@ nav_close_aria: "Close navigation",
 notifications: "Notifications",
 os_notify_label: "Show system notifications",
 os_notify_hint: "Mirror in-app notifications (transfer done, errors, etc.) to your operating system's notification center — but only when the app is in the background, so you're not notified twice. You may be asked to grant notification permission.",
+
+// Installed Apps screen
+installed_apps: "Installed Apps",
+installed_apps_title: "Installed Apps",
+installed_apps_subtitle:
+  "Everything installed on the PS5, grouped by how it got there. Uninstall removes a title (and, for mounted titles, unmounts it).",
+installed_error_title: "Couldn't read installed apps",
+installed_no_host_title: "Not connected",
+installed_no_host_body: "Connect to a PS5 on the Connection tab to see installed apps.",
+installed_loading: "Reading installed titles…",
+installed_loading_hint: "Enumerating /user/appmeta on the PS5.",
+installed_empty_title: "No installed titles found",
+installed_empty_body:
+  "Nothing under /user/appmeta. Install a package or register a game first.",
+installed_registered_unavailable:
+  "Couldn't read the mounted/registered set from the payload — everything is shown under Installed from package. Reload the payload to fix grouping.",
+installed_section_pkg: "Installed from package",
+installed_section_pkg_hint:
+  "Installed via Sony's installer from a .pkg (or shipped with the console).",
+installed_section_registered: "Mounted & registered by PS5Upload",
+installed_section_registered_hint:
+  "Registered from a game folder, .exfat/.ffpkg disc image, or upload. Uninstalling unmounts them; your source files are kept.",
+installed_badge_system: "System",
+installed_badge_image: "Disc image",
+installed_badge_folder: "Folder",
+installed_badge_pkg: "Package",
+installed_uninstall: "Uninstall",
+installed_uninstalling: "Removing…",
+installed_uninstall_confirm_title: "Uninstall {name}?",
+installed_uninstall_confirm_system:
+  "{id} is a SYSTEM app. Removing it can destabilize the console and may require a reinstall to recover. Only continue if you know exactly what this package is.",
+installed_uninstall_confirm_registered:
+  "This unmounts and removes the title from the home screen. Your source files/image on disk are not deleted.",
+installed_uninstall_confirm_pkg:
+  "This removes the installed title from the PS5. You can reinstall it later from the package.",
 };
 
 export default en;

@@ -5,6 +5,7 @@ import {
   Cable,
   Upload,
   PackageOpen,
+  Gamepad2,
   LibraryBig,
   Search,
   HardDrive,
@@ -96,6 +97,7 @@ const items: NavItem[] = [
 
   // ─ Browse PS5: navigate what's on the console ─
   { to: "/library", key: "library", fallback: "Library", icon: LibraryBig, section: { key: "nav_section_browse", fallback: "Browse PS5" } },
+  { to: "/installed", key: "installed_apps", fallback: "Installed Apps", icon: Gamepad2 },
   { to: "/file-system", key: "file_system", fallback: "File System", icon: FolderTree },
   { to: "/search", key: "search", fallback: "Search", icon: Search },
   { to: "/volumes", key: "volumes", fallback: "Volumes", icon: HardDrive },

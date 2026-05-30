@@ -1397,31 +1397,59 @@ int register_title_from_path(const char *src_path,
     return 0;
 }
 
+/* ShellCore authid + kernel ucred helpers — defined in main.c, also
+ * extern'd in bgft.c. sceAppInstUtilAppUninstall is gated on the same
+ * ShellCore-authid check as the install APIs (same installer subsystem),
+ * so an uninstall called under the default debugger authid would be
+ * rejected on FW 9.60+ exactly like InstallByPackage is. Swap for the
+ * call window, then restore. */
+#define REG_SHELLCORE_AUTHID 0x3800000000000010ull
+extern uint64_t kernel_get_ucred_authid(pid_t pid);
+extern int kernel_set_ucred_authid(pid_t pid, uint64_t authid);
+
 int unregister_title(const char *title_id, const char **err_reason_out) {
     register_module_init();
     if (!title_id || !is_safe_component(title_id)) {
         if (err_reason_out) *err_reason_out = "unregister_title_id_invalid";
         return -1;
     }
-    /* Nullfs unmount first. This is the teardown that matters most --
-     * leaving a stale nullfs bound to /system_ex/app/<id>/ points
-     * the XMB launcher at a frozen snapshot whose underlying file
-     * may have been deleted. */
-    if (unmount_title_nullfs(title_id) != 0) {
-        if (err_reason_out) *err_reason_out = "unregister_unmount_failed";
-        return -1;
-    }
-
-    /* Best-effort: remove the tracking link files. The staged
-     * metadata under /user/app/<title_id>/ stays -- Sony's installer
-     * may still need it, and removing it is what Uninstall from
-     * Settings does. */
+    /* Distinguish OUR nullfs registrations from Sony-managed installs.
+     * A title we registered via register_title_from_path() has a
+     * /user/app/<id>/mount.lnk tracking file and a nullfs bound at
+     * /system_ex/app/<id>/. A title installed through Sony's installer
+     * (sceAppInstUtilAppInstallPkg / InstallByPackage — e.g. a staged
+     * fakepkg, including NPXS system pkgs) has NEITHER: Sony owns the
+     * mount and the app.db row.
+     *
+     * 2.20.2-fix: only force-unmount /system_ex/app/<id>/ when WE put a
+     * nullfs there. Blindly unmount()ing that path for a Sony-managed
+     * install would, in the worst case, MNT_FORCE rip out live system
+     * content the console is still using (the path is a real Sony mount,
+     * not our nullfs). For Sony-managed installs we skip straight to
+     * sceAppInstUtilAppUninstall below, which is exactly what Settings →
+     * Uninstall does and lets Sony tear down its own mount + app.db row. */
     char lnk[REG_MAX_PATH];
     char lnk_img[REG_MAX_PATH];
     snprintf(lnk,     sizeof(lnk),     "%s/%s/mount.lnk",     REG_APP_BASE, title_id);
     snprintf(lnk_img, sizeof(lnk_img), "%s/%s/mount_img.lnk", REG_APP_BASE, title_id);
-    (void)unlink(lnk);
-    (void)unlink(lnk_img);
+    int ours = path_exists(lnk);
+
+    if (ours) {
+        /* Nullfs unmount first. This is the teardown that matters most --
+         * leaving a stale nullfs bound to /system_ex/app/<id>/ points
+         * the XMB launcher at a frozen snapshot whose underlying file
+         * may have been deleted. */
+        if (unmount_title_nullfs(title_id) != 0) {
+            if (err_reason_out) *err_reason_out = "unregister_unmount_failed";
+            return -1;
+        }
+        /* Best-effort: remove the tracking link files. The staged
+         * metadata under /user/app/<title_id>/ stays -- Sony's installer
+         * may still need it, and removing it is what Uninstall from
+         * Settings does. */
+        (void)unlink(lnk);
+        (void)unlink(lnk_img);
+    }
 
     /* If Sony's AppUninstall is available, clear the XMB tile too.
      * Failure here is NOT fatal -- the nullfs is already gone, so the
@@ -1433,11 +1461,31 @@ int unregister_title(const char *title_id, const char **err_reason_out) {
     if (g_reg.app_uninstall) {
         /* Signature is (title_id, p1, p2). The trailing out-params
          * accept NULL — the call only needs the title_id and
-         * returns successfully when the title exists. */
+         * returns successfully when the title exists.
+         *
+         * 2.20.2-fix: swap to ShellCore authid for the call (same gate
+         * as install — see REG_SHELLCORE_AUTHID). Without it, uninstall
+         * of a Sony-managed install is rejected on FW 9.60+ and the tile
+         * lingers. Best-effort restore; failure to restore is non-fatal
+         * (the next Sony call re-swaps as needed). */
+        pid_t mypid = getpid();
+        uint64_t saved = kernel_get_ucred_authid(mypid);
+        if (saved != 0) {
+            (void)kernel_set_ucred_authid(mypid, REG_SHELLCORE_AUTHID);
+        }
         pthread_mutex_lock(&sony_api_lock);
-        (void)g_reg.app_uninstall(title_id, NULL, NULL);
+        int unrc = g_reg.app_uninstall(title_id, NULL, NULL);
         usleep(SONY_API_POST_SLEEP_US);
         pthread_mutex_unlock(&sony_api_lock);
+        if (saved != 0) {
+            (void)kernel_set_ucred_authid(mypid, saved);
+        }
+        if (unrc != 0) {
+            fprintf(stderr,
+                    "[register] sceAppInstUtilAppUninstall(%s) rc=0x%08X "
+                    "(non-fatal — tile may linger)\n",
+                    title_id, (unsigned)unrc);
+        }
     }
     return 0;
 }

@@ -120,6 +120,7 @@ pub fn run() {
             // FileSystem/Hardware surfaces.
             commands::ps5_volumes,
             commands::ps5_list_dir,
+            commands::ps5_apps_installed,
             commands::transfer_file,
             commands::transfer_dir,
             commands::transfer_zip,

@@ -449,7 +449,7 @@ run-android: android-deps payload setup-client
 	@test -d $(ANDROID_GEN_DIR) || $(MAKE) android-init
 	@echo "Launching on a connected Android device/emulator (tauri android dev)..."
 	@echo "  Attach one first — check with: adb devices"
-	@cd $(CLIENT_DIR) && $(ANDROID_ENV) npx tauri android dev --target $(ANDROID_TARGET)
+	@cd $(CLIENT_DIR) && $(ANDROID_ENV) npx tauri android dev
 
 #──────────────────────────────────────────────────────────────────────────────
 # Testing

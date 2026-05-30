@@ -27,6 +27,7 @@ import SettingsScreen from "./screens/Settings";
 const UploadScreen = lazy(() => import("./screens/Upload"));
 const InstallPackageScreen = lazy(() => import("./screens/InstallPackage"));
 const LibraryScreen = lazy(() => import("./screens/Library"));
+const InstalledAppsScreen = lazy(() => import("./screens/InstalledApps"));
 const SearchScreen = lazy(() => import("./screens/Search"));
 const VolumesScreen = lazy(() => import("./screens/Volumes"));
 const FileSystemScreen = lazy(() => import("./screens/FileSystem"));
@@ -86,6 +87,14 @@ export default function App() {
           element={
             <Suspense fallback={<ScreenLoader />}>
               <LibraryScreen />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/installed"
+          element={
+            <Suspense fallback={<ScreenLoader />}>
+              <InstalledAppsScreen />
             </Suspense>
           }
         />

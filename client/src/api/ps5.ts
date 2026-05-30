@@ -2418,6 +2418,76 @@ export function gameIconUrl(transferAddr: string, path: string): string {
   )}&path=${encodeURIComponent(path)}`;
 }
 
+/** How an installed title got onto the PS5:
+ *   - "registered" — mounted/registered by ps5upload from a game folder,
+ *                    `.exfat`/`.ffpkg` image, or upload (we track these via
+ *                    /user/app/<id>/mount.lnk; `source` + `imageBacked` set).
+ *   - "pkg"        — installed from a `.pkg` via Sony's installer (or shipped
+ *                    with the console). `system: true` marks NPXS titles
+ *                    (Store, Settings, …) that are dangerous to uninstall. */
+export type InstalledAppOrigin = "registered" | "pkg";
+
+export interface InstalledTitle {
+  titleId: string;
+  titleName: string;
+  origin: InstalledAppOrigin;
+  /** registered + disk-image-backed (.exfat/.ffpkg) vs plain folder. */
+  imageBacked: boolean;
+  /** registered: the source path we registered from (empty otherwise). */
+  source: string;
+  /** NPXS-prefixed system title — UI greys it and double-confirms uninstall. */
+  system: boolean;
+}
+
+export interface InstalledAppsResult {
+  titles: InstalledTitle[];
+  /** True if the payload couldn't report the "registered" set (older
+   *  payload); the UI then shows everything as "installed" with a note. */
+  registeredUnavailable: boolean;
+}
+
+/** List every installed title on the PS5, grouped by origin. Routes through
+ *  the engine's `/api/ps5/apps/installed` (filesystem enumeration of
+ *  /user/appmeta — no sqlite, safe on FW 9.60). */
+export async function appsInstalled(
+  transferAddr: string,
+): Promise<InstalledAppsResult> {
+  const addr = toMgmtAddr(transferAddr);
+  const res = await invoke<{
+    titles?: Array<{
+      title_id?: string;
+      title_name?: string;
+      origin?: string;
+      image_backed?: boolean;
+      source?: string;
+      system?: boolean;
+    }>;
+    registered_unavailable?: boolean;
+  }>("ps5_apps_installed", { addr });
+  const titles: InstalledTitle[] = (res?.titles ?? [])
+    .filter((t): t is { title_id: string } & typeof t => !!t.title_id)
+    .map((t) => ({
+      titleId: t.title_id,
+      titleName: t.title_name && t.title_name.trim() ? t.title_name : t.title_id,
+      origin: t.origin === "registered" ? "registered" : "pkg",
+      imageBacked: !!t.image_backed,
+      source: t.source ?? "",
+      system: !!t.system,
+    }));
+  return { titles, registeredUnavailable: !!res?.registered_unavailable };
+}
+
+/** Stable `<img src=...>` URL for an installed title's cover art
+ *  (/user/appmeta/<titleId>/icon0.png), streamed back as `image/png` by
+ *  the engine. Works identically on desktop and Android (in-process engine
+ *  on the same loopback port; CSP allows 127.0.0.1:19113 for img-src). */
+export function appIconUrl(transferAddr: string, titleId: string): string {
+  const mgmt = toMgmtAddr(transferAddr);
+  return `${ENGINE_BASE}/api/ps5/app-icon?addr=${encodeURIComponent(
+    mgmt
+  )}&title_id=${encodeURIComponent(titleId)}`;
+}
+
 /** Enumerate PS5 storage volumes. Routes through the engine's mgmt-port
  *  FS_LIST_VOLUMES call. `is_placeholder: true` means the OS exposed a
  *  tiny stub (tmpfs) where a drive *could* mount but nothing real is

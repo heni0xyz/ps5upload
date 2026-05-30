@@ -116,6 +116,27 @@ extern int sceAppInstUtilInitialize(void);
 extern int sceAppInstUtilInstallByPackage(AppInstMetaInfo *meta,
                                           AppInstPkgInfo *pkg_info,
                                           AppInstPlayGoInfo *playgo);
+/* Local-path installer (2.20.2 — elf-arsenal/ShadowMount approach).
+ * Sony's dedicated "install this .pkg that already lives on the
+ * console's local disk" entry point. Unlike InstallByPackage — which
+ * parses `meta.uri` as a *URI* and on FW 9.60+ rejects both HTTP fetches
+ * (0x80B22404 PlayGo HTTP pre-flight) and bare absolute paths (no scheme
+ * to parse) — this takes a raw absolute path and reads the bytes
+ * straight off local disk. No PlayGo HTTP gate, no process-context
+ * whitelist. This is the path elf-arsenal uses as its primary local
+ * installer; we adopt it for staged (Tier-1) installs where the .pkg is
+ * already under /user/data. `pkg_info.content_id` is OUTPUT (filled from
+ * the pkg header on success).
+ *
+ * Resolved via dlsym(RTLD_DEFAULT) at call time rather than direct-linked
+ * — see [[reference_ps5_sdk_stub_vs_sprx]]: the SDK's libSceAppInstUtil
+ * stub exports a SUPERSET of what the on-console runtime SPRX actually
+ * provides, so eager-binding a symbol the runtime lacks would fail the
+ * dynamic loader and silently kill main() (no-boot regression). This tier
+ * is non-essential (InstallByPackage is the fallback), so a lazy resolve
+ * that gracefully degrades to NULL is the correct discipline. */
+typedef int (*sce_app_inst_util_app_install_pkg_fn)(const char *path,
+                                                    AppInstPkgInfo *pkg_info);
 extern int sceAppInstUtilGetInstallStatus(const char *content_id,
                                           AppInstStatus *out);
 /* 2.2.54-fix-round-7: pre-install cancel for stuck tasks. Sony
@@ -182,6 +203,26 @@ static void appinst_init_locked(void) {
  * The flag is shared with the engine (`pkg_install::APPINST_VIA_
  * TIER0_FLAG`); via_tier() maps it to "tier0-worker". */
 #define APPINST_VIA_TIER0_FLAG     0x10000000
+/* 2.20.2-fix: set on task_ids issued by the dedicated local-disk
+ * installer (sceAppInstUtilAppInstallPkg, register_path "appinst-local").
+ * Like APPINST_VIA_SHELLUI_FLAG, it makes bgft_install_status take the
+ * synthetic-DONE bypass instead of calling sceAppInstUtilGetInstallStatus.
+ *
+ * WHY: hardware testing on FW 9.60 proved that GetInstallStatus segfaults
+ * the payload when polled for an AppInstallPkg-registered task — the
+ * register itself (err_code 0) and the install proceed fine, but the very
+ * first status poll takes down both listeners (the fatal-signal handler
+ * closes them), forcing a payload reload. The crash reproduced with a
+ * KNOWN-GOOD content_id, so it is not an empty/garbage-id issue — Sony's
+ * status API simply can't be polled from our process for this task class
+ * on 9.60. This is the same failure mode the shellui-rpc tier documents.
+ *
+ * Distinct from the regular in-process InstallByPackage path (plain
+ * APPINST_TASK_ID_FLAG): on firmwares where InstallByPackage succeeds,
+ * GetInstallStatus is known-safe and gives real download/install
+ * progress, so we must NOT blanket-bypass it — only the local-disk
+ * variant gets the bypass. */
+#define APPINST_VIA_LOCAL_FLAG     0x08000000
 #define APPINST_TASK_TABLE    16
 
 typedef struct {
@@ -236,7 +277,7 @@ static int32_t appinst_task_register(const char *content_id) {
 static void appinst_task_release(int32_t task_id) {
     if ((task_id & APPINST_TASK_ID_FLAG) == 0) return;
     int idx = task_id & ~(APPINST_TASK_ID_FLAG | APPINST_VIA_SHELLUI_FLAG
-                            | APPINST_VIA_TIER0_FLAG);
+                            | APPINST_VIA_TIER0_FLAG | APPINST_VIA_LOCAL_FLAG);
     if (idx < 0 || idx >= APPINST_TASK_TABLE) return;
     pthread_mutex_lock(&g_appinst_mtx);
     g_appinst_tasks[idx].in_use = 0;
@@ -256,7 +297,7 @@ static void appinst_task_release(int32_t task_id) {
 static int appinst_task_lookup(int32_t task_id, char *out, size_t out_cap) {
     if ((task_id & APPINST_TASK_ID_FLAG) == 0) return -1;
     int idx = task_id & ~(APPINST_TASK_ID_FLAG | APPINST_VIA_SHELLUI_FLAG
-                            | APPINST_VIA_TIER0_FLAG);
+                            | APPINST_VIA_TIER0_FLAG | APPINST_VIA_LOCAL_FLAG);
     if (idx < 0 || idx >= APPINST_TASK_TABLE) return -1;
     pthread_mutex_lock(&g_appinst_mtx);
     if (!g_appinst_tasks[idx].in_use) {
@@ -425,6 +466,100 @@ static int appinst_install_start(const char *url,
     return 0;
 }
 
+/** Dedicated local-disk install path (2.20.2). Same contract as
+ *  appinst_install_start, but routes through sceAppInstUtilAppInstallPkg
+ *  — Sony's "this .pkg already lives on local disk" entry point — instead
+ *  of InstallByPackage's URI fetcher. Used only when the caller staged
+ *  the pkg under /user/data (path is a bare absolute path), where it
+ *  sidesteps both the PlayGo HTTP gate (0x80B22404) and the URI-parser
+ *  rejection a bare path hits in InstallByPackage.
+ *
+ *  `path` must be a local absolute path. On success the synthetic task_id
+ *  carries APPINST_TASK_ID_FLAG (set by appinst_task_register), so status
+ *  polling routes through the same GetInstallStatus path as the
+ *  InstallByPackage tier — the install record lives in OUR process here
+ *  (no ptrace), so GetInstallStatus is safe to call. */
+static int appinst_install_start_local(const char *path,
+                                        const char *content_id,
+                                        int32_t *out_task_id,
+                                        uint32_t *out_err_code) {
+    AppInstPkgInfo pkg_info;
+    memset(&pkg_info, 0, sizeof(pkg_info));
+    /* pkg_info.content_id is OUTPUT — Sony fills it from the pkg header
+     * on success. Seeding it caused 0x80B21106 in the InstallByPackage
+     * path; same rule applies here. */
+
+    /* Resolve the dedicated installer lazily (see typedef note above).
+     * If the runtime SPRX on this firmware doesn't export it, degrade to
+     * BGFT_ERR_SYMBOL_MISSING and let bgft_install_start fall through to
+     * the InstallByPackage tier — never a hard failure. Resolved BEFORE
+     * the lock so a missing symbol costs no authid swap. */
+    sce_app_inst_util_app_install_pkg_fn app_install_pkg =
+        (sce_app_inst_util_app_install_pkg_fn)dlsym(RTLD_DEFAULT,
+                                                    "sceAppInstUtilAppInstallPkg");
+    if (!app_install_pkg) {
+        *out_err_code = BGFT_ERR_SYMBOL_MISSING;
+        fprintf(stderr,
+                "[bgft] sceAppInstUtilAppInstallPkg not exported on this FW "
+                "— falling back to InstallByPackage\n");
+        return -1;
+    }
+
+    /* Identical authid + lock + init discipline to appinst_install_start.
+     * AppInstallPkg is gated on the same ShellCore-authid check as
+     * InstallByPackage (same installer subsystem), so we hold the
+     * ShellCore-authid swap across the whole init+install window under
+     * sony_api_lock. No pre-install CancelInstall — testing on the
+     * InstallByPackage path showed cancel flushes IPC state the install
+     * call needs and regressed register success; the dedicated installer
+     * shares that subsystem, so we keep the same no-cancel rule. */
+    pthread_mutex_lock(&sony_api_lock);
+    uint64_t saved_authid = authid_acquire_shellcore("AppInstallPkg");
+    pthread_once(&g_appinst_init_once, appinst_init_locked);
+
+    int rc = app_install_pkg(path, &pkg_info);
+
+    authid_release_shellcore(saved_authid, "AppInstallPkg");
+    usleep(SONY_API_POST_SLEEP_US);
+    pthread_mutex_unlock(&sony_api_lock);
+    if (rc != 0) {
+        *out_err_code = (uint32_t)rc;
+        fprintf(stderr,
+                "[bgft] appinst-local path failed: rc=0x%08X (content_id=%s, path=%s)\n",
+                (unsigned)rc, content_id, path);
+        return -1;
+    }
+
+    /* 2.20.2-fix: track the task under a KNOWN-GOOD content_id for the
+     * subsequent GetInstallStatus poll. We log both so we can see on
+     * hardware whether AppInstallPkg actually populated its OUTPUT field.
+     * Empirically on FW 9.60 the status poll segfaulted the payload after
+     * a successful register — a GetInstallStatus() on an empty/garbage
+     * content_id is the prime suspect. We already parsed the real
+     * content_id host-side and passed it in `content_id`, so prefer that
+     * (it equals the pkg-header id Sony's installer tracks the task under)
+     * and only fall back to Sony's output when the caller didn't give us
+     * one. */
+    fprintf(stderr,
+            "[bgft] appinst-local ok: rc=0 caller_cid=%s sony_out_cid=%s path=%s\n",
+            content_id ? content_id : "(null)",
+            pkg_info.content_id[0] ? pkg_info.content_id : "(empty)",
+            path);
+    const char *track_cid =
+        (content_id && content_id[0]) ? content_id : pkg_info.content_id;
+    int32_t tid = appinst_task_register(track_cid);
+    if (tid < 0) {
+        *out_err_code = BGFT_ERR_TASK_TABLE_FULL;
+        return -1;
+    }
+    /* Tag as a local-disk install so bgft_install_status takes the
+     * synthetic-DONE bypass and never calls the FW-9.60-fatal
+     * GetInstallStatus on this task. See APPINST_VIA_LOCAL_FLAG. */
+    *out_task_id  = tid | APPINST_VIA_LOCAL_FLAG;
+    *out_err_code = 0;
+    return 0;
+}
+
 /** Poll an in-flight AppInstUtil install. Maps Sony's status string
  *  ("downloading"/"installing"/"playable") to our phase enum. */
 static int appinst_install_status(int32_t task_id,
@@ -436,6 +571,23 @@ static int appinst_install_status(int32_t task_id,
     if (appinst_task_lookup(task_id, content_id, sizeof(content_id)) != 0) {
         *out_err_code = BGFT_ERR_REGISTER_FAILED;
         return -1;
+    }
+    /* 2.20.2-fix: never hand an empty content_id to Sony's status API.
+     * sceAppInstUtilGetInstallStatus("") dereferences installer state
+     * keyed by content_id; an empty key segfaulted the payload on FW
+     * 9.60. If we somehow tracked a task with no id, report INSTALL
+     * (keep-polling) rather than crash — the install itself already
+     * started when AppInstallPkg/InstallByPackage returned 0. */
+    if (content_id[0] == '\0') {
+        fprintf(stderr,
+                "[bgft] appinst status: empty content_id for task 0x%08X "
+                "— skipping GetInstallStatus, reporting INSTALL\n",
+                (unsigned)task_id);
+        *out_phase      = BGFT_PHASE_INSTALL;
+        *out_downloaded = 0;
+        *out_total      = 0;
+        *out_err_code   = 0;
+        return 0;
     }
     AppInstStatus st;
     memset(&st, 0, sizeof(st));
@@ -950,6 +1102,40 @@ int bgft_install_start(const char *url,
      * first) bypass most of that gate, so Tier 1 works for most pkgs
      * without the ShellUI flash. */
 
+    /* ─── Tier 1a: dedicated local-disk installer (2.20.2) ───────────
+     * When the host staged the pkg to PS5 disk, `url` is a bare absolute
+     * path (e.g. /user/data/ps5upload/pkg_temp/<id>.pkg), NOT an http://
+     * URL — pkg_install.rs emits the raw path for staged installs. For
+     * that shape, sceAppInstUtilAppInstallPkg is the correct Sony entry
+     * point: it reads bytes straight off local disk, with no URI parse
+     * and no PlayGo HTTP pre-flight. InstallByPackage, by contrast,
+     * treats the path as a URI and on FW 9.60+ rejects it (0x80B21106 /
+     * 0x80B22404). We try the dedicated installer FIRST for local paths;
+     * on any failure we fall through to the unchanged ladder below
+     * (InstallByPackage → shellui-rpc → BGFT), so every previously-
+     * verified path remains a backstop. HTTP urls skip this tier
+     * entirely — there's no local file for AppInstallPkg to open. */
+    if (url[0] == '/') {
+        int32_t local_tid = -1;
+        uint32_t local_err = 0;
+        int local_rc = appinst_install_start_local(url, content_id,
+                                                    &local_tid, &local_err);
+        /* Surface the dedicated installer's outcome in the same diag
+         * field as the InstallByPackage tier — both are AppInstUtil
+         * calls, and register_path distinguishes which variant ran. */
+        g_last_appinst_err = local_err;
+        g_last_appinst_err_set = 1;
+        if (local_rc == 0) {
+            *out_task_id = local_tid;
+            *out_err_code = 0;
+            g_last_register_path = "appinst-local";
+            return 0;
+        }
+        fprintf(stderr,
+                "[bgft] appinst-local failed (rc=0x%08X), trying InstallByPackage\n",
+                (unsigned)local_err);
+    }
+
     int32_t app_tid = -1;
     uint32_t app_err = 0;
     int appinst_rc = appinst_install_start(url, content_id, title, &app_tid, &app_err);
@@ -1223,6 +1409,20 @@ int bgft_install_status(int32_t task_id,
          *
          * The UI's "register_path === shellui-rpc" banner explains
          * the hand-off so the user knows where to check. */
+        *out_phase = BGFT_PHASE_DONE;
+        *out_downloaded = 0;
+        *out_total = 0;
+        *out_err_code = 0;
+        return 0;
+    }
+    /* Local-disk installs (appinst-local) take the same synthetic-DONE
+     * bypass. sceAppInstUtilAppInstallPkg already accepted + started the
+     * install synchronously (it returned 0); polling GetInstallStatus for
+     * this task class segfaults the payload on FW 9.60 (hardware-proven,
+     * reproduces even with a valid content_id), so we never call it.
+     * Report DONE — Sony finishes promoting the title in the background
+     * and the PS5's notification panel confirms. See APPINST_VIA_LOCAL_FLAG. */
+    if ((task_id & APPINST_VIA_LOCAL_FLAG) != 0) {
         *out_phase = BGFT_PHASE_DONE;
         *out_downloaded = 0;
         *out_total = 0;
