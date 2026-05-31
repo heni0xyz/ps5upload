@@ -6,70 +6,22 @@ What's new in ps5upload, written for humans.
 
 ## 2.23.3
 
-- **Reporting a problem is now one click.** When the app hits a hard crash,
-  the crash screen has a **"Report this crash"** button that packages the
-  auto-collected diagnostics into a `.zip` and opens our Discord support
-  channel so you can post it. The same packaging lives in Settings →
-  Diagnostics.
-- **Crash reports now capture more failures.** On top of error pop-ups and
-  render crashes, the app now auto-saves a report on any uncaught error or
-  unhandled background failure (e.g. losing contact with the engine) — so
-  whatever goes wrong, there's a detailed report ready to share.
-- Validated large uploads end-to-end on real hardware across all three
-  modes — folder, `.zip`, and `.exfat` disc-image mount — with the helper
-  staying healthy throughout.
-
----
-
-## 2.23.2
-
-- **New: automatic crash & error reports.** When something crashes or errors,
-  the app now quietly saves a detailed diagnostic report (app version, system
-  info incl. memory, recent logs, connection state, what failed) next to your
-  settings, in `~/.ps5upload/crash-reports/`. Nothing is sent anywhere — it
-  just collects on your machine.
-- **New: one-click "Package reports (.zip)"** in Settings → Diagnostics.
-  Bundles every collected report into a single `.zip` and offers a button to
-  open our Discord support channel so you can post it. Makes reporting a bug
-  as simple as: reproduce it → Settings → Package → drag the zip into Discord.
-
----
-
-## 2.23.1
-
-- **Fix: large folder uploads no longer crash the on-PS5 helper.** Uploading
-  a big game (e.g. "It Takes Two", ~5,700 files in ~860 folders) could turn
-  the helper red and fail with `shards_incomplete`, `fs_delete_failed`, or
-  "engine request failed". The cause was the folder diff/reconcile firing
-  many directory scans at once, each a separate connection to the console —
-  a burst big enough to overwhelm the helper. The app now runs **one scan at
-  a time**: the upload waits its turn and the live "Diff vs PS5" preview
-  steps aside while a scan is running. The helper's connection backlog was
-  also widened as a safety margin (takes effect after you re-send the
-  payload).
-- **Fix: "Save logs" / Download in the Logs tab works again** — it failed
-  with "Command plugin:fs|write_text_file not allowed by ACL". It now uses a
-  normal save dialog.
-- **New: an `etaHEN/games` destination preset** on the Upload screen, for
-  jailbreaks that launch from there. (You can also type any custom subpath.)
-
----
-
-## 2.23.0
-
-- **Fix: uploads no longer fail when a file or folder name contains a
-  `}`.** A game folder with a `}` in any file or folder name (or a very
-  long path) made the PS5 reject the whole upload with a cryptic
-  `manifest_invalid` error. The on-console payload now reads those names
-  correctly, the app blocks an over-long path early with a clear,
-  file-named message, and any leftover rejection is shown in plain
-  language instead of the raw error code. Reload the payload on your PS5
-  to pick up the fix — Connection → Send payload.
-- **Every language is now complete, and error messages are translated
-  too.** All 17 non-English languages now fully cover the Installed Apps
-  and Package Library screens, and the app's error and troubleshooting
-  messages are localized for the first time (they were English-only
-  before). 18 languages in total.
+- **Big uploads are much more stable.** Large game folders (thousands of
+  files) no longer crash the on-PS5 helper mid-upload — the app now talks to
+  the console one directory scan at a time instead of flooding it. Validated
+  on real hardware across folder, `.zip`, and `.exfat` disc-image uploads.
+- **Unusual file/folder names work now.** Names containing characters like
+  `}`, or very long paths, no longer get the whole upload rejected with a
+  cryptic error. (Re-send the payload to your PS5 to pick this up —
+  Connection → Send payload.)
+- **One-click crash reporting.** If something goes wrong, the app now saves a
+  detailed report automatically and gives you a **"Report this crash"**
+  button (also in Settings → Diagnostics) that packages everything into a
+  `.zip` and opens our Discord so you can post it.
+- **Fully translated.** All 18 languages now cover every screen, including
+  error and troubleshooting messages (previously English-only).
+- Smaller fixes: an `etaHEN/games` upload destination preset, and "Save logs"
+  in the Logs tab works again.
 
 ---
 
