@@ -4,6 +4,15 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 2.23.5
+
+- **Android build restored.** The 2.23.4 window-placement fix didn't compile
+  for Android, so that release shipped desktop-only (no APK). This build
+  brings the same fixes — a centered, on-screen window, a working "Open
+  folder", and the crash-report tweaks — to Android as well.
+
+---
+
 ## 2.23.4
 
 - **Fix: the crash-report "Open folder" and "Clear" buttons (Settings →

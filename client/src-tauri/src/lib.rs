@@ -33,6 +33,43 @@ mod engine;
 /// the JNI/Obj-C entry symbol the Android/iOS harness invokes (without
 /// it the built `.so` fails Tauri's "missing required runtime symbols"
 /// validation).
+/// Open the main window centred and fully on-screen, shrinking it first if it
+/// would overflow a small / low-res display ("crappy computers"). The
+/// tauri.conf centre/size hints are applied at window creation and are
+/// unreliable in practice (notably on macOS and under `tauri dev`), leaving
+/// the window off-screen / off-centre — re-centring at runtime is reliable.
+///
+/// Desktop-only: the monitor / `center` / `set_size` window APIs don't exist
+/// on mobile (where the app is full-screen anyway), so the mobile build gets a
+/// no-op stub. (A previous version called these unconditionally and broke the
+/// Android cross-compile: `no method named 'center' found`.)
+#[cfg(desktop)]
+fn center_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    use tauri::Manager;
+    if let Some(win) = app.get_webview_window("main") {
+        let monitor = win
+            .current_monitor()
+            .ok()
+            .flatten()
+            .or_else(|| win.primary_monitor().ok().flatten());
+        if let (Some(monitor), Ok(size)) = (monitor, win.outer_size()) {
+            let mon = monitor.size();
+            let max_w = (mon.width as f64 * 0.95) as u32;
+            let max_h = (mon.height as f64 * 0.90) as u32;
+            if size.width > max_w || size.height > max_h {
+                let _ = win.set_size(tauri::PhysicalSize::new(
+                    size.width.min(max_w),
+                    size.height.min(max_h),
+                ));
+            }
+        }
+        let _ = win.center();
+    }
+}
+
+#[cfg(mobile)]
+fn center_main_window<R: tauri::Runtime>(_app: &tauri::AppHandle<R>) {}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Linux WebKitGTK white-screen rescue. On some GPU/compositor stacks
@@ -93,35 +130,10 @@ pub fn run() {
         // (see lib/osNotify.ts). Works on every platform.
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
-            // Make sure the main window opens fully on-screen and centred.
-            // The tauri.conf size/centre hints are applied at window creation
-            // and are unreliable in practice (esp. on macOS and under
-            // `tauri dev`), which left the window off-screen / off-centre. We
-            // also shrink it to fit smaller displays ("crappy computers") so
-            // the title bar and controls are always reachable. All in physical
-            // px so there's no scale-factor maths to get wrong.
-            {
-                use tauri::Manager;
-                if let Some(win) = app.get_webview_window("main") {
-                    let monitor = win
-                        .current_monitor()
-                        .ok()
-                        .flatten()
-                        .or_else(|| win.primary_monitor().ok().flatten());
-                    if let (Some(monitor), Ok(size)) = (monitor, win.outer_size()) {
-                        let mon = monitor.size();
-                        let max_w = (mon.width as f64 * 0.95) as u32;
-                        let max_h = (mon.height as f64 * 0.90) as u32;
-                        if size.width > max_w || size.height > max_h {
-                            let _ = win.set_size(tauri::PhysicalSize::new(
-                                size.width.min(max_w),
-                                size.height.min(max_h),
-                            ));
-                        }
-                    }
-                    let _ = win.center();
-                }
-            }
+            // Open the main window centred + fully on-screen. Desktop-only —
+            // the centre/monitor/size window APIs don't exist on mobile, so
+            // this is a no-op there (see center_main_window).
+            center_main_window(app.handle());
 
             // Spawn the Rust engine binary as a sidecar. On failure we log and
             // keep the window open so the user can see diagnostic info — the
