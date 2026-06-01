@@ -1007,9 +1007,13 @@ function CrashReportsButton() {
     try {
       const { invoke } = await import("@tauri-apps/api/core");
       if (!dir) dir = await invoke<string>("crash_reports_dir_resolved");
-      const { open } = await import("@tauri-apps/plugin-shell");
-      await open(dir);
+      // Open via the backend (runs the OS file manager directly). We can't use
+      // shell.open() here — its scope only allows mailto:/tel:/https URLs and
+      // rejects a filesystem path.
+      await invoke("crash_reports_open_dir");
     } catch (e) {
+      // Mobile (app-private storage) or any failure: show the path so the
+      // user can still find the reports themselves.
       setError(
         `Couldn't open the folder automatically${dir ? ` — it's at: ${dir}` : ""}. ${
           e instanceof Error ? e.message : String(e)

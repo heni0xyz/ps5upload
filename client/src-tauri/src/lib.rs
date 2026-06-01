@@ -253,6 +253,7 @@ pub fn run() {
             commands::crash_reports::crash_reports_dir_resolved,
             commands::crash_reports::crash_reports_zip,
             commands::crash_reports::crash_reports_clear,
+            commands::crash_reports::crash_reports_open_dir,
             // ── Filesystem search index (payload-side) ──────────────
             commands::fs_index_start,
             commands::fs_index_status,
