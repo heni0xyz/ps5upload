@@ -1502,6 +1502,19 @@ err_install_esrch:
 err_install_bgft_generic:
   "Sony's install service rejected the request with {code}. Common causes: stuck previous install (open PS5 notifications → Downloads → clear), wrong account/region, or out of space. If none of those apply, capture the diag panel and file a bug.",
 err_payload_rejected: "PS5 rejected the request: {reason}",
+
+// Settings → Diagnostics: crash & error reports card.
+crash_reports_title: "Crash & error reports",
+crash_reports_hint:
+  "When something crashes or errors, a detailed report is saved automatically next to your settings. Package them into a .zip and post it on our Discord so we can debug.",
+crash_reports_count: "{count} report(s) collected automatically",
+crash_reports_package: "Package reports (.zip)",
+crash_reports_open_folder: "Open folder",
+crash_reports_clear: "Clear",
+crash_reports_saved: "Saved to {path}",
+crash_reports_post: "Please post this .zip in our Discord support channel:",
+crash_reports_open_discord: "Open Discord channel",
+errorboundary_report_crash: "Report this crash",
 };
 
 export default en;

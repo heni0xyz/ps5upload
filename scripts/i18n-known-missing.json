@@ -1,1 +1,257 @@
-{}
+{
+  "ar": {
+    "missing": [
+      "crash_reports_clear",
+      "crash_reports_count",
+      "crash_reports_hint",
+      "crash_reports_open_discord",
+      "crash_reports_open_folder",
+      "crash_reports_package",
+      "crash_reports_post",
+      "crash_reports_saved",
+      "crash_reports_title",
+      "errorboundary_report_crash"
+    ],
+    "stale": []
+  },
+  "bn": {
+    "missing": [
+      "crash_reports_clear",
+      "crash_reports_count",
+      "crash_reports_hint",
+      "crash_reports_open_discord",
+      "crash_reports_open_folder",
+      "crash_reports_package",
+      "crash_reports_post",
+      "crash_reports_saved",
+      "crash_reports_title",
+      "errorboundary_report_crash"
+    ],
+    "stale": []
+  },
+  "de": {
+    "missing": [
+      "crash_reports_clear",
+      "crash_reports_count",
+      "crash_reports_hint",
+      "crash_reports_open_discord",
+      "crash_reports_open_folder",
+      "crash_reports_package",
+      "crash_reports_post",
+      "crash_reports_saved",
+      "crash_reports_title",
+      "errorboundary_report_crash"
+    ],
+    "stale": []
+  },
+  "es": {
+    "missing": [
+      "crash_reports_clear",
+      "crash_reports_count",
+      "crash_reports_hint",
+      "crash_reports_open_discord",
+      "crash_reports_open_folder",
+      "crash_reports_package",
+      "crash_reports_post",
+      "crash_reports_saved",
+      "crash_reports_title",
+      "errorboundary_report_crash"
+    ],
+    "stale": []
+  },
+  "fr": {
+    "missing": [
+      "crash_reports_clear",
+      "crash_reports_count",
+      "crash_reports_hint",
+      "crash_reports_open_discord",
+      "crash_reports_open_folder",
+      "crash_reports_package",
+      "crash_reports_post",
+      "crash_reports_saved",
+      "crash_reports_title",
+      "errorboundary_report_crash"
+    ],
+    "stale": []
+  },
+  "hi": {
+    "missing": [
+      "crash_reports_clear",
+      "crash_reports_count",
+      "crash_reports_hint",
+      "crash_reports_open_discord",
+      "crash_reports_open_folder",
+      "crash_reports_package",
+      "crash_reports_post",
+      "crash_reports_saved",
+      "crash_reports_title",
+      "errorboundary_report_crash"
+    ],
+    "stale": []
+  },
+  "id": {
+    "missing": [
+      "crash_reports_clear",
+      "crash_reports_count",
+      "crash_reports_hint",
+      "crash_reports_open_discord",
+      "crash_reports_open_folder",
+      "crash_reports_package",
+      "crash_reports_post",
+      "crash_reports_saved",
+      "crash_reports_title",
+      "errorboundary_report_crash"
+    ],
+    "stale": []
+  },
+  "it": {
+    "missing": [
+      "crash_reports_clear",
+      "crash_reports_count",
+      "crash_reports_hint",
+      "crash_reports_open_discord",
+      "crash_reports_open_folder",
+      "crash_reports_package",
+      "crash_reports_post",
+      "crash_reports_saved",
+      "crash_reports_title",
+      "errorboundary_report_crash"
+    ],
+    "stale": []
+  },
+  "ja": {
+    "missing": [
+      "crash_reports_clear",
+      "crash_reports_count",
+      "crash_reports_hint",
+      "crash_reports_open_discord",
+      "crash_reports_open_folder",
+      "crash_reports_package",
+      "crash_reports_post",
+      "crash_reports_saved",
+      "crash_reports_title",
+      "errorboundary_report_crash"
+    ],
+    "stale": []
+  },
+  "ko": {
+    "missing": [
+      "crash_reports_clear",
+      "crash_reports_count",
+      "crash_reports_hint",
+      "crash_reports_open_discord",
+      "crash_reports_open_folder",
+      "crash_reports_package",
+      "crash_reports_post",
+      "crash_reports_saved",
+      "crash_reports_title",
+      "errorboundary_report_crash"
+    ],
+    "stale": []
+  },
+  "pt-BR": {
+    "missing": [
+      "crash_reports_clear",
+      "crash_reports_count",
+      "crash_reports_hint",
+      "crash_reports_open_discord",
+      "crash_reports_open_folder",
+      "crash_reports_package",
+      "crash_reports_post",
+      "crash_reports_saved",
+      "crash_reports_title",
+      "errorboundary_report_crash"
+    ],
+    "stale": []
+  },
+  "ru": {
+    "missing": [
+      "crash_reports_clear",
+      "crash_reports_count",
+      "crash_reports_hint",
+      "crash_reports_open_discord",
+      "crash_reports_open_folder",
+      "crash_reports_package",
+      "crash_reports_post",
+      "crash_reports_saved",
+      "crash_reports_title",
+      "errorboundary_report_crash"
+    ],
+    "stale": []
+  },
+  "th": {
+    "missing": [
+      "crash_reports_clear",
+      "crash_reports_count",
+      "crash_reports_hint",
+      "crash_reports_open_discord",
+      "crash_reports_open_folder",
+      "crash_reports_package",
+      "crash_reports_post",
+      "crash_reports_saved",
+      "crash_reports_title",
+      "errorboundary_report_crash"
+    ],
+    "stale": []
+  },
+  "tr": {
+    "missing": [
+      "crash_reports_clear",
+      "crash_reports_count",
+      "crash_reports_hint",
+      "crash_reports_open_discord",
+      "crash_reports_open_folder",
+      "crash_reports_package",
+      "crash_reports_post",
+      "crash_reports_saved",
+      "crash_reports_title",
+      "errorboundary_report_crash"
+    ],
+    "stale": []
+  },
+  "vi": {
+    "missing": [
+      "crash_reports_clear",
+      "crash_reports_count",
+      "crash_reports_hint",
+      "crash_reports_open_discord",
+      "crash_reports_open_folder",
+      "crash_reports_package",
+      "crash_reports_post",
+      "crash_reports_saved",
+      "crash_reports_title",
+      "errorboundary_report_crash"
+    ],
+    "stale": []
+  },
+  "zh-CN": {
+    "missing": [
+      "crash_reports_clear",
+      "crash_reports_count",
+      "crash_reports_hint",
+      "crash_reports_open_discord",
+      "crash_reports_open_folder",
+      "crash_reports_package",
+      "crash_reports_post",
+      "crash_reports_saved",
+      "crash_reports_title",
+      "errorboundary_report_crash"
+    ],
+    "stale": []
+  },
+  "zh-TW": {
+    "missing": [
+      "crash_reports_clear",
+      "crash_reports_count",
+      "crash_reports_hint",
+      "crash_reports_open_discord",
+      "crash_reports_open_folder",
+      "crash_reports_package",
+      "crash_reports_post",
+      "crash_reports_saved",
+      "crash_reports_title",
+      "errorboundary_report_crash"
+    ],
+    "stale": []
+  }
+}

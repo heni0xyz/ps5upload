@@ -93,6 +93,36 @@ pub fn run() {
         // (see lib/osNotify.ts). Works on every platform.
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
+            // Make sure the main window opens fully on-screen and centred.
+            // The tauri.conf size/centre hints are applied at window creation
+            // and are unreliable in practice (esp. on macOS and under
+            // `tauri dev`), which left the window off-screen / off-centre. We
+            // also shrink it to fit smaller displays ("crappy computers") so
+            // the title bar and controls are always reachable. All in physical
+            // px so there's no scale-factor maths to get wrong.
+            {
+                use tauri::Manager;
+                if let Some(win) = app.get_webview_window("main") {
+                    let monitor = win
+                        .current_monitor()
+                        .ok()
+                        .flatten()
+                        .or_else(|| win.primary_monitor().ok().flatten());
+                    if let (Some(monitor), Ok(size)) = (monitor, win.outer_size()) {
+                        let mon = monitor.size();
+                        let max_w = (mon.width as f64 * 0.95) as u32;
+                        let max_h = (mon.height as f64 * 0.90) as u32;
+                        if size.width > max_w || size.height > max_h {
+                            let _ = win.set_size(tauri::PhysicalSize::new(
+                                size.width.min(max_w),
+                                size.height.min(max_h),
+                            ));
+                        }
+                    }
+                    let _ = win.center();
+                }
+            }
+
             // Spawn the Rust engine binary as a sidecar. On failure we log and
             // keep the window open so the user can see diagnostic info — the
             // UI's passive status polling will flag the unreachable engine
