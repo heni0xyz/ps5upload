@@ -4,6 +4,32 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 2.24.0
+
+- **Much faster downloads (backup console → PC).** Saving a game to your PC
+  used to reconnect for every small chunk; it now keeps one connection open
+  and reads ahead, and pulls folders over several connections at once. A big
+  single file roughly doubled to about full network speed, and folder backups
+  are much quicker. It also resumes from where it left off if the connection
+  drops. Nothing new to send to your PS5 — it's all in the app.
+- **See which console each upload is for.** Every item in the upload and
+  install queues now shows its target console, so a mixed queue isn't a
+  guessing game.
+- **Upload to several consoles at once (optional).** New setting under
+  Settings → Upload to send queued games to different consoles in parallel
+  instead of one console at a time. Off by default.
+- **Pick a payload version — and downgrade.** The Payloads catalog now lets
+  you choose any past release of a payload, not just the latest, and flags
+  pre-release builds as possibly unstable. Handy for rolling back when a fresh
+  build misbehaves.
+- **Adding a game's update no longer clashes with its base.** A base game and
+  its update share an ID, which made the app treat an added update as the base
+  again. They're now kept separate, with clear "Update" / "DLC" labels.
+- **Tidy up the staged-package list.** New "Clear finished" and "Clear all"
+  buttons, plus an optional "auto-delete after install."
+
+---
+
 ## 2.23.11
 
 - **Uploads no longer abort with a "buffer space" error on Windows.** During a
