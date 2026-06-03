@@ -4,6 +4,18 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 2.23.8
+
+- **Uploading from a network drive no longer crashes the helper.** When the
+  source folder lives on a network share (SMB/UNC), scanning it can take
+  minutes. The app was sometimes running several of those scans at once — a
+  background "diff vs PS5" preview on top of your actual upload — which fought
+  over the same share and could take the helper down on big games. Now only one
+  scan runs at a time, and the preview pauses while a transfer is in progress
+  and resumes when it's done.
+
+---
+
 ## 2.23.7
 
 - **Queued uploads are more reliable.** Before running a queue, the app now

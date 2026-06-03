@@ -9,6 +9,8 @@ import {
 import { dirDiffPreview, type DirDiffPreview } from "../../api/ps5";
 import { useTr } from "../../state/lang";
 import { formatBytes } from "../../lib/format";
+import { useUploadQueueStore } from "../../state/uploadQueue";
+import { useTransferStore } from "../../state/transfer";
 
 /**
  * Pre-flight folder diff preview.
@@ -39,11 +41,28 @@ export default function FolderDiffPanel({
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
 
+  // Mirror transferScreenBusy() reactively so the panel re-renders when a
+  // transfer starts/stops. A diff-preview does a full local walk of the
+  // source; on a slow network share (SMB/UNC) that's minutes long, and
+  // running it WHILE an upload is in flight makes the two walks fight over
+  // the same share + mgmt port — which took the payload down on a large
+  // game served from a network drive. So we pause the preview during any
+  // active transfer (one-shot or queue) and resume once it settles. The
+  // engine also serializes reconciles, but not previewing at all here avoids
+  // the wasted multi-minute walk in the first place.
+  const queueRunning = useUploadQueueStore((s) => s.running);
+  const phaseKind = useTransferStore((s) => s.phase.kind);
+  const transferBusy =
+    queueRunning || phaseKind === "starting" || phaseKind === "running";
+
   useEffect(() => {
     let cancelled = false;
     setData(null);
     setError(null);
     if (!srcDir || !destRoot || !transferAddr) return;
+    // Don't walk the source while a transfer holds it; resume when busy clears
+    // (transferBusy is a dep, so this effect re-runs and previews then).
+    if (transferBusy) return;
     const id = window.setTimeout(async () => {
       if (cancelled) return;
       setLoading(true);
@@ -78,7 +97,26 @@ export default function FolderDiffPanel({
       cancelled = true;
       window.clearTimeout(id);
     };
-  }, [srcDir, destRoot, transferAddr, excludes]);
+  }, [srcDir, destRoot, transferAddr, excludes, transferBusy]);
+
+  // While a transfer is active, surface a quiet "paused" note (only once the
+  // user has picked a source/dest, so we don't show it on an empty form).
+  if (transferBusy && srcDir && destRoot && transferAddr) {
+    return (
+      <section className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3 text-xs">
+        <header className="flex items-center gap-2 text-[var(--color-muted)]">
+          <GitCompare size={12} />
+          <span>
+            {tr(
+              "folder_diff_paused",
+              undefined,
+              "Diff preview paused while a transfer is running.",
+            )}
+          </span>
+        </header>
+      </section>
+    );
+  }
 
   if (!data && !loading && !error) return null;
 

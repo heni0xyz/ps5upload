@@ -904,16 +904,32 @@ pub struct ReconcileFile {
 /// here yet", so the diff proceeds to mark everything under that parent
 /// as to-send. Matches the contract `list_dir_recursive` had for a
 /// missing root.
-/// Process-global serializer for the multi-call remote directory walk below.
+/// Process-global serializer for the *whole* reconcile (local walk + remote
+/// directory walk), acquired at the top of `reconcile()`.
+///
 /// A folder upload fires a reconcile, and the Upload screen fires a debounced
-/// dir-diff-preview; without this gate several 800+-call walks can run at
-/// once, each opening a *fresh* mgmt-port (9114) connection per directory
-/// (mgmt is one-frame-per-connection). That connection storm overran the
-/// payload's small accept backlog + 8-thread mgmt cap and wedged/crashed the
-/// helper (reported on "it takes two", ~863 dirs → red helper, failed upload,
-/// shards_incomplete, fs_delete_failed). Serializing the walks keeps the
-/// console seeing at most one mgmt connection at a time from this path.
-static REMOTE_WALK_GATE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+/// dir-diff-preview. Two problems this gate solves:
+///
+///   1. mgmt-port storm: without serialization, several 800+-call remote walks
+///      run at once, each opening a *fresh* mgmt-port (9114) connection per
+///      directory (mgmt is one-frame-per-connection). That connection storm
+///      overran the payload's small accept backlog + 8-thread mgmt cap and
+///      wedged/crashed the helper (reported on "it takes two", ~863 dirs → red
+///      helper, failed upload, shards_incomplete, fs_delete_failed).
+///
+///   2. slow-source storm: the LOCAL walk runs first and, on a network source
+///      (SMB/UNC like `\\server\share`), takes MINUTES — each `read_dir`/`stat`
+///      is a network round-trip. The gate used to live inside the remote walk,
+///      so a preview did the full multi-minute local walk *before* reaching it,
+///      then bailed too late. Several previews + the real upload therefore
+///      walked the same slow share concurrently, saturating it and taking the
+///      helper down (reported on an 8571-file game served from `\\RRD-Storage`:
+///      three overlapping ~134 s local walks, payload went down mid-upload).
+///
+/// Gating the entire reconcile means a best-effort preview bails *before* the
+/// expensive local walk, and the console sees at most one mgmt connection at a
+/// time from this path.
+static RECONCILE_WALK_GATE: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Safety valve: above this many unique parent directories, skip the
 /// per-parent reconcile walk entirely (treat the destination as empty, so
@@ -922,11 +938,13 @@ static REMOTE_WALK_GATE: std::sync::Mutex<()> = std::sync::Mutex::new(());
 /// still-correct choice. Normal games are far below this.
 const MAX_RECONCILE_PARENT_DIRS: usize = 12_000;
 
+/// Build the scoped remote inventory. The caller (`reconcile`) already holds
+/// `RECONCILE_WALK_GATE`, so this runs one-at-a-time process-wide — at most one
+/// mgmt connection is open from this path at any moment.
 fn list_remote_scoped(
     addr: &str,
     dest_root: &str,
     local: &LocalInventory,
-    block_for_gate: bool,
 ) -> Result<RemoteInventory> {
     use std::collections::BTreeSet;
     let mut parent_rels: BTreeSet<String> = BTreeSet::new();
@@ -954,26 +972,9 @@ fn list_remote_scoped(
         return Ok(RemoteInventory::new());
     }
 
-    // Serialize remote walks process-wide so concurrent reconcile +
-    // diff-preview requests can't storm the mgmt port (see REMOTE_WALK_GATE).
-    // The actual upload (block_for_gate=true) waits its turn; a best-effort
-    // preview (false) bails out fast if a walk is already running.
-    let _walk_gate = if block_for_gate {
-        REMOTE_WALK_GATE.lock().unwrap_or_else(|e| e.into_inner())
-    } else {
-        match REMOTE_WALK_GATE.try_lock() {
-            Ok(g) => g,
-            Err(std::sync::TryLockError::Poisoned(e)) => e.into_inner(),
-            Err(std::sync::TryLockError::WouldBlock) => {
-                crate::core_log!(
-                    "list_remote_scoped: another remote scan is already running — skipping this preview to protect the mgmt port",
-                );
-                return Err(anyhow::anyhow!(
-                    "reconcile_busy: another remote scan is already in progress"
-                ));
-            }
-        }
-    };
+    // Note: process-wide serialization is handled by the caller via
+    // RECONCILE_WALK_GATE (held across the local walk + this remote walk), so
+    // we don't re-acquire it here.
 
     // Probe dest_root up-front. Serves two purposes:
     //   1. Fast ENOENT path: if the destination doesn't exist at all,
@@ -1137,6 +1138,29 @@ pub fn reconcile(
     // false → best-effort preview; skip with `reconcile_busy` if a walk runs.
     block_for_gate: bool,
 ) -> Result<ReconcilePlan> {
+    // Serialize the ENTIRE reconcile (local walk + remote scan) process-wide —
+    // see RECONCILE_WALK_GATE. The local walk runs first and, on a slow network
+    // source (SMB/UNC), takes minutes; gating up-front means a best-effort
+    // preview bails BEFORE that walk instead of running several concurrent
+    // multi-minute walks against the same share. The real upload
+    // (block_for_gate=true) waits its turn; a preview (false) bails fast.
+    let _walk_gate = if block_for_gate {
+        RECONCILE_WALK_GATE.lock().unwrap_or_else(|e| e.into_inner())
+    } else {
+        match RECONCILE_WALK_GATE.try_lock() {
+            Ok(g) => g,
+            Err(std::sync::TryLockError::Poisoned(e)) => e.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => {
+                crate::core_log!(
+                    "reconcile: another reconcile/preview is already running — skipping this preview before the local walk to protect the source + mgmt port",
+                );
+                return Err(anyhow::anyhow!(
+                    "reconcile_busy: another remote scan is already in progress"
+                ));
+            }
+        }
+    };
+
     let t_local = std::time::Instant::now();
     crate::core_log!("reconcile: walking local {} …", src.display(),);
     let local = walk_local_inventory(src, excludes)?;
@@ -1146,7 +1170,7 @@ pub fn reconcile(
         t_local.elapsed().as_millis(),
     );
     let t_remote = std::time::Instant::now();
-    let remote = list_remote_scoped(addr, dest_root, &local, block_for_gate)?;
+    let remote = list_remote_scoped(addr, dest_root, &local)?;
     crate::core_log!(
         "reconcile: remote inventory built ({} ms, mode={:?}) — starting diff",
         t_remote.elapsed().as_millis(),
@@ -1254,30 +1278,32 @@ fn blake3_file(path: &std::path::Path) -> Result<String> {
 mod tests {
     use super::*;
 
-    /// Regression test for the reconcile connection-storm crash: the
-    /// process-global REMOTE_WALK_GATE must serialize remote directory
-    /// walks so concurrent reconcile + diff-preview requests can never open
-    /// overlapping mgmt-port connections (which crashed the helper on large
-    /// games like "it takes two", ~863 dirs). Exercises the real static used
-    /// in production. Single test (not split) because the gate is global —
-    /// parallel test cases would contend on it and flake.
+    /// Regression test for the reconcile connection-storm + slow-source crash:
+    /// the process-global RECONCILE_WALK_GATE must serialize whole reconciles
+    /// (local walk + remote walk) so concurrent reconcile + diff-preview
+    /// requests can never (a) open overlapping mgmt-port connections (crashed
+    /// the helper on large games like "it takes two", ~863 dirs) nor (b) run
+    /// several multi-minute local walks against the same slow SMB share
+    /// (crashed the helper on an 8571-file game from `\\RRD-Storage`).
+    /// Exercises the real static used in production. Single test (not split)
+    /// because the gate is global — parallel test cases would contend and flake.
     #[test]
-    fn remote_walk_gate_serializes_walks() {
+    fn reconcile_walk_gate_serializes_walks() {
         use std::sync::atomic::{AtomicUsize, Ordering};
         use std::sync::Arc;
 
         // (1) A best-effort preview (try_lock) must bail while a walk holds
         //     the gate, rather than starting a second concurrent walk.
         {
-            let _held = REMOTE_WALK_GATE.lock().unwrap_or_else(|e| e.into_inner());
+            let _held = RECONCILE_WALK_GATE.lock().unwrap_or_else(|e| e.into_inner());
             assert!(
-                REMOTE_WALK_GATE.try_lock().is_err(),
+                RECONCILE_WALK_GATE.try_lock().is_err(),
                 "preview try_lock must fail while a walk holds the gate"
             );
         }
         // Gate is released once the guard drops.
         assert!(
-            REMOTE_WALK_GATE.try_lock().is_ok(),
+            RECONCILE_WALK_GATE.try_lock().is_ok(),
             "gate must be free after the walk completes"
         );
 
@@ -1290,7 +1316,7 @@ mod tests {
             let max_seen = Arc::clone(&max_seen);
             let in_flight = Arc::clone(&in_flight);
             handles.push(std::thread::spawn(move || {
-                let _g = REMOTE_WALK_GATE.lock().unwrap_or_else(|e| e.into_inner());
+                let _g = RECONCILE_WALK_GATE.lock().unwrap_or_else(|e| e.into_inner());
                 let now = in_flight.fetch_add(1, Ordering::SeqCst) + 1;
                 max_seen.fetch_max(now, Ordering::SeqCst);
                 std::thread::sleep(std::time::Duration::from_millis(3));
@@ -1304,6 +1330,33 @@ mod tests {
             max_seen.load(Ordering::SeqCst),
             1,
             "remote walks must be serialized to one at a time"
+        );
+    }
+
+    /// A best-effort preview (block_for_gate=false) must bail with
+    /// `reconcile_busy` BEFORE walking the local tree when a walk is already in
+    /// flight. This is the fix for the slow-source crash: the gate now wraps the
+    /// local walk too, so a preview can't run a multi-minute SMB walk that
+    /// competes with the active upload. We point `src` at a path that does NOT
+    /// exist — if the preview tried to walk it, it would fail with a read_dir
+    /// error rather than the clean reconcile_busy, so this also pins the
+    /// gate-before-walk ordering.
+    #[test]
+    fn preview_bails_before_local_walk_when_gate_held() {
+        let _held = RECONCILE_WALK_GATE.lock().unwrap_or_else(|e| e.into_inner());
+        let missing = std::path::Path::new("/this/path/should/not/exist/ps5upload-test");
+        let err = reconcile(
+            "127.0.0.1:9114",
+            missing,
+            "/data/whatever",
+            ReconcileMode::Fast,
+            &[],
+            false, // best-effort preview
+        )
+        .expect_err("preview must bail while the gate is held");
+        assert!(
+            err.to_string().contains("reconcile_busy"),
+            "preview must fail with reconcile_busy (bailed before the walk), got: {err}"
         );
     }
 
