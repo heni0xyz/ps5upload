@@ -15,6 +15,7 @@ const KEY_ALWAYS_OVERWRITE = "ps5upload.always_overwrite";
 const KEY_SHOW_FILES = "ps5upload.show_transfer_files";
 const KEY_BANDWIDTH_CAP = "ps5upload.bandwidth_cap_mbps";
 const KEY_UPLOAD_STREAMS = "ps5upload.upload_streams";
+const KEY_PARALLEL_CONSOLES = "ps5upload.parallel_consoles";
 
 /** Upper bound on the user-selectable stream count, mirroring the engine's
  *  MAX_TRANSFER_STREAMS. The effective count is further clamped to whatever
@@ -50,6 +51,15 @@ function loadBandwidthCap(): number {
   return isFinite(n) && n > 0 ? n : 0;
 }
 
+function loadParallelConsoles(): boolean {
+  if (typeof window === "undefined") return false;
+  // Default OFF — opt-in. When off, the queue runs strictly one job at a
+  // time across all consoles (legacy behaviour). When on, jobs targeting
+  // DIFFERENT consoles run concurrently (one at a time per console, since
+  // each console's transfer port is single-client).
+  return window.localStorage.getItem(KEY_PARALLEL_CONSOLES) === "true";
+}
+
 function loadUploadStreams(): number {
   // Default 4 (hardware-validated 2026-06-02: ~1.7× on Fat, ~1.4× on Pro).
   // Safe against older payloads — the effective count is min(setting, the
@@ -83,10 +93,16 @@ interface UploadSettingsState {
    *  max_transfer_streams), resolved at upload start. Breaks the
    *  single-stream ~40 MB/s write ceiling on non-Pro PS5s. */
   uploadStreams: number;
+  /** When true, queued uploads targeting DIFFERENT consoles run in
+   *  parallel (still one-at-a-time per console). Off = strict global
+   *  serial (legacy). Opt-in because it multiplies host disk-read +
+   *  network load across consoles. */
+  parallelConsoles: boolean;
   setAlwaysOverwrite: (on: boolean) => void;
   setShowTransferFiles: (on: boolean) => void;
   setBandwidthCapMbps: (n: number) => void;
   setUploadStreams: (n: number) => void;
+  setParallelConsoles: (on: boolean) => void;
 }
 
 export const useUploadSettingsStore = create<UploadSettingsState>((set) => ({
@@ -95,6 +111,7 @@ export const useUploadSettingsStore = create<UploadSettingsState>((set) => ({
   showTransferFiles: loadShowFiles(),
   bandwidthCapMbps: loadBandwidthCap(),
   uploadStreams: loadUploadStreams(),
+  parallelConsoles: loadParallelConsoles(),
   setAlwaysOverwrite: (alwaysOverwrite) => {
     window.localStorage.setItem(
       KEY_ALWAYS_OVERWRITE,
@@ -124,5 +141,12 @@ export const useUploadSettingsStore = create<UploadSettingsState>((set) => ({
     const clamped = Math.min(Math.max(Math.round(n), 1), MAX_UPLOAD_STREAMS);
     window.localStorage.setItem(KEY_UPLOAD_STREAMS, clamped.toString());
     set({ uploadStreams: clamped });
+  },
+  setParallelConsoles: (parallelConsoles) => {
+    window.localStorage.setItem(
+      KEY_PARALLEL_CONSOLES,
+      parallelConsoles ? "true" : "false",
+    );
+    set({ parallelConsoles });
   },
 }));

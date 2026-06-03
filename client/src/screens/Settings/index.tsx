@@ -85,9 +85,11 @@ export default function SettingsScreen() {
     alwaysOverwrite,
     showTransferFiles,
     uploadStreams,
+    parallelConsoles,
     setAlwaysOverwrite,
     setShowTransferFiles,
     setUploadStreams,
+    setParallelConsoles,
   } = useUploadSettingsStore();
   const payloadMaxStreams = useConnectionStore((s) => s.maxTransferStreams);
 
@@ -294,6 +296,31 @@ export default function SettingsScreen() {
                   </div>
                 )}
             </div>
+
+            <label className="flex cursor-pointer items-start gap-3 text-sm">
+              <input
+                type="checkbox"
+                className="mt-0.5 h-4 w-4"
+                checked={parallelConsoles}
+                onChange={(e) => setParallelConsoles(e.target.checked)}
+              />
+              <div>
+                <div className="font-medium">
+                  {tr(
+                    "upload_parallel_consoles",
+                    undefined,
+                    "Upload to multiple consoles at once",
+                  )}
+                </div>
+                <div className="mt-0.5 text-xs text-[var(--color-muted)]">
+                  {tr(
+                    "upload_parallel_consoles_hint",
+                    undefined,
+                    "When your queue has games for different consoles, send to them in parallel instead of one console at a time. Each console still uploads one game at a time. Off by default — it increases load on your PC's disk and network.",
+                  )}
+                </div>
+              </div>
+            </label>
           </div>
         </Section>
 

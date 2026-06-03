@@ -199,6 +199,36 @@ function newId(): string {
   return crypto.randomUUID().replace(/-/g, "");
 }
 
+/** Distinct console hosts (bare IP, port-stripped) among the pending items,
+ *  in first-seen order. The per-console parallel runner spawns one drain
+ *  loop per host. Pure — exported for tests. */
+export function distinctPendingHosts(items: QueueItem[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const it of items) {
+    if (it.status !== "pending") continue;
+    const h = hostOf(it.addr);
+    if (!seen.has(h)) {
+      seen.add(h);
+      out.push(h);
+    }
+  }
+  return out;
+}
+
+/** First pending item targeting `host` (port-stripped match), or null. The
+ *  per-console runner's `pickNext`; stable array order = run order, same
+ *  contract as `nextPending`. Pure — exported for tests. */
+export function nextPendingForHost(
+  items: QueueItem[],
+  host: string,
+): QueueItem | null {
+  return (
+    items.find((it) => it.status === "pending" && hostOf(it.addr) === host) ??
+    null
+  );
+}
+
 export const useUploadQueueStore = create<QueueState>((set, get) => {
   // Generation counter: every start() bumps it. The runner loop
   // captures its own generation and bails between awaits when the
@@ -608,14 +638,21 @@ export const useUploadQueueStore = create<QueueState>((set, get) => {
       const myRun = gen.next();
       const isLive = () => gen.isLive(myRun);
       set({ running: true });
-      try {
+
+      // One drain loop: repeatedly pick the next item via `pickNext`, run
+      // it to a terminal state, settling between jobs on the SAME payload.
+      // Extracted so the serial path (one loop over all pending items) and
+      // the parallel path (one loop per console) share byte-for-byte
+      // identical per-item handling — the only difference is which items a
+      // given loop picks. Returns when `pickNext` is empty, on stop
+      // (isLive false), or on a hard-stop-after-failure.
+      const runDrainLoop = async (pickNext: () => QueueItem | null) => {
         // Make sure the console is on the payload that matches this build
         // BEFORE running any jobs. Older payloads lack the mgmt-port
         // hardening (backlog 8→128 + reconcile storm mitigations from
-        // v2.23.1), and the upload queue — unlike the install queue — never
-        // pushed it, so a queue run could hammer a fragile payload and kill
-        // it after the first job. Done once per run; never throws.
-        const head = nextPending(get().items);
+        // v2.23.1). Best-effort; never throws. In parallel mode each
+        // loop preflights its OWN console's first item.
+        const head = pickNext();
         if (head) {
           try {
             await ensurePayloadCurrent(hostOf(head.addr));
@@ -627,10 +664,11 @@ export const useUploadQueueStore = create<QueueState>((set, get) => {
 
         let jobsRun = 0;
         while (isLive()) {
-          const next = nextPending(get().items);
+          const next = pickNext();
           if (!next) break;
 
           // Let the payload settle between jobs (see INTER_JOB_SETTLE_MS).
+          // Per-loop counter ⇒ the settle is per-console, not global.
           if (jobsRun > 0) {
             await sleep(INTER_JOB_SETTLE_MS);
             if (!isLive()) return;
@@ -708,6 +746,28 @@ export const useUploadQueueStore = create<QueueState>((set, get) => {
               break;
             }
           }
+        }
+      };
+
+      try {
+        const parallel = useUploadSettingsStore.getState().parallelConsoles;
+        const hosts = distinctPendingHosts(get().items);
+        if (!parallel || hosts.length <= 1) {
+          // Serial (default): one loop over all pending items, exactly the
+          // legacy behaviour.
+          await runDrainLoop(() => nextPending(get().items));
+        } else {
+          // Parallel: one drain loop per distinct console, run concurrently.
+          // Each console's transfer port is single-client, so per-console
+          // work stays serial while DIFFERENT consoles overlap. Each item
+          // belongs to exactly one console ⇒ exactly one loop ever claims
+          // it, so there's no cross-loop claim race. A hard-stop-after-
+          // failure stops only the failed console's loop; siblings finish.
+          await Promise.all(
+            hosts.map((h) =>
+              runDrainLoop(() => nextPendingForHost(get().items, h)),
+            ),
+          );
         }
       } finally {
         if (isLive()) {
