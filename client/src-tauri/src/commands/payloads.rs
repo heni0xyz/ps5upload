@@ -562,6 +562,10 @@ struct GithubRelease {
     assets: Vec<GithubAsset>,
     #[serde(default)]
     html_url: String,
+    /// GitHub/Gitea "this is a pre-release" flag. Surfaced so the UI can
+    /// warn that a version may be unstable (payload dev moves fast).
+    #[serde(default)]
+    prerelease: bool,
 }
 
 /// What the renderer actually consumes — flat, no surprise asset
@@ -587,6 +591,10 @@ pub struct ReleaseInfo {
     picked_asset_url: String,
     picked_asset_name: String,
     picked_asset_size: u64,
+    /// True when GitHub/Gitea marked this release a pre-release. The UI
+    /// badges it so a user picking a version knows it may be unstable.
+    #[serde(default)]
+    prerelease: bool,
     /// Cache freshness in seconds. UI surfaces this as "checked Ns
     /// ago" so users know whether to hit Refresh.
     cached_age_secs: u64,
@@ -904,6 +912,139 @@ pub async fn payloads_release(
     Ok(release_to_info(entry, &release, 0))
 }
 
+/// Cache file for a payload's FULL release list — distinct from the
+/// single-`release.json` latest-only cache, so version selection and the
+/// "latest" fast path don't clobber each other.
+fn cache_releases_list_path(app: &AppHandle, payload_id: &str) -> Result<PathBuf, String> {
+    let root = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|e| format!("app_local_data_dir: {e}"))?;
+    let dir = root.join("payloads").join(payload_id);
+    std::fs::create_dir_all(&dir).map_err(|e| format!("mkdir {}: {e}", dir.display()))?;
+    Ok(dir.join("releases.json"))
+}
+
+/// Read the cached release LIST. With `respect_ttl` true this is the fresh
+/// fast path (honours the 1h TTL); false ignores the TTL for the
+/// stale-is-better-than-nothing fallback. Mirrors read_cached_release /
+/// read_stale_cached_release but for a `Vec`.
+fn read_cached_releases(
+    path: &std::path::Path,
+    respect_ttl: bool,
+) -> Option<(Vec<GithubRelease>, u64)> {
+    let meta = std::fs::metadata(path).ok()?;
+    let mtime = meta.modified().ok()?;
+    let age = SystemTime::now().duration_since(mtime).ok()?;
+    if respect_ttl && age >= RELEASE_CACHE_TTL {
+        return None;
+    }
+    let bytes = std::fs::read(path).ok()?;
+    let releases: Vec<GithubRelease> = serde_json::from_slice(&bytes).ok()?;
+    Some((releases, age.as_secs()))
+}
+
+/// List ALL releases for a catalogue payload, newest first, so the user
+/// can pick a specific version — pin a known-good build or DOWNGRADE when
+/// the latest is unstable (payload dev moves fast). Mirrors
+/// `payloads_release` exactly (allowlist guard, 1h cache, stale-on-failure
+/// fallback) but hits the `/releases` list endpoint and maps every entry.
+/// The renderer feeds a chosen entry's `picked_asset_url` + `tag` straight
+/// into `payloads_download`, which already takes an explicit asset URL.
+#[tauri::command]
+pub async fn payloads_releases(
+    app: AppHandle,
+    id: String,
+    force_refresh: Option<bool>,
+) -> Result<Vec<ReleaseInfo>, String> {
+    let entry = find_entry(&id).ok_or_else(|| format!("unknown payload id: {id}"))?;
+    let cache_path = cache_releases_list_path(&app, &id)?;
+    let force = force_refresh.unwrap_or(false);
+
+    if !force {
+        if let Some((releases, age)) = read_cached_releases(&cache_path, true) {
+            return Ok(releases
+                .iter()
+                .map(|r| release_to_info(entry, r, age))
+                .collect());
+        }
+    }
+
+    const ALLOWED_HOSTS: &[&str] = &["github.com", "git.earthonion.com"];
+    if !ALLOWED_HOSTS.contains(&entry.repo_host) {
+        return Err(format!(
+            "catalog entry {} declares repo_host={:?} which is not in the allowlist",
+            entry.id, entry.repo_host
+        ));
+    }
+
+    // GitHub paginates with per_page; Gitea with limit. 30 is plenty of
+    // history for a downgrade without paging.
+    let url = if entry.repo_host == "github.com" {
+        format!(
+            "https://api.github.com/repos/{}/{}/releases?per_page=30",
+            entry.repo_owner, entry.repo_name
+        )
+    } else {
+        format!(
+            "https://{}/api/v1/repos/{}/{}/releases?limit=30",
+            entry.repo_host, entry.repo_owner, entry.repo_name
+        )
+    };
+    let client = reqwest::Client::builder()
+        .timeout(RELEASE_FETCH_TIMEOUT)
+        .user_agent(HTTP_USER_AGENT)
+        .build()
+        .map_err(|e| format!("http client: {e}"))?;
+
+    let fallback_to_stale = |reason: String| -> Result<Vec<ReleaseInfo>, String> {
+        if let Some((releases, age)) = read_cached_releases(&cache_path, false) {
+            return Ok(releases
+                .iter()
+                .map(|r| {
+                    release_to_info_with_refresh_error(entry, r, age, Some(reason.clone()))
+                })
+                .collect());
+        }
+        Err(reason)
+    };
+
+    let resp = match client
+        .get(&url)
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => return fallback_to_stale(format!("fetch {url}: {e}")),
+    };
+    if !resp.status().is_success() {
+        let status = resp.status();
+        return fallback_to_stale(format!(
+            "fetch {url}: HTTP {} ({})",
+            status.as_u16(),
+            status.canonical_reason().unwrap_or("unknown status")
+        ));
+    }
+    let body = match resp.text().await {
+        Ok(b) => b,
+        Err(e) => return fallback_to_stale(format!("read body: {e}")),
+    };
+    let releases: Vec<GithubRelease> = match serde_json::from_str(&body) {
+        Ok(r) => r,
+        Err(e) => return fallback_to_stale(format!("parse releases JSON: {e}")),
+    };
+
+    let tmp = cache_path.with_extension("json.tmp");
+    std::fs::write(&tmp, &body).map_err(|e| format!("write cache: {e}"))?;
+    super::replace_file(&tmp, &cache_path).map_err(|e| format!("rename cache: {e}"))?;
+
+    Ok(releases
+        .iter()
+        .map(|r| release_to_info(entry, r, 0))
+        .collect())
+}
+
 fn release_to_info(
     entry: &CatalogueEntry,
     release: &GithubRelease,
@@ -938,6 +1079,7 @@ fn release_to_info_with_refresh_error(
         picked_asset_url: url,
         picked_asset_name: name,
         picked_asset_size: size,
+        prerelease: release.prerelease,
         cached_age_secs,
         refresh_error,
     }
@@ -1271,6 +1413,7 @@ mod tests {
             body: "".into(),
             published_at: "".into(),
             html_url: "".into(),
+            prerelease: false,
             assets: vec![
                 GithubAsset {
                     name: "kstuff-lowfw.elf".into(),
@@ -1300,6 +1443,7 @@ mod tests {
             body: "".into(),
             published_at: "".into(),
             html_url: "".into(),
+            prerelease: false,
             assets: vec![
                 GithubAsset {
                     name: "README.md".into(),
@@ -1330,6 +1474,7 @@ mod tests {
             body: "".into(),
             published_at: "".into(),
             html_url: "".into(),
+            prerelease: false,
             assets: vec![
                 GithubAsset {
                     name: "shadowmountplus-1.6beta10.zip".into(),
@@ -1357,6 +1502,7 @@ mod tests {
             body: "".into(),
             published_at: "".into(),
             html_url: "".into(),
+            prerelease: false,
             assets: vec![
                 GithubAsset {
                     name: "kstuff.sha256".into(),
@@ -1382,6 +1528,7 @@ mod tests {
             body: "".into(),
             published_at: "".into(),
             html_url: "".into(),
+            prerelease: false,
             assets: vec![],
         };
         let (n, u, s) = pick_asset(&r, "");
@@ -1394,6 +1541,28 @@ mod tests {
     fn find_entry_lookup() {
         assert!(find_entry("shadowmountplus").is_some());
         assert!(find_entry("nope").is_none());
+    }
+
+    #[test]
+    fn release_to_info_carries_tag_and_prerelease() {
+        // The version picker relies on `tag` + `prerelease` flowing through
+        // release_to_info untouched (a stable build vs a fast-moving rc).
+        let entry = find_entry("shadowmountplus").expect("catalog entry");
+        let mk = |tag: &str, pre: bool| GithubRelease {
+            tag_name: tag.into(),
+            name: "".into(),
+            body: "".into(),
+            published_at: "".into(),
+            html_url: "".into(),
+            prerelease: pre,
+            assets: vec![],
+        };
+        let stable = release_to_info(entry, &mk("v2.0", false), 0);
+        let pre = release_to_info(entry, &mk("v2.1-rc1", true), 0);
+        assert_eq!(stable.tag, "v2.0");
+        assert!(!stable.prerelease);
+        assert_eq!(pre.tag, "v2.1-rc1");
+        assert!(pre.prerelease);
     }
 
     #[test]
@@ -1425,6 +1594,7 @@ mod tests {
             body: "".into(),
             published_at: "".into(),
             html_url: "".into(),
+            prerelease: false,
             assets: vec![GithubAsset {
                 name: "ShadowMountPlus_1.6test11.zip".into(),
                 browser_download_url: "https://example/smp.zip".into(),

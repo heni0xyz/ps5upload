@@ -1118,6 +1118,10 @@ export interface PayloadReleaseInfo {
   picked_asset_url: string;
   picked_asset_name: string;
   picked_asset_size: number;
+  /** True when GitHub/Gitea marked this release a pre-release. The UI
+   *  badges it "pre-release" so a user picking a version knows it may
+   *  be unstable (payload dev moves fast). */
+  prerelease?: boolean;
   cached_age_secs: number;
   /** Present when the response came from cache because the live
    *  fetch failed (network down, GitHub rate-limited, 5xx outage,
@@ -1146,6 +1150,21 @@ export async function payloadsRelease(
   forceRefresh = false,
 ): Promise<PayloadReleaseInfo> {
   return invoke<PayloadReleaseInfo>("payloads_release", {
+    id,
+    forceRefresh,
+  });
+}
+
+/** List ALL releases for a catalogue payload (newest first) so the user
+ *  can pick a specific version — pin a known-good build or downgrade when
+ *  the latest is unstable. Each entry is a full `PayloadReleaseInfo`
+ *  (same shape as `payloadsRelease`), so the chosen one's
+ *  `picked_asset_url` + `tag` feed straight into `payloadsDownload`. */
+export async function payloadsReleases(
+  id: string,
+  forceRefresh = false,
+): Promise<PayloadReleaseInfo[]> {
+  return invoke<PayloadReleaseInfo[]>("payloads_releases", {
     id,
     forceRefresh,
   });

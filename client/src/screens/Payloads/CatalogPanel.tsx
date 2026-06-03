@@ -15,7 +15,7 @@ import { useConnectionStore } from "../../state/connection";
 import { pushNotification } from "../../state/notifications";
 import {
   payloadsCatalog,
-  payloadsRelease,
+  payloadsReleases,
   payloadsLocalInventory,
   payloadsDownload,
   sendPayload,
@@ -23,6 +23,11 @@ import {
   type PayloadReleaseInfo,
   type PayloadLocalEntry,
 } from "../../api/ps5";
+import {
+  defaultRelease,
+  downloadableReleases,
+  isLatestTag,
+} from "../../lib/payloadVersions";
 import { Button, ErrorCard } from "../../components";
 import { useTr } from "../../state/lang";
 import UsbAutoloaderModal from "./UsbAutoloaderModal";
@@ -49,7 +54,14 @@ export default function CatalogPanel() {
   const host = useConnectionStore((s) => s.host);
   const [catalog, setCatalog] = useState<PayloadInfo[] | null>(null);
   const [inventory, setInventory] = useState<PayloadLocalEntry[]>([]);
+  // `releases[id]` is the currently-SELECTED release for each payload (drives
+  // the Download button + info box). `releaseLists[id]` is the full version
+  // history for the picker; `selectedTag[id]` is the user's chosen version.
   const [releases, setReleases] = useState<Record<string, PayloadReleaseInfo>>({});
+  const [releaseLists, setReleaseLists] = useState<
+    Record<string, PayloadReleaseInfo[]>
+  >({});
+  const [selectedTag, setSelectedTag] = useState<Record<string, string>>({});
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [usbWizardOpen, setUsbWizardOpen] = useState(false);
@@ -98,13 +110,29 @@ export default function CatalogPanel() {
       return rest;
     });
     try {
-      const r = await payloadsRelease(id, force);
-      setReleases((prev) => ({ ...prev, [id]: r }));
+      // Fetch the full release history (newest-first) so the user can pick
+      // a version / downgrade — and default the selection to the newest
+      // STABLE build (the latest tag is often a fast-moving pre-release).
+      const list = await payloadsReleases(id, force);
+      setReleaseLists((prev) => ({ ...prev, [id]: list }));
+      const def = defaultRelease(list);
+      const tag = def?.tag ?? list[0]?.tag ?? "";
+      setSelectedTag((prev) => ({ ...prev, [id]: tag }));
+      const sel = list.find((r) => r.tag === tag) ?? list[0];
+      if (sel) setReleases((prev) => ({ ...prev, [id]: sel }));
     } catch (e) {
       setErrors((prev) => ({ ...prev, [id]: String(e) }));
     } finally {
       setBusy(id, false);
     }
+  }
+
+  // User picked a specific version in the dropdown — switch the selected
+  // release (drives the Download button + info box).
+  function handleSelectTag(id: string, tag: string) {
+    setSelectedTag((prev) => ({ ...prev, [id]: tag }));
+    const sel = releaseLists[id]?.find((r) => r.tag === tag);
+    if (sel) setReleases((prev) => ({ ...prev, [id]: sel }));
   }
 
   async function handleDownload(id: string) {
@@ -233,6 +261,9 @@ export default function CatalogPanel() {
             key={p.id}
             info={p}
             release={releases[p.id]}
+            releaseList={releaseLists[p.id]}
+            selectedTag={selectedTag[p.id]}
+            onSelectTag={(tag) => handleSelectTag(p.id, tag)}
             local={inventoryById[p.id]}
             busy={busyIds.has(p.id)}
             error={errors[p.id]}
@@ -259,6 +290,9 @@ export default function CatalogPanel() {
 function PayloadCard({
   info,
   release,
+  releaseList,
+  selectedTag,
+  onSelectTag,
   local,
   busy,
   error,
@@ -269,6 +303,9 @@ function PayloadCard({
 }: {
   info: PayloadInfo;
   release: PayloadReleaseInfo | undefined;
+  releaseList: PayloadReleaseInfo[] | undefined;
+  selectedTag: string | undefined;
+  onSelectTag: (tag: string) => void;
   local: PayloadLocalEntry | undefined;
   busy: boolean;
   error: string | undefined;
@@ -278,6 +315,10 @@ function PayloadCard({
   onOpenHomepage: () => void;
 }) {
   const tr = useTr();
+  // Versions the picker offers (only those with a downloadable asset).
+  const pickable = releaseList ? downloadableReleases(releaseList) : [];
+  const selectedIsPrerelease = !!release?.prerelease;
+  const selectedIsLatest = !!release && isLatestTag(releaseList ?? [], release.tag);
   const upToDate =
     !!local &&
     !!release &&
@@ -359,6 +400,36 @@ function PayloadCard({
                 ? tr("payloads_refresh", undefined, "Refresh")
                 : tr("payloads_check", undefined, "Check release")}
             </Button>
+            {pickable.length > 1 && selectedTag && (
+              <label className="flex items-center gap-1">
+                <span className="sr-only">
+                  {tr("payloads_version", undefined, "Version")}
+                </span>
+                <select
+                  value={selectedTag}
+                  onChange={(e) => onSelectTag(e.target.value)}
+                  disabled={busy}
+                  className="max-w-[12rem] rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 py-1 text-[11px]"
+                  title={tr(
+                    "payloads_version_tooltip",
+                    undefined,
+                    "Pick a version. Older versions let you downgrade if the latest is unstable.",
+                  )}
+                >
+                  {pickable.map((r) => (
+                    <option key={r.tag} value={r.tag}>
+                      {r.tag}
+                      {isLatestTag(releaseList ?? [], r.tag)
+                        ? ` (${tr("payloads_latest", undefined, "latest")})`
+                        : ""}
+                      {r.prerelease
+                        ? ` — ${tr("payloads_prerelease", undefined, "pre-release")}`
+                        : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             {release && release.picked_asset_url && (
               <Button
                 variant={updateAvailable || !local ? "primary" : "secondary"}
@@ -367,13 +438,16 @@ function PayloadCard({
                 onClick={onDownload}
                 disabled={busy}
               >
-                {updateAvailable
+                {/* Wording: "Update to" only when picking the genuine latest
+                    and it's newer than cached; otherwise neutral "Download"
+                    (covers re-download AND downgrade to an older tag). */}
+                {updateAvailable && selectedIsLatest
                   ? tr(
                       "payloads_update",
                       { version: release.tag },
                       `Update to ${release.tag}`,
                     )
-                  : local
+                  : local && local.version === release.tag
                     ? tr("payloads_redownload", undefined, "Re-download")
                     : tr(
                         "payloads_download",
@@ -407,6 +481,16 @@ function PayloadCard({
                 `${release.tag} · published ${release.published_at || "—"}`,
               )}
             </span>
+            {selectedIsPrerelease && (
+              <span className="inline-flex items-center gap-1 rounded-full border border-[var(--color-warn)] px-1.5 py-0.5 font-medium text-[var(--color-warn)]">
+                <AlertTriangle size={10} />
+                {tr(
+                  "payloads_prerelease_warn",
+                  undefined,
+                  "pre-release — may be unstable",
+                )}
+              </span>
+            )}
             {release.picked_asset_name && (
               <span title={release.picked_asset_url}>
                 {release.picked_asset_name} ·{" "}

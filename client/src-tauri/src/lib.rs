@@ -231,6 +231,7 @@ pub fn run() {
             // commands/payloads.rs.
             commands::payloads_catalog,
             commands::payloads_release,
+            commands::payloads_releases,
             commands::payloads_local_inventory,
             commands::payloads_local_path,
             commands::payloads_download,
