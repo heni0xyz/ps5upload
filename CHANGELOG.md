@@ -4,6 +4,21 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 2.23.9
+
+- **Faster uploads — large folders now send over several connections at once.**
+  A single upload stream is limited by the console's per-connection write speed
+  (around 40 MB/s on non-Pro PS5s — a single-thread limit, not your network or
+  SSD). Uploads now split a folder's files across up to 4 parallel streams,
+  which adds up to a much higher total. Measured on wired gigabit: ~1.7× faster
+  on a PS5 (fat) and ~1.4× on a PS5 Pro (which was already close to the network
+  limit). It turns on automatically and falls back to a single stream on older
+  payloads; you can change it under Settings → Upload → Parallel upload streams.
+  (Tiny-file folders are limited by the console's filesystem, not bandwidth, so
+  they don't speed up — this helps games with real-sized files.)
+
+---
+
 ## 2.23.8
 
 - **Uploading from a network drive no longer crashes the helper.** When the

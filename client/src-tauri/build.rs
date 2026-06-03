@@ -64,7 +64,10 @@ fn main() {
         .join("ezremote-dpi.elf.gz");
     println!("cargo:rerun-if-changed={}", dpi_gz.display());
     if dpi_gz.is_file() {
-        println!("cargo:rustc-env=PS5UPLOAD_DPI_GZ_BYTES={}", dpi_gz.display());
+        println!(
+            "cargo:rustc-env=PS5UPLOAD_DPI_GZ_BYTES={}",
+            dpi_gz.display()
+        );
         println!("cargo:rustc-cfg=have_dpi");
     }
 

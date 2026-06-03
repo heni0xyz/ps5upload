@@ -51,14 +51,15 @@ function loadBandwidthCap(): number {
 }
 
 function loadUploadStreams(): number {
-  // Default 1 (single stream = today's behaviour). Multi-stream is opt-in
-  // until it's hardware-validated, and only takes effect against a payload
-  // that advertises support (older payloads cap the effective count at 1).
-  if (typeof window === "undefined") return 1;
+  // Default 4 (hardware-validated 2026-06-02: ~1.7× on Fat, ~1.4× on Pro).
+  // Safe against older payloads — the effective count is min(setting, the
+  // payload's advertised max_transfer_streams), and a payload that predates
+  // multi-stream advertises nothing → clamps to 1 (single stream).
+  if (typeof window === "undefined") return MAX_UPLOAD_STREAMS;
   const v = window.localStorage.getItem(KEY_UPLOAD_STREAMS);
-  if (!v) return 1;
+  if (!v) return MAX_UPLOAD_STREAMS;
   const n = parseInt(v, 10);
-  if (!Number.isFinite(n)) return 1;
+  if (!Number.isFinite(n)) return MAX_UPLOAD_STREAMS;
   return Math.min(Math.max(n, 1), MAX_UPLOAD_STREAMS);
 }
 

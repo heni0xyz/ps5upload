@@ -187,7 +187,12 @@ fn open_in_file_manager(path: &Path) -> Result<(), String> {
         .map_err(|e| format!("explorer failed: {e}"))
 }
 
-#[cfg(all(unix, not(target_os = "macos"), not(target_os = "android"), not(target_os = "ios")))]
+#[cfg(all(
+    unix,
+    not(target_os = "macos"),
+    not(target_os = "android"),
+    not(target_os = "ios")
+))]
 fn open_in_file_manager(path: &Path) -> Result<(), String> {
     std::process::Command::new("xdg-open")
         .arg(path)
