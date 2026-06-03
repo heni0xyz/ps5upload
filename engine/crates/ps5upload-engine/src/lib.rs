@@ -51,8 +51,7 @@ use ps5upload_core::{
     cleanup::{cleanup_path, CleanupResult},
     connection::Connection,
     download::{
-        download_to_local_multistream, enumerate_download_set, DownloadKind,
-        MAX_DOWNLOAD_STREAMS,
+        download_to_local_multistream, enumerate_download_set, DownloadKind, MAX_DOWNLOAD_STREAMS,
     },
     fs_ops::{
         app_launch, app_list_registered, app_register, app_unregister, fs_copy_with_op_id,

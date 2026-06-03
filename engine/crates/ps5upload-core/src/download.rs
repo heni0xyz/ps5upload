@@ -523,9 +523,8 @@ pub fn download_to_local(
                         );
                         continue;
                     }
-                    return Err(e).with_context(|| {
-                        format!("download {} @ {offset}", entry.remote_path)
-                    });
+                    return Err(e)
+                        .with_context(|| format!("download {} @ {offset}", entry.remote_path));
                 }
             }
         }
@@ -641,9 +640,7 @@ pub fn download_to_local_multistream(
             let addr = addr.to_string();
             let dest = dest_dir.to_path_buf();
             let prog = progress_bytes.cloned();
-            handles.push(scope.spawn(move || {
-                download_to_local(&addr, &dest, &sub, prog.as_ref())
-            }));
+            handles.push(scope.spawn(move || download_to_local(&addr, &dest, &sub, prog.as_ref())));
         }
         handles
             .into_iter()
@@ -946,11 +943,7 @@ mod pipeline_tests {
     }
 
     fn run_download(addr: &str, size: u64) -> (PathBuf, Result<u64>) {
-        let dir = std::env::temp_dir().join(format!(
-            "ps5dl-test-{}-{}",
-            std::process::id(),
-            size
-        ));
+        let dir = std::env::temp_dir().join(format!("ps5dl-test-{}-{}", std::process::id(), size));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let manifest = vec![DownloadEntry {
@@ -1028,8 +1021,9 @@ mod pipeline_tests {
                     let path = v["path"].as_str().unwrap().to_string();
                     let offset = v["offset"].as_u64().unwrap();
                     let limit = v["limit"].as_u64().unwrap();
-                    let data: Vec<u8> =
-                        (offset..offset + limit).map(|o| seeded_byte(&path, o)).collect();
+                    let data: Vec<u8> = (offset..offset + limit)
+                        .map(|o| seeded_byte(&path, o))
+                        .collect();
                     let rh = FrameHeader::new(FrameType::FsReadAck, 0, limit, 0);
                     if s.write_all(&rh.encode()).is_err() || s.write_all(&data).is_err() {
                         break;
@@ -1044,7 +1038,16 @@ mod pipeline_tests {
     fn multistream_download_splits_and_reassembles_correctly() {
         let addr = spawn_fake_payload_concurrent();
         // Mixed sizes so the byte-balanced split is non-trivial.
-        let sizes = [10u64, 1_000_000, 50, DOWNLOAD_CHUNK_SIZE + 3, 4096, 7, 999, 123_456];
+        let sizes = [
+            10u64,
+            1_000_000,
+            50,
+            DOWNLOAD_CHUNK_SIZE + 3,
+            4096,
+            7,
+            999,
+            123_456,
+        ];
         let dir = std::env::temp_dir().join(format!("ps5dl-ms-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -1064,8 +1067,8 @@ mod pipeline_tests {
 
         for entry in &manifest {
             let path = dir.join(&entry.rel_path);
-            let bytes = std::fs::read(&path)
-                .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+            let bytes =
+                std::fs::read(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
             assert_eq!(bytes.len() as u64, entry.size, "size of {}", entry.rel_path);
             for (i, b) in bytes.iter().enumerate() {
                 assert_eq!(
