@@ -4,6 +4,16 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 2.25.2
+
+- **Installed packages actually launch now.** Installing a `.pkg` from the
+  Install Package page registered the game's icon but never laid down its
+  actual content — so the tile appeared on the PS5 but launching it failed with
+  "can't start the game or app." Installs now go through the path that installs
+  the full game content (the same approach etaHEN uses), so the game launches.
+
+---
+
 ## 2.25.1
 
 - **Installed games actually launch now.** Some games installed without any
