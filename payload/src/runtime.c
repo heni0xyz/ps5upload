@@ -4396,6 +4396,17 @@ static int handle_stream_shard(runtime_state_t *state, int client_fd,
         unsigned char computed[BLAKE3_OUT_LEN];
         int want_verify = 0;
         int i = 0;
+        /* Multi-file per-file durable promote (2.25.x). When this shard
+         * completes its owning file in a kind==2 folder upload, the write
+         * branch below records the file's tmp + final path here; the actual
+         * rename is deferred until AFTER the per-shard digest check passes
+         * (so a corrupt final shard never gets promoted). See the promote
+         * block past the verify gate. */
+        int mf_completed = 0;
+        char mf_done_tmp[sizeof(((manifest_file_entry_t *)0)->path) + 16];
+        char mf_done_final[sizeof(((manifest_file_entry_t *)0)->path)];
+        mf_done_tmp[0] = '\0';
+        mf_done_final[0] = '\0';
         /* Only hash if the sender provided a non-zero expected digest. */
         for (i = 0; i < BLAKE3_OUT_LEN; i++) {
             if (shard_hdr_bytes[24 + i] != 0) { want_verify = 1; break; }
@@ -4496,6 +4507,19 @@ static int handle_stream_shard(runtime_state_t *state, int client_fd,
                                                            want_verify ? computed : NULL);
                     if (write_ok == 0 && idx_mut) {
                         idx_mut->bytes_written += data_len;
+                        /* Did this shard finish the file? Shards partition the
+                         * file exactly, so bytes_written hits mf.size only on
+                         * the genuine last shard. Record the paths; the promote
+                         * rename runs past the digest gate below (never promote
+                         * a shard that fails verification). size==0 files ride
+                         * inside packed shards, never here. */
+                        if (mf.size > 0 && idx_mut->bytes_written >= mf.size) {
+                            mf_completed = 1;
+                            snprintf(mf_done_tmp, sizeof(mf_done_tmp),
+                                     "%s.ps5up2-tmp", mf.path);
+                            snprintf(mf_done_final, sizeof(mf_done_final),
+                                     "%s", mf.path);
+                        }
                     }
                 }
             } else if (entry) {
@@ -4595,6 +4619,38 @@ static int handle_stream_shard(runtime_state_t *state, int client_fd,
             rc = send_frame(client_fd, FTX2_FRAME_ERROR, 0, trace_id,
                             "shard_digest_mismatch", 21);
             goto out;
+        }
+
+        /* Per-file durable promote (2.25.x). A multi-file folder upload is one
+         * BeginTx…CommitTx, and historically every file's `<path>.ps5up2-tmp`
+         * was renamed to its final path ONLY at COMMIT_TX. So a payload crash
+         * mid-folder (the 220 GB-game report: "payload no longer loaded" ~¼–½
+         * through) lost EVERY streamed-but-uncommitted file — the next reconcile
+         * scans only final dest paths, so it never saw the orphaned tmps and
+         * re-sent the whole game, pinning "already present" at the same count
+         * forever. Promote each file to its final path the instant its last
+         * shard is verified, so a crash leaves completed files durable and the
+         * next resume is naturally incremental (reconcile sees them, skips them).
+         *
+         * Reaching here means the digest gate above passed (or verify was off),
+         * so the file is whole and correct. COMMIT_TX stays the backstop: it
+         * finds the tmp gone + the file already at its final size and takes the
+         * ENOENT==success path (the same one packed files already use). This is
+         * a metadata-only rename — NO inline fsync: flushing a multi-GB file
+         * here would stall the socket read long enough to trip the engine's
+         * write timeout (the very drop we fight elsewhere), and process-crash
+         * recovery only needs the bytes in the kernel page cache, which a
+         * rename preserves. Power-loss durability is unchanged from the old
+         * commit-time rename (both rely on un-fsync'd data) and is covered by
+         * Safe-mode hashing. A rename failure is non-fatal: leave the tmp and
+         * let COMMIT_TX promote it the old way. */
+        if (entry && mf_completed) {
+            if (rename(mf_done_tmp, mf_done_final) != 0 && errno != ENOENT) {
+                fprintf(stderr,
+                        "[payload2] per-file promote %s -> %s errno=%d "
+                        "(deferring to commit)\n",
+                        mf_done_tmp, mf_done_final, errno);
+            }
         }
     }
 
@@ -14339,7 +14395,46 @@ static int handle_binary_frame(runtime_state_t *state, int client_fd,
             if (entry->multi_file && !entry->manifest_index) {
                 char *mbuf = NULL;
                 size_t mlen = 0;
-                if (runtime_read_manifest_alloc(entry, &mbuf, &mlen) == 0) {
+                int from_begin = 0;
+                /* 2.25.x: PREFER the manifest carried in THIS resume BeginTx
+                 * over the stale on-disk journal copy. Since per-file durable
+                 * promote landed, the engine reconciles before every resume and
+                 * EXCLUDES the files that already promoted to their final path,
+                 * so the BeginTx manifest is REDUCED (fewer files, shards
+                 * renumbered 1..N). Rebuilding from the journal's ORIGINAL
+                 * full manifest would route the reduced stream by the old
+                 * numbering — "no manifest file owns shard <n>" → fatal abort,
+                 * the exact same-tx-id resume failure the promote change
+                 * otherwise introduces. Adopt the engine's current manifest
+                 * (authoritative — it already accounts for what's durable),
+                 * refresh the scalar totals from it, and re-persist the journal
+                 * so a further restart stays consistent. The resume cursor is a
+                 * COUNT against the OLD numbering and is meaningless here, but
+                 * reconcile_resume_cursor (called just below) re-derives it from
+                 * on-disk durable state: every file in a freshly-reduced
+                 * manifest is non-durable, so it clamps the cursor to 0 and the
+                 * whole reduced set is re-requested cleanly. Fall back to the
+                 * journal copy only when this BeginTx carried no manifest (an
+                 * older client that doesn't resend it on resume). */
+                if (bextra && bextra_len > 0) {
+                    uint64_t fc = extract_json_uint64_field(bextra, "file_count");
+                    uint64_t ts = extract_json_uint64_field(bextra, "total_shards");
+                    uint64_t tb = extract_json_uint64_field(bextra, "total_bytes");
+                    mbuf = (char *)malloc((size_t)bextra_len + 1);
+                    if (mbuf) {
+                        memcpy(mbuf, bextra, (size_t)bextra_len);
+                        mbuf[bextra_len] = '\0';
+                        mlen = (size_t)bextra_len;
+                        from_begin = 1;
+                        if (fc > 0) entry->file_count = fc;
+                        entry->total_shards = ts;
+                        entry->total_bytes  = tb;
+                    }
+                }
+                if (!mbuf && runtime_read_manifest_alloc(entry, &mbuf, &mlen) != 0) {
+                    mbuf = NULL;
+                }
+                if (mbuf) {
                     manifest_index_entry_t *ridx = NULL;
                     uint64_t ridx_count = 0;
                     if (build_manifest_index(mbuf, mlen, entry->file_count,
@@ -14349,6 +14444,11 @@ static int handle_binary_frame(runtime_state_t *state, int client_fd,
                         entry->manifest_index       = ridx;
                         entry->manifest_index_count = ridx_count;
                         entry->direct_mode          = 1;
+                        /* Persist the adopted (reduced) manifest so a SECOND
+                         * restart rebuilds from it, not the original. */
+                        if (from_begin) {
+                            (void)runtime_write_manifest(entry, mbuf, mlen);
+                        }
                     } else {
                         free(mbuf);
                     }
