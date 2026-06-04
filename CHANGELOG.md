@@ -4,6 +4,23 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 2.25.5
+
+- **System → Hardware no longer drops the connection.** On some consoles,
+  opening the Hardware screen (or the dashboard's live readouts) could break the
+  connection to the helper and force you to send it again. Live temperatures and
+  CPU clock are now read in a way that's safe on every firmware, so the
+  connection stays put. (Power draw now shows as "unavailable" on firmware where
+  reading it isn't safe — a deliberate trade so it can never knock the helper
+  offline.)
+- **File search can't run the console out of memory.** Indexing a very large
+  drive is now capped, so a big game library won't exhaust the helper's memory;
+  the results just show as partial when the limit is hit.
+- Hardened the helper against malformed and out-of-range values so it stays
+  stable under unusual conditions.
+
+---
+
 ## 2.25.4
 
 - **Plays nice with ShadowMount+.** If you run ShadowMount+, ps5upload now hands
