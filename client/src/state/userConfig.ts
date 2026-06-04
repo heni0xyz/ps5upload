@@ -214,3 +214,32 @@ export async function userConfigPath(): Promise<string | null> {
     return null;
   }
 }
+
+/**
+ * Factory-reset: wipe ALL local ps5upload data + metadata and the renderer's
+ * own storage. The caller should reload the window afterwards so every store
+ * re-initialises from defaults.
+ *
+ * Order matters: cancel any queued settings-mirror write FIRST, so the
+ * debounced `user_config_save` can't recreate `settings.json` right after the
+ * backend deletes it. Then wipe the filesystem (backend) + localStorage
+ * (renderer). Returns the count of filesystem entries removed.
+ */
+export async function resetAllAppData(): Promise<number> {
+  if (pendingTimer) {
+    clearTimeout(pendingTimer);
+    pendingTimer = null;
+  }
+  let removed = 0;
+  if (isTauriEnv()) {
+    removed = await invoke<number>("app_data_reset");
+  }
+  // localStorage.clear() drops every ps5upload.* key the renderer owns in one
+  // shot (the app owns its origin's storage). Best-effort.
+  try {
+    window.localStorage.clear();
+  } catch {
+    // private-mode / sandbox: nothing more we can do
+  }
+  return removed;
+}

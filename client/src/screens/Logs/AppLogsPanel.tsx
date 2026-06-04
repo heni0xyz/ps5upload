@@ -294,14 +294,14 @@ function LogRow({ entry }: { entry: LogEntry }) {
           } ${hasDetail ? "" : "opacity-0"}`}
         />
         <span
-          className={`mt-px shrink-0 rounded px-1.5 py-0.5 font-mono text-[10px] font-semibold ${meta.bg} ${meta.tone}`}
+          className={`mt-px shrink-0 rounded px-1.5 py-0.5 font-mono text-xs font-semibold ${meta.bg} ${meta.tone}`}
         >
           {meta.label}
         </span>
         <span className="shrink-0 font-mono tabular-nums text-[var(--color-muted)]">
           {formatTime(entry.timestamp)}
         </span>
-        <span className="shrink-0 rounded border border-[var(--color-border)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--color-muted)]">
+        <span className="shrink-0 rounded border border-[var(--color-border)] px-1.5 py-0.5 font-mono text-xs text-[var(--color-muted)]">
           {entry.source}
         </span>
         <span className="min-w-0 flex-1 truncate font-mono">
@@ -309,7 +309,7 @@ function LogRow({ entry }: { entry: LogEntry }) {
         </span>
       </button>
       {expanded && entry.detail && (
-        <pre className="mt-2 ml-[54px] max-h-64 overflow-auto rounded border border-[var(--color-border)] bg-[var(--color-surface)] p-2 font-mono text-[11px] text-[var(--color-muted)]">
+        <pre className="mt-2 ml-[54px] max-h-64 overflow-auto rounded border border-[var(--color-border)] bg-[var(--color-surface)] p-2 font-mono text-xs text-[var(--color-muted)]">
           {entry.detail}
         </pre>
       )}

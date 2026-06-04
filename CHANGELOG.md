@@ -4,6 +4,33 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 2.25.0
+
+- **More reliable uploads by default.** Sending several streams at once could
+  crash the PS5 helper mid-upload on some consoles, so uploads now use a single
+  stream by default. You can still turn streams up in Settings — with a heads-up
+  that it's less stable — but the single-stream path is the rock-solid one.
+- **Uploads recover on their own.** If a transfer drops mid-upload — most often
+  because the helper crashed — the app now re-sends the helper and picks up
+  exactly where it left off, retrying a few times before giving up. Real
+  problems like the PS5 running out of space still stop right away. On by
+  default.
+- **Keeps your PS5 awake while uploading.** Long uploads used to die when the
+  console slipped into rest mode. The app now keeps the PS5 awake for the
+  duration of a transfer. On by default.
+- **Finds your PS5 across every network.** "Find PS5s on the network" now scans
+  all of your computer's connections at once (Ethernet + Wi-Fi), so it locates
+  your console even when it's not on your computer's main network.
+- **Reset everything.** A new button under Settings → Data & reset wipes all
+  local app data — settings, saved consoles, history, and caches — and starts
+  fresh. Nothing on your PS5 is touched.
+- **Cleaner, easier-to-read interface.** Bigger text and logo, a tidier layout
+  that wastes less space, and friendlier "nothing here yet" screens. Settings is
+  reorganized into clear sections, and the upload-speed limit is now a proper
+  control there.
+
+---
+
 ## 2.24.0
 
 - **Much faster downloads (backup console → PC).** Saving a game to your PC

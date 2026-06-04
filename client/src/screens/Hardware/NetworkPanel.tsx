@@ -51,7 +51,7 @@ export default function NetworkPanel({ mgmtAddr }: { mgmtAddr: string }) {
         </Button>
       </header>
       {error && (
-        <div className="rounded-md border border-[var(--color-bad)] p-2 text-[11px] text-[var(--color-bad)]">
+        <div className="rounded-md border border-[var(--color-bad)] p-2 text-xs text-[var(--color-bad)]">
           {error}
         </div>
       )}
@@ -87,7 +87,7 @@ export default function NetworkPanel({ mgmtAddr }: { mgmtAddr: string }) {
               >
                 <td className="px-1 py-0.5">{i.name}</td>
                 <td className="px-1 py-0.5">{i.ipv4}</td>
-                <td className="px-1 py-0.5 text-[10px]">{i.mac}</td>
+                <td className="px-1 py-0.5 text-xs">{i.mac}</td>
                 <td className="px-1 py-0.5 text-right tabular-nums">
                   {i.mtu}
                 </td>

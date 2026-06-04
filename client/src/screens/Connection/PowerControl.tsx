@@ -208,7 +208,7 @@ export default function PowerControl({ host }: { host: string }) {
         </Button>
       </div>
       {last && (
-        <div className="mt-2 flex items-start gap-1.5 text-[11px]">
+        <div className="mt-2 flex items-start gap-1.5 text-xs">
           <CheckCircle2 size={11} className="mt-0.5 shrink-0 text-[var(--color-good)]" />
           <span className="text-[var(--color-muted)]">
             {last.action ?? "ok"}
@@ -217,7 +217,7 @@ export default function PowerControl({ host }: { host: string }) {
         </div>
       )}
       {error && (
-        <div className="mt-2 flex items-start gap-1.5 text-[11px] text-[var(--color-bad)]">
+        <div className="mt-2 flex items-start gap-1.5 text-xs text-[var(--color-bad)]">
           <AlertTriangle size={11} className="mt-0.5 shrink-0" />
           <span>{error}</span>
         </div>

@@ -134,7 +134,7 @@ export default function FolderDiffPanel({
           <button
             type="button"
             onClick={() => setExpanded((v) => !v)}
-            className="text-[10px] text-[var(--color-muted)] hover:text-[var(--color-text)]"
+            className="text-xs text-[var(--color-muted)] hover:text-[var(--color-text)]"
           >
             {expanded ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
           </button>
@@ -181,14 +181,14 @@ export default function FolderDiffPanel({
       )}
       {expanded && data && data.sample_to_send.length > 0 && (
         <div className="mt-2 max-h-40 overflow-auto rounded border border-[var(--color-border)] bg-[var(--color-surface)] p-2">
-          <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-muted)]">
+          <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--color-muted)]">
             {tr(
               "folder_diff_sample",
               { count: data.sample_to_send.length, total: data.to_send_count },
               `Sample of files to send (${data.sample_to_send.length} of ${data.to_send_count})`,
             )}
           </div>
-          <ul className="space-y-0.5 font-mono text-[10px]">
+          <ul className="space-y-0.5 font-mono text-xs">
             {data.sample_to_send.map((p) => (
               <li key={p} className="break-all">
                 {p}

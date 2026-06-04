@@ -95,7 +95,7 @@ export function ShortcutsOverlay() {
         <div className="max-h-[60vh] overflow-y-auto p-4 text-sm">
           {SHORTCUTS.map((section) => (
             <div key={section.section} className="mb-4 last:mb-0">
-              <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-muted)]">
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-muted)]">
                 {section.section}
               </div>
               <ul className="space-y-1">
@@ -105,7 +105,7 @@ export function ShortcutsOverlay() {
                     className="flex items-center justify-between"
                   >
                     <span className="text-xs">{s.description}</span>
-                    <kbd className="rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 py-0.5 font-mono text-[10px]">
+                    <kbd className="rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 py-0.5 font-mono text-xs">
                       {s.keys}
                     </kbd>
                   </li>

@@ -256,13 +256,13 @@ function KpiCard({
 }) {
   return (
     <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3">
-      <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-muted)]">
+      <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-[var(--color-muted)]">
         {icon}
         {label}
       </div>
       <div className="mt-1 text-base font-semibold tabular-nums">{value}</div>
       {sub && (
-        <div className="truncate text-[10px] text-[var(--color-muted)]" title={sub}>
+        <div className="truncate text-xs text-[var(--color-muted)]" title={sub}>
           {sub}
         </div>
       )}
@@ -302,7 +302,7 @@ function DailyChart({
           );
         })}
       </div>
-      <div className="mt-2 flex justify-between text-[10px] text-[var(--color-muted)]">
+      <div className="mt-2 flex justify-between text-xs text-[var(--color-muted)]">
         <span>{days[0]?.date}</span>
         <span>{days[Math.floor(days.length / 2)]?.date}</span>
         <span>{days[days.length - 1]?.date}</span>

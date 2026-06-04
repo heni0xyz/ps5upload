@@ -139,7 +139,7 @@ export function PlaylistsPanel({
                   <span className="max-w-[12rem] truncate font-medium">
                     {p.name}
                   </span>
-                  <span className="text-[10px] text-[var(--color-muted)] tabular-nums">
+                  <span className="text-xs text-[var(--color-muted)] tabular-nums">
                     {formatAgo(p.lastRunAt ?? 0)}
                   </span>
                   <button
@@ -292,7 +292,7 @@ function RunStatusBanner() {
             anything broke. Without this, users only see "N failed"
             and have to dig through logs to figure out which step. */}
         {hasFailures && runStatus.failures.length > 0 && (
-          <ul className="mt-1.5 space-y-0.5 pl-6 font-mono text-[10px] text-[var(--color-warn)]">
+          <ul className="mt-1.5 space-y-0.5 pl-6 font-mono text-xs text-[var(--color-warn)]">
             {runStatus.failures.map((f) => (
               <li key={f.stepIndex} className="break-all">
                 {tr(
@@ -469,7 +469,7 @@ function PlaylistCard({
               />
             </button>
           )}
-          <span className="text-[11px] text-[var(--color-muted)]">
+          <span className="text-xs text-[var(--color-muted)]">
             ·{" "}
             {tr(
               "playlist_step_count",
@@ -479,7 +479,7 @@ function PlaylistCard({
           </span>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <label className="flex items-center gap-1.5 text-[11px] text-[var(--color-muted)]">
+          <label className="flex items-center gap-1.5 text-xs text-[var(--color-muted)]">
             <input
               type="checkbox"
               checked={playlist.continueOnFailure}
@@ -583,7 +583,7 @@ function PlaylistCard({
       )}
 
       {playlist.steps.length === 0 ? (
-        <div className="rounded border border-dashed border-[var(--color-border)] p-3 text-center text-[11px] text-[var(--color-muted)]">
+        <div className="rounded border border-dashed border-[var(--color-border)] p-3 text-center text-xs text-[var(--color-muted)]">
           {tr(
             "playlist_no_steps",
             undefined,
@@ -610,10 +610,10 @@ function PlaylistCard({
                   activeIndex={activeStepIndex}
                   isRunning={isThisRunning}
                 />
-                <span className="shrink-0 font-mono text-[11px] text-[var(--color-muted)] tabular-nums">
+                <span className="shrink-0 font-mono text-xs text-[var(--color-muted)] tabular-nums">
                   {String(i + 1).padStart(2, "0")}
                 </span>
-                <div className="min-w-0 flex-1 truncate font-mono text-[11px]">
+                <div className="min-w-0 flex-1 truncate font-mono text-xs">
                   {step.path}
                 </div>
               </div>
@@ -624,7 +624,7 @@ function PlaylistCard({
                   IP entered above. Useful for sequences targeting
                   multiple PS5s (push a loader to dev kit, push
                   harness to test kit). */}
-              <label className="flex shrink-0 items-center gap-1 text-[10px] text-[var(--color-muted)]">
+              <label className="flex shrink-0 items-center gap-1 text-xs text-[var(--color-muted)]">
                 {tr("playlist_step_ip", undefined, "ip")}
                 <input
                   type="text"
@@ -640,12 +640,12 @@ function PlaylistCard({
                     })
                   }
                   disabled={anyRunning}
-                  className="w-28 rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-1 py-0.5 text-[11px]"
+                  className="w-28 rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-1 py-0.5 text-xs"
                 />
               </label>
               {/* Per-step port override. Empty / 0 = use the
                   playlist-wide port (default 9021). */}
-              <label className="flex shrink-0 items-center gap-1 text-[10px] text-[var(--color-muted)]">
+              <label className="flex shrink-0 items-center gap-1 text-xs text-[var(--color-muted)]">
                 {tr("playlist_step_port", undefined, "port")}
                 <input
                   type="number"
@@ -666,10 +666,10 @@ function PlaylistCard({
                     });
                   }}
                   disabled={anyRunning}
-                  className="w-16 rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-1 py-0.5 text-right text-[11px] tabular-nums"
+                  className="w-16 rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-1 py-0.5 text-right text-xs tabular-nums"
                 />
               </label>
-              <label className="flex shrink-0 items-center gap-1 text-[10px] text-[var(--color-muted)]">
+              <label className="flex shrink-0 items-center gap-1 text-xs text-[var(--color-muted)]">
                 {tr("playlist_step_sleep", undefined, "sleep")}
                 <input
                   type="number"
@@ -682,7 +682,7 @@ function PlaylistCard({
                     })
                   }
                   disabled={anyRunning}
-                  className="w-16 rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-1 py-0.5 text-right text-[11px] tabular-nums"
+                  className="w-16 rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-1 py-0.5 text-right text-xs tabular-nums"
                 />
                 <span>ms</span>
               </label>

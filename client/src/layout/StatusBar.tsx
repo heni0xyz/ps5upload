@@ -46,7 +46,7 @@ export default function StatusBar() {
       <div className="flex items-center gap-2" title={tr("status_payload_tooltip", undefined, "PS5Upload helper on :9113")}>
         {dot(payloadStatus)} {tr("status_payload", undefined, "helper")}
         {payloadVersion && (
-          <span className="rounded bg-[var(--color-surface-3)] px-1 font-mono text-[10px]">
+          <span className="rounded bg-[var(--color-surface-3)] px-1 font-mono text-xs">
             v{payloadVersion}
           </span>
         )}
@@ -57,7 +57,7 @@ export default function StatusBar() {
           title={ps5Kernel}
         >
           <span>PS5</span>
-          <span className="rounded bg-[var(--color-surface-3)] px-1 font-mono text-[10px]">
+          <span className="rounded bg-[var(--color-surface-3)] px-1 font-mono text-xs">
             {ps5Firmware
               ? tr("status_fw", { ver: ps5Firmware }, `FW ${ps5Firmware}`)
               : tr("status_kernel_ok", undefined, "kernel OK")}

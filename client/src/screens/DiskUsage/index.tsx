@@ -179,6 +179,7 @@ export default function DiskUsageScreen() {
       />
       {payloadStatus !== "up" ? (
         <EmptyState
+          fill
           icon={PieChart}
           message={tr(
             "disk_usage_no_payload",
@@ -216,7 +217,7 @@ export default function DiskUsageScreen() {
                 key={p}
                 type="button"
                 onClick={() => setPath(p)}
-                className={`rounded px-2 py-0.5 text-[10px] ${
+                className={`rounded px-2 py-0.5 text-xs ${
                   path === p
                     ? "bg-[var(--color-accent)] text-[var(--color-accent-contrast)]"
                     : "border border-[var(--color-border)] hover:bg-[var(--color-surface-3)]"
@@ -228,7 +229,7 @@ export default function DiskUsageScreen() {
           </div>
 
           {error && (
-            <div className="flex items-start gap-1 rounded-md border border-[var(--color-bad)] p-2 text-[11px] text-[var(--color-bad)]">
+            <div className="flex items-start gap-1 rounded-md border border-[var(--color-bad)] p-2 text-xs text-[var(--color-bad)]">
               <AlertTriangle size={11} className="mt-0.5 shrink-0" />
               {error}
             </div>
@@ -371,7 +372,7 @@ function Treemap({
                   onClick={() => onDrill(n.name, n.isDir)}
                   disabled={!n.isDir}
                   title={`${n.name} — ${formatBytes(n.totalSize)}`}
-                  className={`flex min-w-0 flex-col justify-center overflow-hidden rounded px-1.5 py-0.5 text-[10px] text-white transition ${
+                  className={`flex min-w-0 flex-col justify-center overflow-hidden rounded px-1.5 py-0.5 text-xs text-white transition ${
                     n.isDir ? "cursor-pointer hover:opacity-80" : "cursor-default"
                   }`}
                   /* flex-grow with size as weight: row width is shared
@@ -397,10 +398,10 @@ function Treemap({
                     backgroundColor: `oklch(0.45 ${0.13 * colorIntensity} 250)`,
                   }}
                 >
-                  <div className="truncate text-[11px] font-medium leading-tight">
+                  <div className="truncate text-xs font-medium leading-tight">
                     {n.name}
                   </div>
-                  <div className="truncate font-mono text-[10px] leading-tight opacity-85">
+                  <div className="truncate font-mono text-xs leading-tight opacity-85">
                     {formatBytes(n.totalSize)}
                   </div>
                 </button>

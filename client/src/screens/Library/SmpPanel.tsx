@@ -105,7 +105,7 @@ export default function SmpPanel({ mgmtAddr }: { mgmtAddr: string | null }) {
             <div className="text-sm font-semibold">
               {tr("smp_panel_title", undefined, "ShadowMount+")}
             </div>
-            <div className="flex items-center gap-3 text-[11px] text-[var(--color-muted)]">
+            <div className="flex items-center gap-3 text-xs text-[var(--color-muted)]">
               <SmpBadge ok={status?.installed ?? false}>
                 {status?.installed
                   ? tr("smp_installed", undefined, "installed")
@@ -167,7 +167,7 @@ export default function SmpPanel({ mgmtAddr }: { mgmtAddr: string | null }) {
                     <span className="font-medium">
                       {m.derived_name || m.mount_point}
                     </span>
-                    <code className="text-[10px] text-[var(--color-muted)]">
+                    <code className="text-xs text-[var(--color-muted)]">
                       {m.mount_point}
                     </code>
                   </li>
@@ -251,7 +251,7 @@ function SmpSection({
 }) {
   return (
     <div>
-      <div className="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-muted)]">
+      <div className="mb-1 flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-[var(--color-muted)]">
         <Activity size={10} />
         {title}
       </div>
@@ -271,11 +271,11 @@ function SmpFileBlock({
 }) {
   return (
     <details className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)]">
-      <summary className="cursor-pointer px-2 py-1.5 text-[11px]">
+      <summary className="cursor-pointer px-2 py-1.5 text-xs">
         <span className="font-medium">{title}</span>{" "}
-        <code className="ml-2 text-[10px] text-[var(--color-muted)]">{path}</code>
+        <code className="ml-2 text-xs text-[var(--color-muted)]">{path}</code>
       </summary>
-      <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words border-t border-[var(--color-border)] p-2 font-mono text-[10px] text-[var(--color-text)]">
+      <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words border-t border-[var(--color-border)] p-2 font-mono text-xs text-[var(--color-text)]">
         {body}
       </pre>
     </details>
@@ -410,12 +410,12 @@ function SmpAutotuneTable({
   }
   return (
     <details className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)]" open>
-      <summary className="cursor-pointer px-2 py-1.5 text-[11px]">
+      <summary className="cursor-pointer px-2 py-1.5 text-xs">
         <span className="font-medium">autotune.ini</span>{" "}
-        <code className="ml-2 text-[10px] text-[var(--color-muted)]">
+        <code className="ml-2 text-xs text-[var(--color-muted)]">
           /data/shadowmount/autotune.ini
         </code>{" "}
-        <span className="ml-2 text-[10px] text-[var(--color-muted)]">
+        <span className="ml-2 text-xs text-[var(--color-muted)]">
           {tr(
             "smp_autotune_count",
             { n: rows.length },
@@ -423,7 +423,7 @@ function SmpAutotuneTable({
           )}
         </span>
       </summary>
-      <div className="space-y-2 border-t border-[var(--color-border)] p-2 text-[11px]">
+      <div className="space-y-2 border-t border-[var(--color-border)] p-2 text-xs">
         {kstuffRows.length > 0 && (
           <AutotuneSubsection
             title={tr(
@@ -465,7 +465,7 @@ function SmpAutotuneTable({
           <button
             type="button"
             onClick={() => setShowRaw((v) => !v)}
-            className="text-[10px] text-[var(--color-muted)] underline-offset-2 hover:underline"
+            className="text-xs text-[var(--color-muted)] underline-offset-2 hover:underline"
           >
             {showRaw
               ? tr("smp_autotune_hide_raw", undefined, "hide raw")
@@ -477,7 +477,7 @@ function SmpAutotuneTable({
                 type="button"
                 onClick={save}
                 disabled={saving}
-                className="rounded-md bg-[var(--color-accent)] px-2 py-0.5 text-[10px] text-[var(--color-accent-contrast)] disabled:opacity-50"
+                className="rounded-md bg-[var(--color-accent)] px-2 py-0.5 text-xs text-[var(--color-accent-contrast)] disabled:opacity-50"
               >
                 {saving
                   ? tr("smp_autotune_saving", undefined, "Saving…")
@@ -490,20 +490,20 @@ function SmpAutotuneTable({
               <button
                 type="button"
                 onClick={() => setEdits({})}
-                className="text-[10px] text-[var(--color-muted)] hover:underline"
+                className="text-xs text-[var(--color-muted)] hover:underline"
               >
                 {tr("smp_autotune_revert", undefined, "Discard")}
               </button>
             </>
           )}
           {saveError && (
-            <span className="text-[10px] text-[var(--color-bad)]">
+            <span className="text-xs text-[var(--color-bad)]">
               {saveError}
             </span>
           )}
         </div>
         {showRaw && (
-          <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words border-t border-[var(--color-border)] p-2 font-mono text-[10px] text-[var(--color-text)]">
+          <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words border-t border-[var(--color-border)] p-2 font-mono text-xs text-[var(--color-text)]">
             {body}
           </pre>
         )}
@@ -532,11 +532,11 @@ function AutotuneSubsection({
   const tr = useTr();
   return (
     <div>
-      <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-muted)]">
+      <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--color-muted)]">
         {title}
       </div>
       <div className="overflow-x-auto">
-      <table className="w-full min-w-[360px] text-[10px]">
+      <table className="w-full min-w-[360px] text-xs">
         <thead>
           <tr className="text-left text-[var(--color-muted)]">
             <th className="px-1 py-0.5">{targetLabel}</th>

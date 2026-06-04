@@ -398,6 +398,7 @@ export default function LibraryScreen() {
 
       {entries === null && !loading && !error && (
         <EmptyState
+          fill
           message={tr(
             "library_waiting",
             undefined,
@@ -585,7 +586,7 @@ function SectionHeader({
     <header className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[var(--color-muted)]">
       {icon}
       <span>{title}</span>
-      <span className="text-[10px] font-normal normal-case">· {count}</span>
+      <span className="text-xs font-normal normal-case">· {count}</span>
     </header>
   );
 }
@@ -1858,7 +1859,7 @@ function LibraryRow({
           )}
           {isMounted && (
             <div
-              className="mt-1 inline-block rounded-full border border-[var(--color-accent)] bg-[var(--color-accent-soft)] px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--color-accent)]"
+              className="mt-1 inline-block rounded-full border border-[var(--color-accent)] bg-[var(--color-accent-soft)] px-1.5 py-0.5 text-xs font-medium uppercase tracking-wide text-[var(--color-accent)]"
               title={`Mounted at ${currentMount}`}
             >
               {tr("library_badge_mounted", undefined, "mounted")}
@@ -1866,7 +1867,7 @@ function LibraryRow({
           )}
           {entry.kind === "game" && entry.titleId && isTitleRunning && (
             <div
-              className="mt-1 inline-block rounded-full border border-[var(--color-good)] bg-[var(--color-good-soft)] px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--color-good)]"
+              className="mt-1 inline-block rounded-full border border-[var(--color-good)] bg-[var(--color-good-soft)] px-1.5 py-0.5 text-xs font-medium uppercase tracking-wide text-[var(--color-good)]"
               title={tr(
                 "library_badge_running_tooltip",
                 undefined,
@@ -1878,7 +1879,7 @@ function LibraryRow({
           )}
           {playSeconds !== undefined && playSeconds > 60 && (
             <div
-              className="mt-1 text-[10px] tabular-nums text-[var(--color-muted)]"
+              className="mt-1 text-xs tabular-nums text-[var(--color-muted)]"
               title={tr(
                 "library_play_time_tooltip",
                 undefined,
@@ -1890,7 +1891,7 @@ function LibraryRow({
           )}
           {fromImagePath && fromImageBasename && (
             <div
-              className="mt-1 inline-flex items-center gap-1 rounded-full border border-[var(--color-border-strong)] bg-[var(--color-surface-2)] px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--color-muted)]"
+              className="mt-1 inline-flex items-center gap-1 rounded-full border border-[var(--color-border-strong)] bg-[var(--color-surface-2)] px-1.5 py-0.5 text-xs font-medium uppercase tracking-wide text-[var(--color-muted)]"
               title={tr(
                 "library_badge_from_image_tooltip",
                 { image: fromImagePath },
@@ -2294,7 +2295,7 @@ function LibraryRow({
               onClick={() => {
                 downloadStopRef.current = true;
               }}
-              className="ml-auto rounded-md border border-[var(--color-border)] px-2 py-0.5 text-[10px] hover:bg-[var(--color-surface-3)]"
+              className="ml-auto rounded-md border border-[var(--color-border)] px-2 py-0.5 text-xs hover:bg-[var(--color-surface-3)]"
               title={tr(
                 "library_download_stop_tooltip",
                 undefined,
@@ -2310,7 +2311,7 @@ function LibraryRow({
               onClick={() => {
                 moveStopRef.current = true;
               }}
-              className="ml-auto rounded-md border border-[var(--color-border)] px-2 py-0.5 text-[10px] hover:bg-[var(--color-surface-3)]"
+              className="ml-auto rounded-md border border-[var(--color-border)] px-2 py-0.5 text-xs hover:bg-[var(--color-surface-3)]"
               title={tr(
                 "library_move_stop_tooltip",
                 undefined,
@@ -2332,7 +2333,7 @@ function LibraryRow({
           hits transient errors will see no banner. */}
       {busy === "move-copying" &&
         moveProgressUnsupportedThreshold === "2.2.16" && (
-          <div className="rounded-md border border-[var(--color-warn)] bg-[var(--color-warn-soft)] p-2 text-[11px] text-[var(--color-warn)]">
+          <div className="rounded-md border border-[var(--color-warn)] bg-[var(--color-warn-soft)] p-2 text-xs text-[var(--color-warn)]">
             {tr(
               "library_move_progress_unsupported_2_2_16",
               undefined,
@@ -2342,7 +2343,7 @@ function LibraryRow({
         )}
       {busy === "move-copying" &&
         moveProgressUnsupportedThreshold === "2.2.7" && (
-          <div className="rounded-md border border-[var(--color-warn)] bg-[var(--color-warn-soft)] p-2 text-[11px] text-[var(--color-warn)]">
+          <div className="rounded-md border border-[var(--color-warn)] bg-[var(--color-warn-soft)] p-2 text-xs text-[var(--color-warn)]">
             {tr(
               "library_move_progress_unsupported_2_2_7",
               undefined,
@@ -2705,7 +2706,7 @@ function MoveModal({
           <dd className="font-mono text-[var(--color-text)]">{entry.path}</dd>
         </dl>
 
-        <label className="mb-2 block text-[10px] font-semibold uppercase tracking-wide text-[var(--color-muted)]">
+        <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-[var(--color-muted)]">
           {tr("library_move_modal_destination", undefined, "To")}
         </label>
         <div className="mb-3 flex items-center gap-2 text-sm">
@@ -2742,7 +2743,7 @@ function MoveModal({
             below to keep this a single-segment rename — if a user
             really wants to inject a deeper subpath, they can put it
             in the subpath field above. */}
-        <label className="mb-2 block text-[10px] font-semibold uppercase tracking-wide text-[var(--color-muted)]">
+        <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-[var(--color-muted)]">
           {tr("library_move_modal_name", undefined, "Name (optional rename)")}
         </label>
         <div className="mb-3">
@@ -2756,7 +2757,7 @@ function MoveModal({
                 : "border-[var(--color-border)]"
             }`}
           />
-          <p className="mt-1 text-[10px] text-[var(--color-muted)]">
+          <p className="mt-1 text-xs text-[var(--color-muted)]">
             {tr(
               "library_move_modal_name_hint",
               { default: sourceBasename(entry.path) },
@@ -2766,7 +2767,7 @@ function MoveModal({
         </div>
 
         <div className="mb-4 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-2 text-xs">
-          <div className="text-[10px] uppercase tracking-wide text-[var(--color-muted)]">
+          <div className="text-xs uppercase tracking-wide text-[var(--color-muted)]">
             {tr(
               "library_move_modal_resolved",
               undefined,
@@ -2822,7 +2823,7 @@ function MoveModal({
           </Button>
         </div>
 
-        <p className="mt-3 text-[11px] text-[var(--color-muted)]">
+        <p className="mt-3 text-xs text-[var(--color-muted)]">
           {tr(
             "library_move_modal_explainer",
             undefined,
@@ -3057,7 +3058,7 @@ function MountModal({
         </dl>
 
         {!supportsMountPoint && (
-          <div className="mb-3 rounded-md border border-[var(--color-warn)] bg-[var(--color-surface)] p-2 text-[11px] text-[var(--color-warn)]">
+          <div className="mb-3 rounded-md border border-[var(--color-warn)] bg-[var(--color-surface)] p-2 text-xs text-[var(--color-warn)]">
             {tr(
               "library_mount_modal_old_payload",
               undefined,
@@ -3068,7 +3069,7 @@ function MountModal({
 
         {supportsMountPoint && (
           <>
-            <label className="mb-2 block text-[10px] font-semibold uppercase tracking-wide text-[var(--color-muted)]">
+            <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-[var(--color-muted)]">
               {tr("library_mount_modal_destination", undefined, "Mount under")}
             </label>
             <div className="mb-3 flex items-center gap-2 text-sm">
@@ -3128,7 +3129,7 @@ function MountModal({
           </>
         )}
 
-        <label className="mb-2 block text-[10px] font-semibold uppercase tracking-wide text-[var(--color-muted)]">
+        <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-[var(--color-muted)]">
           {tr("library_mount_modal_name", undefined, "Name")}
         </label>
         <div className="mb-3">
@@ -3142,7 +3143,7 @@ function MountModal({
                 : "border-[var(--color-border)]"
             }`}
           />
-          <p className="mt-1 text-[10px] text-[var(--color-muted)]">
+          <p className="mt-1 text-xs text-[var(--color-muted)]">
             {tr(
               "library_mount_modal_name_hint",
               { default: derivedName },
@@ -3152,7 +3153,7 @@ function MountModal({
         </div>
 
         <div className="mb-4 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-2 text-xs">
-          <div className="text-[10px] uppercase tracking-wide text-[var(--color-muted)]">
+          <div className="text-xs uppercase tracking-wide text-[var(--color-muted)]">
             {tr(
               "library_mount_modal_resolved",
               undefined,
@@ -3172,7 +3173,7 @@ function MountModal({
          * the engine. Doesn't disable the button; some firmware /
          * setup combinations DO accept it. */}
         {supportsMountPoint && /^\/mnt\/(usb|ext)\d/.test(volume) && (
-          <div className="mb-4 rounded-md border border-[var(--color-warn)] bg-[var(--color-surface)] p-2 text-[11px] text-[var(--color-warn)]">
+          <div className="mb-4 rounded-md border border-[var(--color-warn)] bg-[var(--color-surface)] p-2 text-xs text-[var(--color-warn)]">
             <div className="mb-1 font-semibold">
               {tr(
                 "library_mount_modal_usb_warn_title",
@@ -3193,7 +3194,7 @@ function MountModal({
                 setVolume("/mnt/ps5upload");
                 setSubpath("");
               }}
-              className="mt-1.5 rounded border border-[var(--color-warn)] bg-[var(--color-surface)] px-2 py-0.5 text-[10px] hover:bg-[var(--color-surface-3)]"
+              className="mt-1.5 rounded border border-[var(--color-warn)] bg-[var(--color-surface)] px-2 py-0.5 text-xs hover:bg-[var(--color-surface-3)]"
             >
               {tr(
                 "library_mount_modal_usb_warn_switch",
@@ -3242,7 +3243,7 @@ function MountModal({
         )}
 
         {!isLegacyRoot && !nameInvalid && (
-          <div className="mb-3 rounded-md border border-[var(--color-warn)] bg-[var(--color-surface)] p-2 text-[11px] text-[var(--color-warn)]">
+          <div className="mb-3 rounded-md border border-[var(--color-warn)] bg-[var(--color-surface)] p-2 text-xs text-[var(--color-warn)]">
             {tr(
               "library_mount_modal_outside_default",
               undefined,
@@ -3252,7 +3253,7 @@ function MountModal({
         )}
 
         {crossVolume && !nameInvalid && imageVolume && (
-          <div className="mb-3 rounded-md border border-[var(--color-warn)] bg-[var(--color-surface)] p-2 text-[11px] text-[var(--color-warn)]">
+          <div className="mb-3 rounded-md border border-[var(--color-warn)] bg-[var(--color-surface)] p-2 text-xs text-[var(--color-warn)]">
             {tr(
               "library_mount_modal_cross_volume",
               { imageVolume, volume },

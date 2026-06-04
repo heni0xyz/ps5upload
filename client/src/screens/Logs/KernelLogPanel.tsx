@@ -234,6 +234,7 @@ export default function KernelLogPanel() {
     return (
       <div className="flex min-h-0 flex-1 flex-col">
         <EmptyState
+          fill
           icon={Terminal}
           message={tr(
             "klog_no_payload",
@@ -251,7 +252,7 @@ export default function KernelLogPanel() {
           "showing N of M" count so the eye-down-from-tabs flow shows
           state immediately. */}
       <div className="mb-3 flex items-center justify-between gap-2">
-        <span className="text-[11px] tabular-nums text-[var(--color-muted)]">
+        <span className="text-xs tabular-nums text-[var(--color-muted)]">
           {tr("kernellog_showing", undefined, "showing")} {visible.length}{" "}
           {tr("kernellog_of", undefined, "of")} {entries.length}
         </span>
@@ -264,7 +265,7 @@ export default function KernelLogPanel() {
           >
             {tr("klog_filters", undefined, "Filters")}
             {hiddenCats.size > 0 && (
-              <span className="ml-1 rounded bg-[var(--color-surface)] px-1 text-[10px] text-[var(--color-muted)]">
+              <span className="ml-1 rounded bg-[var(--color-surface)] px-1 text-xs text-[var(--color-muted)]">
                 −{hiddenCats.size}
               </span>
             )}
@@ -302,7 +303,7 @@ export default function KernelLogPanel() {
       </div>
 
       {showFilters && (
-        <div className="mb-2 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-2 text-[11px]">
+        <div className="mb-2 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-2 text-xs">
           <div className="mb-1.5 flex items-center justify-between">
             <span className="font-semibold">
               {tr("kernellog_categories", undefined, "Categories")}
@@ -311,14 +312,14 @@ export default function KernelLogPanel() {
               <button
                 type="button"
                 onClick={hideSonyDefaults}
-                className="text-[10px] underline-offset-2 hover:underline"
+                className="text-xs underline-offset-2 hover:underline"
               >
                 {tr("kernellog_hide_sony_noise", undefined, "Hide Sony noise")}
               </button>
               <button
                 type="button"
                 onClick={showAll}
-                className="text-[10px] underline-offset-2 hover:underline"
+                className="text-xs underline-offset-2 hover:underline"
               >
                 {tr("kernellog_show_all_default", undefined, "Show all (default)")}
               </button>
@@ -349,7 +350,7 @@ export default function KernelLogPanel() {
               );
             })}
           </div>
-          <div className="mt-2 text-[10px] text-[var(--color-muted)]">
+          <div className="mt-2 text-xs text-[var(--color-muted)]">
             {tr(
               "kernellog_default_hidden_explainer",
               undefined,
@@ -359,14 +360,14 @@ export default function KernelLogPanel() {
         </div>
       )}
       {error && (
-        <div className="mb-2 rounded-md border border-[var(--color-bad)] p-2 text-[11px] text-[var(--color-bad)]">
+        <div className="mb-2 rounded-md border border-[var(--color-bad)] p-2 text-xs text-[var(--color-bad)]">
           {error}
         </div>
       )}
       <div
         ref={scrollRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-auto rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-2 font-mono text-[10px] leading-tight"
+        className="flex-1 overflow-auto rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-2 font-mono text-xs leading-tight"
       >
         {visible.length === 0 ? (
           <div className="text-[var(--color-muted)]">
@@ -397,7 +398,7 @@ export default function KernelLogPanel() {
           <button
             type="button"
             onClick={jumpToBottom}
-            className="rounded-md bg-[var(--color-accent)] px-2 py-1 text-[10px] text-[var(--color-accent-contrast)]"
+            className="rounded-md bg-[var(--color-accent)] px-2 py-1 text-xs text-[var(--color-accent-contrast)]"
           >
             {tr("klog_jump_bottom", undefined, "Jump to latest")}
           </button>

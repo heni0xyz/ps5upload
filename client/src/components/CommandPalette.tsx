@@ -296,7 +296,7 @@ export function CommandPalette() {
             )}
             className="flex-1 bg-transparent text-sm outline-none"
           />
-          <span className="rounded bg-[var(--color-surface-3)] px-1.5 py-0.5 text-[10px] text-[var(--color-muted)]">
+          <span className="rounded bg-[var(--color-surface-3)] px-1.5 py-0.5 text-xs text-[var(--color-muted)]">
             {tr("cmdpalette_esc", "Esc")}
           </span>
         </div>
@@ -312,7 +312,7 @@ export function CommandPalette() {
           ) : (
             grouped.map(({ group, items }) => (
               <div key={group}>
-                <div className="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-muted)]">
+                <div className="px-3 pb-1 pt-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-muted)]">
                   {group}
                 </div>
                 {items.map((c) => {
@@ -332,7 +332,7 @@ export function CommandPalette() {
                     >
                       <span className="min-w-0 flex-1 truncate">{c.label}</span>
                       {c.hint && (
-                        <span className="truncate text-[10px] opacity-60">
+                        <span className="truncate text-xs opacity-60">
                           {c.hint}
                         </span>
                       )}
@@ -344,7 +344,7 @@ export function CommandPalette() {
             ))
           )}
         </div>
-        <div className="border-t border-[var(--color-border)] px-3 py-1.5 text-[10px] text-[var(--color-muted)]">
+        <div className="border-t border-[var(--color-border)] px-3 py-1.5 text-xs text-[var(--color-muted)]">
           {tr(
             "cmdpalette_footer_hint",
             "↑↓ navigate · Enter run · Esc close · Cmd/Ctrl+K toggle",

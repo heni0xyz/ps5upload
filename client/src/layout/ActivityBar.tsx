@@ -66,7 +66,7 @@ export default function ActivityBar() {
         <button
           type="button"
           onClick={() => navigate("/activity")}
-          className="rounded-md border border-[var(--color-border)] px-2 py-0.5 text-[10px] text-[var(--color-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text)]"
+          className="rounded-md border border-[var(--color-border)] px-2 py-0.5 text-xs text-[var(--color-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text)]"
         >
           {tr("activity_bar_open", undefined, "View Activity")}
         </button>
@@ -123,7 +123,7 @@ function RunningRow({ entry }: { entry: ActivityEntry }) {
         {speed > 0 && ` · ${formatBytes(speed)}/s`}
       </span>
       {entry.detail && (
-        <span className="text-[10px] text-[var(--color-muted)]">
+        <span className="text-xs text-[var(--color-muted)]">
           {entry.detail}
         </span>
       )}

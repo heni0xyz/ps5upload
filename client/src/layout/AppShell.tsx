@@ -26,7 +26,10 @@ import { CommandPalette } from "../components/CommandPalette";
 import { ShortcutsOverlay } from "../components/ShortcutsOverlay";
 import { LocalPathPicker } from "../components/LocalPathPicker";
 import { useWindowStatePersistence } from "../lib/windowState";
-import { mgmtAddr } from "../lib/addr";
+import { mgmtAddr, hostOf } from "../lib/addr";
+import { useUploadQueueStore } from "../state/uploadQueue";
+import { useTransferStore } from "../state/transfer";
+import { useUploadSettingsStore } from "../state/uploadSettings";
 import { installPlayTimeAccumulator } from "../state/playTime";
 import { useTr } from "../state/lang";
 import { isAndroid } from "../lib/platform";
@@ -170,6 +173,45 @@ function useUpdateCheckOnMount() {
     }, 1500);
     return () => window.clearTimeout(id);
   }, [ensureChecked]);
+}
+
+/** Keep the PS5 awake while an upload is in flight (default on). The PS5's
+ *  auto-standby timer (shortest setting ~20 min) would otherwise drop a long
+ *  upload into rest mode mid-transfer — the `spool_apply_failed` failure.
+ *  While the upload queue OR the single-shot transfer is active, send a
+ *  power-tick (sceSystemServicePowerTick, resets the idle timer) to every
+ *  console with a running job, every few minutes. Each tick is one tiny mgmt
+ *  frame; failures (payload momentarily down during auto-resume) are ignored.
+ */
+const KEEP_PS5_AWAKE_TICK_MS = 2 * 60 * 1000;
+function useKeepPs5AwakeDuringUploads() {
+  const enabled = useUploadSettingsStore((s) => s.keepPs5Awake);
+  const queueRunning = useUploadQueueStore((s) => s.running);
+  const transferActive = useTransferStore(
+    (s) => s.phase.kind === "starting" || s.phase.kind === "running",
+  );
+  const active = enabled && (queueRunning || transferActive);
+  useEffect(() => {
+    if (!active) return;
+    const tickAll = () => {
+      // Distinct hosts to keep awake: any console with a running queue item,
+      // plus the currently-connected host (covers the single-shot upload).
+      const hosts = new Set<string>();
+      const conn = useConnectionStore.getState().host.trim();
+      if (conn) hosts.add(conn);
+      for (const it of useUploadQueueStore.getState().items) {
+        if (it.status === "running") hosts.add(hostOf(it.addr));
+      }
+      for (const h of hosts) {
+        void powerTick(mgmtAddr(h)).catch(() => {
+          // best-effort — payload may be momentarily down during recovery
+        });
+      }
+    };
+    tickAll(); // reset the timer immediately when an upload starts
+    const id = window.setInterval(tickAll, KEEP_PS5_AWAKE_TICK_MS);
+    return () => window.clearInterval(id);
+  }, [active]);
 }
 
 /** App-wide drag-drop listener that auto-routes .pkg files to the
@@ -382,6 +424,7 @@ function AndroidStorageAccessBanner() {
 export default function AppShell() {
   useStatusPolling();
   useUpdateCheckOnMount();
+  useKeepPs5AwakeDuringUploads();
   useRoutePersistence();
   useWindowStatePersistence();
   usePkgAutoRoute();
@@ -452,17 +495,16 @@ export default function AppShell() {
           type="button"
           aria-label={tr("nav_open_aria", "Open navigation")}
           onClick={() => setMobileNavOpen(true)}
-          className="rounded-md p-1.5 text-[var(--color-text)] hover:bg-[var(--color-surface-3)]"
+          className="rounded-md p-2 text-[var(--color-text)] hover:bg-[var(--color-surface-3)]"
         >
-          <Menu size={20} />
+          <Menu size={22} />
         </button>
         <img
           src="/logo-square.png"
-          alt=""
-          aria-hidden
-          className="h-6 w-6 rounded"
+          alt="PS5Upload"
+          className="h-8 w-8 rounded-md"
         />
-        <span className="text-sm font-semibold">PS5Upload</span>
+        <span className="text-base font-bold tracking-tight">PS5Upload</span>
       </div>
       <AndroidStorageAccessBanner />
 

@@ -27,10 +27,18 @@ function sleep(ms: number): Promise<void> {
  *
  * Never throws — on any failure it returns "no-push" / "stale-ok" and lets
  * the caller proceed with whatever payload is loaded.
+ *
+ * `shouldCancel` (optional) is polled between the boot-wait sleeps so a caller
+ * that has been torn down (e.g. the upload queue's Stop during a recovery)
+ * can bail out of the ~30 s poll promptly instead of running it to completion
+ * in the background. Returns "no-push" when cancelled mid-poll. The ELF may
+ * already have been sent by then — that's fine, it's idempotent.
  */
 export async function ensurePayloadCurrent(
   host: string,
+  shouldCancel?: () => boolean,
 ): Promise<EnsurePayloadResult> {
+  if (shouldCancel?.()) return "no-push";
   let appVersion: string;
   try {
     appVersion = await getVersion();
@@ -69,6 +77,7 @@ export async function ensurePayloadCurrent(
   // execute; the elevateUcred step takes a few more.
   await sleep(1500);
   for (let i = 0; i < 28; i++) {
+    if (shouldCancel?.()) return "no-push";
     try {
       const probe = await payloadCheck(host);
       if (

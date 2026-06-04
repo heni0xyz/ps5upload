@@ -59,7 +59,7 @@ function OriginBadge({ title }: { title: InstalledTitle }) {
   const tr = useTr();
   if (title.system) {
     return (
-      <span className="inline-flex items-center gap-1 rounded bg-[var(--color-danger-soft,#7f1d1d33)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--color-danger,#ef4444)]">
+      <span className="inline-flex items-center gap-1 rounded bg-[var(--color-danger-soft,#7f1d1d33)] px-1.5 py-0.5 text-xs font-medium text-[var(--color-danger,#ef4444)]">
         <AlertTriangle size={11} />
         {tr("installed_badge_system", undefined, "System")}
       </span>
@@ -67,19 +67,19 @@ function OriginBadge({ title }: { title: InstalledTitle }) {
   }
   if (title.origin === "registered") {
     return title.imageBacked ? (
-      <span className="inline-flex items-center gap-1 rounded bg-[var(--color-surface-3)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--color-muted)]">
+      <span className="inline-flex items-center gap-1 rounded bg-[var(--color-surface-3)] px-1.5 py-0.5 text-xs font-medium text-[var(--color-muted)]">
         <Disc3 size={11} />
         {tr("installed_badge_image", undefined, "Disc image")}
       </span>
     ) : (
-      <span className="inline-flex items-center gap-1 rounded bg-[var(--color-surface-3)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--color-muted)]">
+      <span className="inline-flex items-center gap-1 rounded bg-[var(--color-surface-3)] px-1.5 py-0.5 text-xs font-medium text-[var(--color-muted)]">
         <FolderOpen size={11} />
         {tr("installed_badge_folder", undefined, "Folder")}
       </span>
     );
   }
   return (
-    <span className="inline-flex items-center gap-1 rounded bg-[var(--color-surface-3)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--color-muted)]">
+    <span className="inline-flex items-center gap-1 rounded bg-[var(--color-surface-3)] px-1.5 py-0.5 text-xs font-medium text-[var(--color-muted)]">
       <Package size={11} />
       {tr("installed_badge_pkg", undefined, "Package")}
     </span>
@@ -105,7 +105,7 @@ function AppCard({
         <div className="truncate text-sm font-medium" title={title.titleName}>
           {title.titleName}
         </div>
-        <div className="truncate font-mono text-[11px] text-[var(--color-muted)]">
+        <div className="truncate font-mono text-xs text-[var(--color-muted)]">
           {title.titleId}
         </div>
       </div>
@@ -126,7 +126,7 @@ function AppCard({
       </div>
       {title.origin === "registered" && title.source ? (
         <div
-          className="truncate text-[10px] text-[var(--color-muted)]"
+          className="truncate text-xs text-[var(--color-muted)]"
           title={title.source}
         >
           {title.source}

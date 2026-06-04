@@ -100,7 +100,7 @@ function PkgRow({
               {entry.title || entry.contentId || entry.name}
             </span>
             {installed && !busy && (
-              <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-[var(--color-good)] bg-[var(--color-good-soft)] px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--color-good)]">
+              <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-[var(--color-good)] bg-[var(--color-good-soft)] px-1.5 py-0.5 text-xs font-medium uppercase tracking-wide text-[var(--color-good)]">
                 {tr("pkglib.badge.installed", "installed")}
               </span>
             )}
@@ -108,14 +108,14 @@ function PkgRow({
                 ContentID, so without this they look identical. */}
             {pkgCategoryLabel(entry.category) &&
               pkgCategoryLabel(entry.category) !== "Base" && (
-                <span className="inline-flex shrink-0 items-center rounded-full border border-[var(--color-accent)] bg-[var(--color-accent-soft,transparent)] px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--color-accent)]">
+                <span className="inline-flex shrink-0 items-center rounded-full border border-[var(--color-accent)] bg-[var(--color-accent-soft,transparent)] px-1.5 py-0.5 text-xs font-medium uppercase tracking-wide text-[var(--color-accent)]">
                   {pkgCategoryLabel(entry.category) === "Update"
                     ? tr("pkglib.badge.update", "update")
                     : tr("pkglib.badge.dlc", "DLC")}
                 </span>
               )}
           </div>
-          <div className="mt-0.5 truncate font-mono text-[11px] text-[var(--color-muted)]">
+          <div className="mt-0.5 truncate font-mono text-xs text-[var(--color-muted)]">
             {entry.contentId || entry.name}
             <span className="px-1 opacity-60">·</span>
             <span className="tabular-nums">{formatBytes(entry.size)}</span>
@@ -185,7 +185,7 @@ function PkgRow({
               style={{ width: `${pct}%` }}
             />
           </div>
-          <div className="flex items-center justify-between text-[11px] text-[var(--color-muted)]">
+          <div className="flex items-center justify-between text-xs text-[var(--color-muted)]">
             <span>{tr("pkglib.uploading", "Uploading to PS5…")}</span>
             <span className="tabular-nums">
               {formatBytes(entry.bytes ?? 0)}
@@ -199,7 +199,7 @@ function PkgRow({
       {/* Last install result */}
       {!busy && entry.lastResult && (
         <div
-          className={`flex items-start gap-1.5 text-[11px] ${
+          className={`flex items-start gap-1.5 text-xs ${
             entry.lastResult.ok
               ? "text-[var(--color-good)]"
               : "text-[var(--color-bad)]"
@@ -528,7 +528,7 @@ export default function InstallPackageScreen() {
             })}
           </ul>
           {entries.length > 0 && (
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-[var(--color-border)] pt-3 text-[11px] text-[var(--color-muted)]">
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-[var(--color-border)] pt-3 text-xs text-[var(--color-muted)]">
               <span>
                 {tr(
                   "pkglib.footer.count",
@@ -586,7 +586,7 @@ export default function InstallPackageScreen() {
             </div>
           )}
           {entries.length > 0 && (
-            <label className="mt-2 flex cursor-pointer items-center gap-2 text-[11px] text-[var(--color-muted)]">
+            <label className="mt-2 flex cursor-pointer items-center gap-2 text-xs text-[var(--color-muted)]">
               <input
                 type="checkbox"
                 className="h-3.5 w-3.5"

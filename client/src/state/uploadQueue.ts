@@ -38,6 +38,11 @@ import { createRunGen } from "../lib/runGen";
 import { hostOf } from "../lib/addr";
 import { ensurePayloadCurrent } from "../lib/ensurePayloadCurrent";
 import { effectiveUploadStreams } from "../lib/uploadStreams";
+import {
+  autoRecoverBackoffMs,
+  isAutoRecoverable,
+  MAX_AUTO_RECOVER_ATTEMPTS,
+} from "../lib/uploadRecovery";
 
 /**
  * Pause between queued jobs so the PS5 payload can drain the detached
@@ -130,6 +135,16 @@ export interface QueueItem {
    *  swallowed them so users with `mountAfterUpload` got no feedback
    *  about an image that mounted successfully but won't register. */
   mountWarnings: string[];
+  /** Transient: true while the runner is between auto-recovery attempts
+   *  for this item (waiting out a backoff and re-deploying a crashed
+   *  payload before resuming). Only meaningful when `status === "running"`;
+   *  not persisted in any meaningful way (a `running`/recovering item
+   *  resets to `pending` on hydrate). The row renders a "recovering" hint
+   *  instead of the live speed while this is set. */
+  recovering?: boolean;
+  /** Which recovery attempt is in progress (1-based), for the
+   *  "recovering (2/3)…" readout. 0/undefined when not recovering. */
+  recoverAttempt?: number;
   error: string | null;
   /** Payload-side error category, when the failure originated from a
    *  PS5 protocol error frame (e.g. `direct_writer_io_error`,
@@ -663,7 +678,7 @@ export const useUploadQueueStore = create<QueueState>((set, get) => {
         }
 
         let jobsRun = 0;
-        while (isLive()) {
+        drain: while (isLive()) {
           const next = pickNext();
           if (!next) break;
 
@@ -686,6 +701,8 @@ export const useUploadQueueStore = create<QueueState>((set, get) => {
               bytesSent: 0,
               totalBytes: 0,
               bytesPerSec: 0,
+              recovering: false,
+              recoverAttempt: 0,
               error: null,
               errorReason: null,
               errorDetail: null,
@@ -693,57 +710,135 @@ export const useUploadQueueStore = create<QueueState>((set, get) => {
           }));
           scheduleSave();
 
-          try {
-            const { bytesSent, bytesPerSec, mountedAt, mountWarnings } =
-              await runOne(next, isLive);
-            // Always flip to "done" once runOne returns success — the
-            // upload + (optional) mount are committed PS5-side, and
-            // resetting the row to "pending" via resetRunningToPending
-            // would silently lie: the next Start would re-upload + try
-            // to re-mount, hitting EBUSY at mount time and wasting the
-            // bytes already on the console. Pre-2.2.52 a Stop landing
-            // between runOne's success and this `set` produced exactly
-            // that phantom-pending state. Honesty > liveness here:
-            // record the committed work and let the user re-process
-            // the queue if they want to skip the row.
-            set((s) => ({
-              items: patchItem(s.items, next.id, {
-                status: "done",
-                bytesSent,
-                bytesPerSec,
-                mountedAt,
-                mountWarnings,
-                completedAt: Date.now(),
-              }),
-            }));
-            scheduleSave();
-            if (!isLive()) return;
-          } catch (e) {
-            if (!isLive()) return;
-            const message = e instanceof Error ? e.message : String(e);
-            // Lift the structured payload error fields onto the item
-            // if waitForJob's thrown error carries them. UI uses these
-            // to render a humanized hint via `humanizeJobErrorReason`
-            // — without the structured fields the user just sees the
-            // raw chain (which often ends in {"error":"…","detail":"…"}
-            // JSON that's hard to read in a queue row).
-            const reason =
-              e instanceof UploadJobError ? (e.reason ?? null) : null;
-            const detail =
-              e instanceof UploadJobError ? (e.detail ?? null) : null;
-            set((s) => ({
-              items: patchItem(s.items, next.id, {
-                status: "failed",
-                bytesPerSec: 0,
-                error: message,
-                errorReason: reason,
-                errorDetail: detail,
-                completedAt: Date.now(),
-              }),
-            }));
-            scheduleSave();
-            if (!shouldContinueAfterFailure(get().continueOnFailure)) {
-              break;
+          // Per-item run with bounded auto-recovery. Each pass is a full
+          // attempt; on a *recoverable* failure (the payload crashed or the
+          // connection dropped) we surface a "recovering" state, wait a
+          // backoff, re-deploy the payload via ensurePayloadCurrent if it's
+          // down, then retry. The retry re-runs reconcile, so it resumes from
+          // exactly the unfinished files (including the one that was mid-
+          // flight) — recovery is idempotent and never double-writes. Fatal
+          // errors (out of space, path rejected, source missing) and a spent
+          // attempt budget fall through to a terminal "failed".
+          let recoverAttempt = 0;
+          for (;;) {
+            try {
+              const { bytesSent, bytesPerSec, mountedAt, mountWarnings } =
+                await runOne(next, isLive);
+              // Always flip to "done" once runOne returns success — the
+              // upload + (optional) mount are committed PS5-side, and
+              // resetting the row to "pending" via resetRunningToPending
+              // would silently lie: the next Start would re-upload + try
+              // to re-mount, hitting EBUSY at mount time and wasting the
+              // bytes already on the console. Pre-2.2.52 a Stop landing
+              // between runOne's success and this `set` produced exactly
+              // that phantom-pending state. Honesty > liveness here:
+              // record the committed work and let the user re-process
+              // the queue if they want to skip the row.
+              set((s) => ({
+                items: patchItem(s.items, next.id, {
+                  status: "done",
+                  bytesSent,
+                  bytesPerSec,
+                  mountedAt,
+                  mountWarnings,
+                  recovering: false,
+                  recoverAttempt: 0,
+                  completedAt: Date.now(),
+                }),
+              }));
+              scheduleSave();
+              if (!isLive()) return;
+              break; // success → next item
+            } catch (e) {
+              if (!isLive()) return;
+              const message = e instanceof Error ? e.message : String(e);
+              // Lift the structured payload error fields onto the item
+              // if waitForJob's thrown error carries them. UI uses these
+              // to render a humanized hint via `humanizeJobErrorReason`
+              // — without the structured fields the user just sees the
+              // raw chain (which often ends in {"error":"…","detail":"…"}
+              // JSON that's hard to read in a queue row).
+              const reason =
+                e instanceof UploadJobError ? (e.reason ?? null) : null;
+              const detail =
+                e instanceof UploadJobError ? (e.detail ?? null) : null;
+
+              const autoResume = useUploadSettingsStore.getState().autoResume;
+              const canRecover =
+                autoResume &&
+                recoverAttempt < MAX_AUTO_RECOVER_ATTEMPTS &&
+                isAutoRecoverable(reason, message);
+
+              if (!canRecover) {
+                set((s) => ({
+                  items: patchItem(s.items, next.id, {
+                    status: "failed",
+                    bytesPerSec: 0,
+                    recovering: false,
+                    recoverAttempt: 0,
+                    error: message,
+                    errorReason: reason,
+                    errorDetail: detail,
+                    completedAt: Date.now(),
+                  }),
+                }));
+                scheduleSave();
+                if (!shouldContinueAfterFailure(get().continueOnFailure)) {
+                  break drain; // hard stop: tear down this console's loop
+                }
+                break; // continueOnFailure → move to the next item
+              }
+
+              // Recoverable: show the "recovering (n/max)" state, hold the
+              // failure text so the row explains why, then wait + heal.
+              recoverAttempt += 1;
+              set((s) => ({
+                items: patchItem(s.items, next.id, {
+                  status: "running",
+                  recovering: true,
+                  recoverAttempt,
+                  bytesPerSec: 0,
+                  error: message,
+                  errorReason: reason,
+                  errorDetail: detail,
+                }),
+              }));
+              scheduleSave();
+
+              // Interruptible backoff: poll isLive() so a Stop during the
+              // (up to 30 s) wait is honored within ~250 ms instead of making
+              // the user wait out the whole backoff.
+              const backoffMs = autoRecoverBackoffMs(recoverAttempt - 1);
+              for (let waited = 0; waited < backoffMs; waited += 250) {
+                await sleep(Math.min(250, backoffMs - waited));
+                if (!isLive()) return;
+              }
+              // Re-deploy the payload if it's down (no-op if it's healthy),
+              // then poll until it answers. Best-effort — if it throws we
+              // still retry the transfer, which surfaces the real error.
+              // `() => !isLive()` lets a Stop bail out of the ~30 s boot-wait
+              // promptly instead of leaving a ghost push running.
+              try {
+                await ensurePayloadCurrent(hostOf(next.addr), () => !isLive());
+              } catch (healErr) {
+                console.warn("auto-resume: ensurePayloadCurrent threw:", healErr);
+              }
+              if (!isLive()) return;
+
+              // Clear the recovering banner + counters and loop to retry.
+              set((s) => ({
+                items: patchItem(s.items, next.id, {
+                  status: "running",
+                  recovering: false,
+                  bytesSent: 0,
+                  totalBytes: 0,
+                  bytesPerSec: 0,
+                  error: null,
+                  errorReason: null,
+                  errorDetail: null,
+                }),
+              }));
+              scheduleSave();
             }
           }
         }
@@ -763,11 +858,27 @@ export const useUploadQueueStore = create<QueueState>((set, get) => {
           // belongs to exactly one console ⇒ exactly one loop ever claims
           // it, so there's no cross-loop claim race. A hard-stop-after-
           // failure stops only the failed console's loop; siblings finish.
-          await Promise.all(
-            hosts.map((h) =>
-              runDrainLoop(() => nextPendingForHost(get().items, h)),
-            ),
-          );
+          //
+          // Re-evaluate the host set after each batch: items added for a NEW
+          // console while the queue is already running (a host with no loop at
+          // start) would otherwise sit "pending" forever. Only re-loop when
+          // continueOnFailure is set — with stop-on-first-failure a console
+          // that hard-stopped must NOT be auto-resumed, so we run one batch.
+          // Each batch drains every then-pending item to a terminal state, so
+          // the pending set strictly shrinks unless the user keeps adding —
+          // it converges once adds stop.
+          let batchHosts = hosts;
+          do {
+            await Promise.all(
+              batchHosts.map((h) =>
+                runDrainLoop(() => nextPendingForHost(get().items, h)),
+              ),
+            );
+            batchHosts =
+              isLive() && get().continueOnFailure
+                ? distinctPendingHosts(get().items)
+                : [];
+          } while (batchHosts.length > 0);
         }
       } finally {
         if (isLive()) {

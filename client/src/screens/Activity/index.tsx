@@ -56,7 +56,7 @@ export default function ActivityScreen() {
         )}
         right={
           <div className="flex items-center gap-2">
-            <div className="flex rounded-md border border-[var(--color-border)] text-[10px]">
+            <div className="flex rounded-md border border-[var(--color-border)] text-xs">
               <button
                 type="button"
                 onClick={() => setView("list")}
@@ -116,7 +116,7 @@ export default function ActivityScreen() {
           <header className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[var(--color-muted)]">
             <Loader2 size={13} className="animate-spin" />
             {tr("activity_running", undefined, "Running now")}
-            <span className="text-[10px]">· {running.length}</span>
+            <span className="text-xs">· {running.length}</span>
             {/* Bulk clear of running rows. Same effect as the per-row
                 Stop button, but for orphans whose underlying op is
                 already gone (engine restart, payload disconnect, app
@@ -126,7 +126,7 @@ export default function ActivityScreen() {
             <button
               type="button"
               onClick={clearRunning}
-              className="ml-auto rounded-md border border-[var(--color-border)] px-2 py-0.5 text-[10px] normal-case tracking-normal hover:bg-[var(--color-surface-3)]"
+              className="ml-auto rounded-md border border-[var(--color-border)] px-2 py-0.5 text-xs normal-case tracking-normal hover:bg-[var(--color-surface-3)]"
               title={tr(
                 "activity_clear_running_tooltip",
                 undefined,
@@ -148,7 +148,7 @@ export default function ActivityScreen() {
         <section>
           <header className="mb-3 text-xs font-semibold uppercase tracking-wide text-[var(--color-muted)]">
             {tr("activity_past", undefined, "Recent")}
-            <span className="ml-2 text-[10px]">· {past.length}</span>
+            <span className="ml-2 text-xs">· {past.length}</span>
           </header>
           <ul className="space-y-2">
             {past.map((e) => (
@@ -296,7 +296,7 @@ function ActivityRow({ entry }: { entry: ActivityEntry }) {
         <span className="font-medium">{entry.label}</span>
         {consoleLabel && (
           <span
-            className="inline-flex max-w-[10rem] items-center gap-1 truncate rounded bg-[var(--color-surface-3)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--color-muted)]"
+            className="inline-flex max-w-[10rem] items-center gap-1 truncate rounded bg-[var(--color-surface-3)] px-1.5 py-0.5 text-xs font-medium text-[var(--color-muted)]"
             title={entry.addr}
           >
             <span aria-hidden>🖥</span>
@@ -319,7 +319,7 @@ function ActivityRow({ entry }: { entry: ActivityEntry }) {
           // the legacy "Finalizing on PS5" pill (no counter) for old
           // payloads or before the first frame lands.
           <span
-            className="rounded-full bg-[var(--color-warn)]/15 px-1.5 py-0.5 text-[10px] font-medium text-[var(--color-warn)]"
+            className="rounded-full bg-[var(--color-warn)]/15 px-1.5 py-0.5 text-xs font-medium text-[var(--color-warn)]"
             title={tr(
               "activity_phase_finalizing_hint",
               undefined,
@@ -339,7 +339,7 @@ function ActivityRow({ entry }: { entry: ActivityEntry }) {
           </span>
         )}
         {entry.files !== undefined && entry.files > 1 && (
-          <span className="rounded-full bg-[var(--color-surface-3)] px-1.5 py-0.5 text-[10px] text-[var(--color-muted)]">
+          <span className="rounded-full bg-[var(--color-surface-3)] px-1.5 py-0.5 text-xs text-[var(--color-muted)]">
             {tr(
               "activity_files_badge",
               { count: entry.files },
@@ -347,14 +347,14 @@ function ActivityRow({ entry }: { entry: ActivityEntry }) {
             )}
           </span>
         )}
-        <span className="ml-auto text-[10px] text-[var(--color-muted)]">
+        <span className="ml-auto text-xs text-[var(--color-muted)]">
           {formatRelative(entry.startedAtMs, tr)} · {formatDuration(elapsedMs / 1000)}
         </span>
         {isRunning && (
           <button
             type="button"
             onClick={() => void handleStop()}
-            className="rounded-md border border-[var(--color-border)] px-2 py-0.5 text-[10px] hover:bg-[var(--color-surface-3)]"
+            className="rounded-md border border-[var(--color-border)] px-2 py-0.5 text-xs hover:bg-[var(--color-surface-3)]"
             title={tr(
               "activity_stop_tooltip",
               undefined,
@@ -377,7 +377,7 @@ function ActivityRow({ entry }: { entry: ActivityEntry }) {
         // tooltip-hidden warning for an hour before force-quitting.
         // Promote it to an inline line under the row's header so it's
         // the next thing they read after seeing the pill itself.
-        <div className="mb-1 text-[11px] text-[var(--color-warn)]">
+        <div className="mb-1 text-xs text-[var(--color-warn)]">
           {tr(
             "activity_phase_finalizing_hint",
             undefined,
@@ -391,7 +391,7 @@ function ActivityRow({ entry }: { entry: ActivityEntry }) {
           at the end. Falls back to the legacy single `detail` line
           for entries created before fromPath/toPath were tracked. */}
       {(entry.fromPath || entry.toPath) ? (
-        <div className="mb-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 font-mono text-[11px] text-[var(--color-muted)]">
+        <div className="mb-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 font-mono text-xs text-[var(--color-muted)]">
           {entry.fromPath && (
             <>
               <span className="text-[var(--color-muted)]">
@@ -410,12 +410,12 @@ function ActivityRow({ entry }: { entry: ActivityEntry }) {
           )}
         </div>
       ) : entry.detail ? (
-        <div className="mb-1 break-all font-mono text-[11px] text-[var(--color-muted)]">
+        <div className="mb-1 break-all font-mono text-xs text-[var(--color-muted)]">
           {entry.detail}
         </div>
       ) : null}
 
-      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-[11px] text-[var(--color-muted)]">
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-xs text-[var(--color-muted)]">
         {entry.bytes !== undefined && entry.bytes > 0 && (
           <span>
             {formatBytes(entry.bytes)}
@@ -472,7 +472,7 @@ function ActivityRow({ entry }: { entry: ActivityEntry }) {
         // red error on a row that's still happily running, which
         // is more confusing than helpful.
         <div
-          className={`mt-1 text-[11px] ${
+          className={`mt-1 text-xs ${
             isRunning
               ? "text-[var(--color-warn)]"
               : "text-[var(--color-bad)]"
@@ -571,7 +571,7 @@ function ActivityTimeline({ entries }: { entries: ActivityEntry[] }) {
             `Timeline (${days.length} days)`,
           )}
         </h3>
-        <span className="text-[10px] text-[var(--color-muted)]">
+        <span className="text-xs text-[var(--color-muted)]">
           {tr(
             "activity_timeline_legend",
             undefined,
@@ -581,7 +581,7 @@ function ActivityTimeline({ entries }: { entries: ActivityEntry[] }) {
       </header>
       <div className="space-y-1">
         {/* X-axis labels: 0h, 6h, 12h, 18h, 24h. */}
-        <div className="ml-20 flex justify-between text-[10px] text-[var(--color-muted)]">
+        <div className="ml-20 flex justify-between text-xs text-[var(--color-muted)]">
           <span>00:00</span>
           <span>06:00</span>
           <span>12:00</span>
@@ -590,7 +590,7 @@ function ActivityTimeline({ entries }: { entries: ActivityEntry[] }) {
         </div>
         {days.map(([day, dayEntries]) => (
           <div key={day} className="flex items-center gap-2">
-            <div className="w-20 shrink-0 text-[10px] tabular-nums text-[var(--color-muted)]">
+            <div className="w-20 shrink-0 text-xs tabular-nums text-[var(--color-muted)]">
               {day}
             </div>
             <div className="relative h-5 flex-1 rounded-sm bg-[var(--color-surface)]">
@@ -627,7 +627,7 @@ function ActivityTimeline({ entries }: { entries: ActivityEntry[] }) {
                 );
               })}
             </div>
-            <div className="w-12 text-right text-[10px] tabular-nums text-[var(--color-muted)]">
+            <div className="w-12 text-right text-xs tabular-nums text-[var(--color-muted)]">
               {dayEntries.length}
             </div>
           </div>

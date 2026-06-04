@@ -165,6 +165,7 @@ export default function ShellScreen() {
 
       {payloadStatus !== "up" ? (
         <EmptyState
+          fill
           icon={TerminalSquare}
           message={tr(
             "shell_no_payload",
@@ -176,7 +177,7 @@ export default function ShellScreen() {
         <div className="flex min-h-0 flex-1 flex-col gap-3">
           <div
             ref={outputRef}
-            className="flex-1 overflow-auto rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-2 font-mono text-[10px]"
+            className="flex-1 overflow-auto rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-2 font-mono text-xs"
           >
             {history.length === 0 ? (
               <div className="text-[var(--color-muted)]">
@@ -249,7 +250,7 @@ function ShellHistoryRow({ entry }: { entry: HistoryEntry }) {
   const ok = entry.result && exit === 0;
   return (
     <li>
-      <div className="flex items-center gap-2 text-[10px] text-[var(--color-muted)]">
+      <div className="flex items-center gap-2 text-xs text-[var(--color-muted)]">
         <span>{ts.toLocaleTimeString()}</span>
         {entry.durationMs !== undefined && (
           <span>· {Math.round(entry.durationMs)}ms</span>

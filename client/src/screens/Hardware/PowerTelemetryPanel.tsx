@@ -59,7 +59,7 @@ export default function PowerTelemetryPanel({ mgmtAddr }: { mgmtAddr: string }) 
         </Button>
       </header>
       {error && (
-        <div className="rounded-md border border-[var(--color-bad)] p-2 text-[11px] text-[var(--color-bad)]">
+        <div className="rounded-md border border-[var(--color-bad)] p-2 text-xs text-[var(--color-bad)]">
           {error}
         </div>
       )}
@@ -87,7 +87,7 @@ export default function PowerTelemetryPanel({ mgmtAddr }: { mgmtAddr: string }) 
           <dd>{data.power_up_cause !== null ? `code ${data.power_up_cause}` : "—"}</dd>
         </dl>
       )}
-      <p className="mt-3 text-[10px] text-[var(--color-muted)]">
+      <p className="mt-3 text-xs text-[var(--color-muted)]">
         {tr(
           "power_telemetry_explainer",
           undefined,

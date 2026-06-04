@@ -132,13 +132,13 @@ export default function FfpkgInspectorPanel({ path }: { path: string }) {
         )}
       </div>
       {error && (
-        <div className="border-t border-[var(--color-border)] px-3 py-2 text-[11px] text-[var(--color-bad)]">
+        <div className="border-t border-[var(--color-border)] px-3 py-2 text-xs text-[var(--color-bad)]">
           <AlertTriangle size={11} className="mr-1 inline" />
           {error}
         </div>
       )}
       {open && meta && (
-        <div className="space-y-3 border-t border-[var(--color-border)] px-3 py-3 text-[11px]">
+        <div className="space-y-3 border-t border-[var(--color-border)] px-3 py-3 text-xs">
           <MetaGrid meta={meta} />
           {/* "Extract everything" button at top — useful when the
               user just wants the whole image's contents on disk
@@ -201,7 +201,7 @@ export default function FfpkgInspectorPanel({ path }: { path: string }) {
                 )}
               </div>
               {extractResult.sample_paths.length > 0 && (
-                <details className="mt-1 text-[10px] text-[var(--color-muted)]">
+                <details className="mt-1 text-xs text-[var(--color-muted)]">
                   <summary className="cursor-pointer">
                     {tr("ffpkg_extract_show_paths", undefined, "show paths")}
                   </summary>
@@ -307,7 +307,7 @@ function RootEntries({
   }
   return (
     <div>
-      <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-muted)]">
+      <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--color-muted)]">
         {tr(
           "ffpkg_inspect_root",
           { count: meta.root_entries.length },
@@ -327,7 +327,7 @@ function RootEntries({
             )}
             <span className="min-w-0 flex-1 truncate font-mono">{e.name}</span>
             {e.kind === "file" && (
-              <span className="text-[10px] text-[var(--color-muted)]">
+              <span className="text-xs text-[var(--color-muted)]">
                 {formatBytes(e.size)}
               </span>
             )}

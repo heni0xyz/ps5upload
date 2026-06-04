@@ -140,7 +140,7 @@ export default function NotificationInbox() {
                 <button
                   type="button"
                   onClick={() => setUnreadOnly((v) => !v)}
-                  className={`rounded px-1.5 py-0.5 text-[10px] ${
+                  className={`rounded px-1.5 py-0.5 text-xs ${
                     unreadOnly
                       ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)]"
                       : "text-[var(--color-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)]"
@@ -232,7 +232,7 @@ function NotificationRow({
               {entry.body}
             </div>
           )}
-          <div className="mt-1 flex items-center gap-2 text-[10px] text-[var(--color-muted)]">
+          <div className="mt-1 flex items-center gap-2 text-xs text-[var(--color-muted)]">
             <span>{ts.toLocaleString()}</span>
             {entry.link && (
               <button

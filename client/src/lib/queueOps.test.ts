@@ -138,6 +138,22 @@ describe("resetRunningToPending", () => {
     expect(next).toBe(arr);
   });
 
+  it("clears transient auto-recovery flags on a stopped running item", () => {
+    // A running item caught mid-recovery must not be persisted as a pending
+    // row that still claims to be recovering.
+    const arr = [
+      {
+        ...runItem("b", "running", 600, 1024, 12345),
+        recovering: true,
+        recoverAttempt: 2,
+      },
+    ];
+    const next = resetRunningToPending(arr);
+    expect(next[0].status).toBe("pending");
+    expect(next[0].recovering).toBe(false);
+    expect(next[0].recoverAttempt).toBe(0);
+  });
+
   it("returns same reference when nothing was running", () => {
     const arr: RunItem[] = [
       runItem("a", "pending", 0, 0, 0),

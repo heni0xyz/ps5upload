@@ -149,7 +149,7 @@ export default function UsbAutoloaderModal({
               }
             />
             {drivesError && (
-              <div className="rounded-md border border-[var(--color-bad)] p-2 text-[11px] text-[var(--color-bad)]">
+              <div className="rounded-md border border-[var(--color-bad)] p-2 text-xs text-[var(--color-bad)]">
                 {drivesError}
               </div>
             )}
@@ -185,11 +185,11 @@ export default function UsbAutoloaderModal({
                     />
                     <div className="min-w-0 flex-1">
                       <div className="font-medium">{d.label}</div>
-                      <div className="text-[10px] text-[var(--color-muted)]">
+                      <div className="text-xs text-[var(--color-muted)]">
                         {d.path}
                       </div>
                     </div>
-                    <div className="text-right text-[10px] text-[var(--color-muted)]">
+                    <div className="text-right text-xs text-[var(--color-muted)]">
                       {formatBytes(d.free_bytes)} {tr("usbmodal_free_slash", "free /")}{" "}
                       {formatBytes(d.total_bytes)}
                     </div>
@@ -210,7 +210,7 @@ export default function UsbAutoloaderModal({
                   "Pick payloads to bundle",
                 )}
               />
-              <p className="mb-2 text-[11px] text-[var(--color-muted)]">
+              <p className="mb-2 text-xs text-[var(--color-muted)]">
                 {tr(
                   "usb_wizard_step2_hint",
                   undefined,
@@ -240,17 +240,17 @@ export default function UsbAutoloaderModal({
                       />
                       <div className="min-w-0 flex-1">
                         <div className="font-medium">{p.display_name}</div>
-                        <div className="text-[10px] text-[var(--color-muted)]">
+                        <div className="text-xs text-[var(--color-muted)]">
                           {p.role} {tr("usbmodal_priority", "· priority")} {p.autoload_priority}
                         </div>
                       </div>
                       {cached && inventoryById[p.id]?.version && (
-                        <span className="text-[10px] text-[var(--color-muted)]">
+                        <span className="text-xs text-[var(--color-muted)]">
                           {inventoryById[p.id].version}
                         </span>
                       )}
                       {!cached && (
-                        <span className="text-[10px] text-[var(--color-muted)]">
+                        <span className="text-xs text-[var(--color-muted)]">
                           {tr(
                             "usb_wizard_not_cached",
                             undefined,
@@ -312,13 +312,13 @@ export default function UsbAutoloaderModal({
                     )}
               </Button>
               {installError && (
-                <div className="mt-2 flex items-start gap-2 rounded-md border border-[var(--color-bad)] p-2 text-[11px] text-[var(--color-bad)]">
+                <div className="mt-2 flex items-start gap-2 rounded-md border border-[var(--color-bad)] p-2 text-xs text-[var(--color-bad)]">
                   <AlertTriangle size={11} className="mt-0.5 shrink-0" />
                   {installError}
                 </div>
               )}
               {result && (
-                <div className="mt-2 space-y-2 text-[11px]">
+                <div className="mt-2 space-y-2 text-xs">
                   <div className="rounded-md border border-[var(--color-good)] bg-[var(--color-surface)] p-2">
                     <div className="font-medium text-[var(--color-good)]">
                       {tr(
@@ -357,7 +357,7 @@ export default function UsbAutoloaderModal({
                         "Generated autoload.txt",
                       )}
                     </summary>
-                    <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words font-mono text-[10px] text-[var(--color-text)]">
+                    <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words font-mono text-xs text-[var(--color-text)]">
                       {result.autoload_txt}
                     </pre>
                   </details>
@@ -383,7 +383,7 @@ function SectionHeader({
   return (
     <div className="mb-2 flex items-center justify-between">
       <h3 className="flex items-center gap-2 text-sm font-semibold">
-        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[var(--color-surface-3)] text-[10px] tabular-nums">
+        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[var(--color-surface-3)] text-xs tabular-nums">
           {index}
         </span>
         {title}

@@ -187,7 +187,7 @@ export default function RunningAppsPanel({ mgmtAddr }: { mgmtAddr: string }) {
         </Button>
       </header>
       {error && (
-        <div className="mb-2 flex items-start gap-1 text-[11px] text-[var(--color-bad)]">
+        <div className="mb-2 flex items-start gap-1 text-xs text-[var(--color-bad)]">
           <AlertTriangle size={11} className="mt-0.5 shrink-0" />
           {error}
         </div>
@@ -207,7 +207,7 @@ export default function RunningAppsPanel({ mgmtAddr }: { mgmtAddr: string }) {
                 <div className="font-medium">
                   {a.name ?? a.title_id ?? `app ${a.app_id}`}
                 </div>
-                <div className="text-[10px] text-[var(--color-muted)]">
+                <div className="text-xs text-[var(--color-muted)]">
                   app_id {a.app_id}
                   {a.title_id && ` · ${a.title_id}`}
                 </div>

@@ -9,7 +9,7 @@ import {
 
 import { useConnectionStore, PS5_PAYLOAD_PORT } from "../../state/connection";
 import { searchPS5, type SearchHit, type SearchProgress } from "../../api/ps5";
-import { PageHeader, ErrorCard, Button } from "../../components";
+import { PageHeader, ErrorCard, Button, EmptyState } from "../../components";
 // Direct import to avoid the barrel's circular-dep warning at build.
 import { usePrompt } from "../../components/ConfirmDialog";
 import { useTr } from "../../state/lang";
@@ -229,7 +229,7 @@ export default function SearchScreen() {
           )}
         </div>
         {(saved.length > 0 || pattern.trim()) && (
-          <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px]">
+          <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
             {pattern.trim() && (
               <button
                 type="button"
@@ -304,8 +304,20 @@ export default function SearchScreen() {
         </div>
       )}
 
+      {!result && !loading && (
+        <EmptyState
+          fill
+          icon={SearchIcon}
+          message={tr(
+            "search_idle",
+            undefined,
+            "Enter a filename pattern above and hit Search to scan every writable drive on your PS5.",
+          )}
+        />
+      )}
+
       {result && result.hits.length === 0 && !loading && (
-        <div className="rounded-md border border-dashed border-[var(--color-border)] p-4 text-center text-xs text-[var(--color-muted)]">
+        <div className="rounded-md border border-dashed border-[var(--color-border)] p-6 text-center text-sm text-[var(--color-muted)]">
           {result.cancelled
             ? `Search stopped. Scanned ${result.scanned.toLocaleString()} entries before you cancelled.`
             : `No matches. Scanned ${result.scanned.toLocaleString()} entries.`}
@@ -329,14 +341,14 @@ export default function SearchScreen() {
             <button
               type="button"
               onClick={() => exportSearchResults(result.hits, "csv")}
-              className="ml-auto rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-0.5 text-[10px] hover:bg-[var(--color-surface-3)]"
+              className="ml-auto rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-0.5 text-xs hover:bg-[var(--color-surface-3)]"
             >
               {tr("search_export_csv", undefined, "Export CSV")}
             </button>
             <button
               type="button"
               onClick={() => exportSearchResults(result.hits, "json")}
-              className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-0.5 text-[10px] hover:bg-[var(--color-surface-3)]"
+              className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-0.5 text-xs hover:bg-[var(--color-surface-3)]"
             >
               {tr("search_export_json", undefined, "Export JSON")}
             </button>

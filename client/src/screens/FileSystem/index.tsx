@@ -19,7 +19,7 @@ import {
   X,
 } from "lucide-react";
 import { pickPath } from "../../lib/pickPath";
-import { PageHeader, Button } from "../../components";
+import { PageHeader, Button, EmptyState } from "../../components";
 // Direct import to avoid the barrel's circular-dep warning at build.
 import { useConfirm, useAlert, usePrompt } from "../../components/ConfirmDialog";
 import { useTr } from "../../state/lang";
@@ -1654,12 +1654,14 @@ export default function FileSystemScreen() {
       )}
 
       {entries === null && !loading && !error && (
-        <div className="rounded-md border border-dashed border-[var(--color-border)] p-4 text-center text-xs text-[var(--color-muted)]">
-          {tr(
+        <EmptyState
+          fill
+          icon={FolderTree}
+          message={tr(
             "fs_connect_first",
             "Connect to your PS5 first — use the Connection tab.",
           )}
-        </div>
+        />
       )}
 
       {entries && entries.length === 0 && (
@@ -1792,7 +1794,7 @@ export default function FileSystemScreen() {
                       undefined,
                       "Preview small file inline (text or image)",
                     )}
-                    className="rounded-md border border-[var(--color-border)] p-1 text-[10px] hover:bg-[var(--color-surface-3)]"
+                    className="rounded-md border border-[var(--color-border)] p-1 text-xs hover:bg-[var(--color-surface-3)]"
                   >
                     👁
                   </button>
@@ -1806,7 +1808,7 @@ export default function FileSystemScreen() {
                       undefined,
                       "Compute CRC32 of this file (cheap integrity check)",
                     )}
-                    className="rounded-md border border-[var(--color-border)] p-1 text-[10px] font-mono hover:bg-[var(--color-surface-3)]"
+                    className="rounded-md border border-[var(--color-border)] p-1 text-xs font-mono hover:bg-[var(--color-surface-3)]"
                   >
                     #
                   </button>
@@ -1820,7 +1822,7 @@ export default function FileSystemScreen() {
                       undefined,
                       "BLAKE3 + CRC32 verification (slower, crypto-strength)",
                     )}
-                    className="rounded-md border border-[var(--color-border)] p-1 text-[10px] font-mono hover:bg-[var(--color-surface-3)]"
+                    className="rounded-md border border-[var(--color-border)] p-1 text-xs font-mono hover:bg-[var(--color-surface-3)]"
                   >
                     ✓
                   </button>
@@ -1850,7 +1852,7 @@ export default function FileSystemScreen() {
             <header className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-2">
               <div>
                 <div className="text-sm font-semibold">{preview.name}</div>
-                <div className="text-[10px] text-[var(--color-muted)]">
+                <div className="text-xs text-[var(--color-muted)]">
                   {formatBytes(preview.size)} · {preview.kind}
                 </div>
               </div>
@@ -1870,7 +1872,7 @@ export default function FileSystemScreen() {
                   className="mx-auto max-h-full"
                 />
               ) : (
-                <pre className="whitespace-pre-wrap break-all font-mono text-[11px]">
+                <pre className="whitespace-pre-wrap break-all font-mono text-xs">
                   {preview.body}
                 </pre>
               )}
@@ -1926,7 +1928,7 @@ function RecentPathsDropdown({
         type="button"
         onClick={() => setOpen((v) => !v)}
         title={tr("fs_recent_tooltip", undefined, "Recent destinations")}
-        className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-[var(--color-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text)]"
+        className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs uppercase tracking-wider text-[var(--color-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text)]"
       >
         {tr("fs_recent", "Recent")}
         <ChevronRight
@@ -1945,7 +1947,7 @@ function RecentPathsDropdown({
                     onPick(p);
                     setOpen(false);
                   }}
-                  className="min-w-0 flex-1 truncate px-2 py-1 text-left font-mono text-[11px] hover:bg-[var(--color-surface-3)]"
+                  className="min-w-0 flex-1 truncate px-2 py-1 text-left font-mono text-xs hover:bg-[var(--color-surface-3)]"
                   title={p}
                 >
                   {p}
@@ -1953,7 +1955,7 @@ function RecentPathsDropdown({
                 <button
                   type="button"
                   onClick={() => remove(p)}
-                  className="px-1 py-1 text-[10px] text-[var(--color-muted)] hover:text-[var(--color-bad)]"
+                  className="px-1 py-1 text-xs text-[var(--color-muted)] hover:text-[var(--color-bad)]"
                   title={tr("fs_recent_remove", undefined, "Forget this entry")}
                 >
                   ×
@@ -1967,7 +1969,7 @@ function RecentPathsDropdown({
               clear();
               setOpen(false);
             }}
-            className="block w-full border-t border-[var(--color-border)] px-2 py-1 text-left text-[10px] text-[var(--color-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text)]"
+            className="block w-full border-t border-[var(--color-border)] px-2 py-1 text-left text-xs text-[var(--color-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text)]"
           >
             {tr("fs_recent_clear", undefined, "Clear all")}
           </button>
@@ -2055,7 +2057,7 @@ function BulkOpBanner({
           type="button"
           onClick={() => useFsBulkOpStore.getState().requestCancel()}
           disabled={cancelRequested}
-          className="ml-auto rounded-md border border-[var(--color-border)] px-2 py-0.5 text-[10px] hover:bg-[var(--color-surface-3)] disabled:opacity-50"
+          className="ml-auto rounded-md border border-[var(--color-border)] px-2 py-0.5 text-xs hover:bg-[var(--color-surface-3)] disabled:opacity-50"
           title={tr(
             "fs_bulk_stop_tooltip",
             undefined,
@@ -2071,7 +2073,7 @@ function BulkOpBanner({
       </div>
 
       {currentName && (
-        <div className="mb-2 flex flex-wrap items-baseline gap-x-3 gap-y-0.5 font-mono text-[11px]">
+        <div className="mb-2 flex flex-wrap items-baseline gap-x-3 gap-y-0.5 font-mono text-xs">
           <span className="text-[var(--color-text)]">{currentName}</span>
           {currentBytesCopied > 0 && currentSize !== null && currentSize > 0 ? (
             <span className="text-[var(--color-muted)]">
@@ -2103,7 +2105,7 @@ function BulkOpBanner({
 
       {cancelRequested && op === "delete" && (
         // Delete has no per-byte cancel; explain why it's slower.
-        <div className="mb-2 rounded-md border border-[var(--color-warn)] bg-[var(--color-warn-soft)] p-2 text-[11px] text-[var(--color-warn)]">
+        <div className="mb-2 rounded-md border border-[var(--color-warn)] bg-[var(--color-warn-soft)] p-2 text-xs text-[var(--color-warn)]">
           {tr(
             "fs_bulk_stop_explainer_delete",
             { name: currentName },
@@ -2113,7 +2115,7 @@ function BulkOpBanner({
       )}
 
       {(fromPath || toPath) && (
-        <div className="mb-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-[11px] text-[var(--color-muted)]">
+        <div className="mb-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs text-[var(--color-muted)]">
           {fromPath && (
             <>
               <span>{tr("fs_bulk_from", undefined, "From")}</span>
@@ -2195,7 +2197,7 @@ function DownloadOpBanner({
         <button
           type="button"
           onClick={() => useFsDownloadOpStore.getState().requestStop()}
-          className="ml-auto rounded-md border border-[var(--color-border)] px-2 py-0.5 text-[10px] hover:bg-[var(--color-surface-3)]"
+          className="ml-auto rounded-md border border-[var(--color-border)] px-2 py-0.5 text-xs hover:bg-[var(--color-surface-3)]"
           title={tr(
             "fs_download_stop_tooltip",
             undefined,
@@ -2206,7 +2208,7 @@ function DownloadOpBanner({
         </button>
       </div>
 
-      <div className="mb-2 flex flex-wrap items-baseline gap-x-3 gap-y-0.5 font-mono text-[11px]">
+      <div className="mb-2 flex flex-wrap items-baseline gap-x-3 gap-y-0.5 font-mono text-xs">
         <span>{rootName}</span>
         {totalBytes > 0 ? (
           <span className="text-[var(--color-muted)]">
@@ -2224,7 +2226,7 @@ function DownloadOpBanner({
         )}
       </div>
 
-      <div className="mb-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-[11px] text-[var(--color-muted)]">
+      <div className="mb-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs text-[var(--color-muted)]">
         <span>{tr("fs_bulk_from", undefined, "From")}</span>
         <span className="break-all font-mono">{rootSrcPath}</span>
         <span>{tr("fs_bulk_to", undefined, "To")}</span>

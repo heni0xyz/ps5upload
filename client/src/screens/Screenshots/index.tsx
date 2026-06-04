@@ -222,6 +222,7 @@ export default function ScreenshotsScreen() {
 
       {payloadStatus !== "up" && (
         <EmptyState
+          fill
           icon={ImageIcon}
           message={tr(
             "screenshots_no_payload",
@@ -256,7 +257,7 @@ export default function ScreenshotsScreen() {
           <button
             type="button"
             onClick={toggleAll}
-            className="mb-2 inline-flex items-center gap-1.5 text-[11px] text-[var(--color-muted)] hover:text-[var(--color-text)]"
+            className="mb-2 inline-flex items-center gap-1.5 text-xs text-[var(--color-muted)] hover:text-[var(--color-text)]"
           >
             {allSelected ? (
               <CheckSquare size={11} />
@@ -290,10 +291,10 @@ export default function ScreenshotsScreen() {
                 </button>
                 <ImageIcon size={14} className="text-[var(--color-muted)]" />
                 <div className="min-w-0 flex-1">
-                  <code className="block truncate text-[11px]">
+                  <code className="block truncate text-xs">
                     {item.path.split("/").pop()}
                   </code>
-                  <div className="text-[10px] text-[var(--color-muted)]">
+                  <div className="text-xs text-[var(--color-muted)]">
                     {formatBytes(item.size)} ·{" "}
                     {new Date(item.mtime * 1000).toLocaleString()}
                   </div>

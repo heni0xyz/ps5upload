@@ -92,6 +92,8 @@ export function resetRunningToPending<
     bytesSent: number;
     totalBytes: number;
     bytesPerSec: number;
+    recovering?: boolean;
+    recoverAttempt?: number;
   },
 >(items: T[]): T[] {
   let changed = false;
@@ -104,6 +106,11 @@ export function resetRunningToPending<
         bytesSent: 0,
         totalBytes: 0,
         bytesPerSec: 0,
+        // A "running" item may have been mid-auto-recovery; clear the
+        // transient recovery flags so a stopped/hydrated item isn't
+        // persisted as a pending row with `recovering:true`.
+        recovering: false,
+        recoverAttempt: 0,
       };
     }
     return it;

@@ -89,6 +89,13 @@ zip = { version = "8", default-features = false, features = ["deflate"] }
 # browse, not a long-running daemon.
 mdns-sd = { version = "0.20", default-features = false, features = ["async"] }
 
+# Enumerate ALL local network interfaces (not just the default-route one) so
+# the LAN sweep in commands/discover.rs probes every subnet the host is on —
+# Ethernet + Wi-Fi + USB-tether simultaneously. Pure-Rust, cross-platform
+# (macOS/Windows/Linux), no system linkage; keeps the single-toolchain
+# cross-compile story intact.
+if-addrs = "0.13"
+
 # libc for `statvfs` in the USB autoloader's drive enumeration
 # (commands/usb_autoloader.rs). Already pulled in transitively via
 # ps5upload-core, but listed explicitly here so a future change to

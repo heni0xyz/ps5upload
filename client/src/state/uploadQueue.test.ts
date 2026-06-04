@@ -23,6 +23,7 @@ vi.mock("../api/ps5", async (importOriginal) => {
 });
 
 import { jobStatus, startTransferFile } from "../api/ps5";
+import { ensurePayloadCurrent } from "../lib/ensurePayloadCurrent";
 import {
   useUploadQueueStore,
   distinctPendingHosts,
@@ -34,6 +35,7 @@ import { useUploadSettingsStore } from "./uploadSettings";
 
 const mockedJobStatus = vi.mocked(jobStatus);
 const mockedStartFile = vi.mocked(startTransferFile);
+const mockedEnsurePayload = vi.mocked(ensurePayloadCurrent);
 
 function installLocalStorageStub() {
   const store = new Map<string, string>();
@@ -188,5 +190,184 @@ describe("upload runner concurrency", () => {
 
     expect(itemsByStatus("done")).toHaveLength(2);
     expect(useUploadQueueStore.getState().running).toBe(false);
+  });
+});
+
+// ── Runner: auto-resume after failure ────────────────────────────────────────
+
+describe("upload runner auto-resume", () => {
+  const ADDR = "192.168.1.10:9113";
+
+  beforeEach(() => {
+    installLocalStorageStub();
+    vi.useFakeTimers();
+    mockedJobStatus.mockReset();
+    mockedStartFile.mockReset().mockResolvedValue("job");
+    mockedEnsurePayload.mockReset().mockResolvedValue(undefined as never);
+    useUploadQueueStore.setState({
+      items: [],
+      running: false,
+      continueOnFailure: false,
+      loaded: true,
+    });
+    useUploadSettingsStore.setState({ parallelConsoles: false, autoResume: true });
+  });
+  afterEach(() => {
+    useUploadQueueStore.getState().stop();
+    vi.useRealTimers();
+  });
+
+  it("recoverable failure → re-deploys payload, retries, and completes", async () => {
+    addItem(ADDR, "A1");
+    // Attempt 0 fails with a connection-class error (no payload reason ⇒
+    // recoverable); the retry's poll reports done.
+    mockedJobStatus
+      .mockResolvedValueOnce({
+        status: "failed",
+        error: "connection reset by peer",
+      } as Awaited<ReturnType<typeof jobStatus>>)
+      .mockResolvedValue({
+        status: "done",
+        bytes_sent: 100,
+      } as Awaited<ReturnType<typeof jobStatus>>);
+
+    const p = useUploadQueueStore.getState().start();
+    // Drive through: first poll → fail → recovering → 5s backoff → heal →
+    // retry → done.
+    await vi.advanceTimersByTimeAsync(20_000);
+    await p;
+
+    expect(itemsByStatus("done")).toHaveLength(1);
+    // Two transfer starts = original + one resume.
+    expect(mockedStartFile).toHaveBeenCalledTimes(2);
+    // Healed at least once beyond the preflight (preflight + recovery).
+    expect(mockedEnsurePayload.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("surfaces the 'recovering' state between attempts", async () => {
+    addItem(ADDR, "A1");
+    mockedJobStatus
+      .mockResolvedValueOnce({
+        status: "failed",
+        error: "broken pipe",
+      } as Awaited<ReturnType<typeof jobStatus>>)
+      .mockResolvedValue({
+        status: "running",
+      } as Awaited<ReturnType<typeof jobStatus>>);
+
+    void useUploadQueueStore.getState().start();
+    // Far enough to hit the failure + enter recovering, but inside the 5s
+    // backoff so it hasn't retried yet.
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    const item = useUploadQueueStore.getState().items[0];
+    expect(item.status).toBe("running");
+    expect(item.recovering).toBe(true);
+    expect(item.recoverAttempt).toBe(1);
+  });
+
+  it("fatal failure (out of space) → fails immediately, no retry", async () => {
+    addItem(ADDR, "A1");
+    mockedJobStatus.mockResolvedValue({
+      status: "failed",
+      error: "no space",
+      error_reason: "fs_write_failed_errno_28",
+    } as Awaited<ReturnType<typeof jobStatus>>);
+
+    const p = useUploadQueueStore.getState().start();
+    await vi.advanceTimersByTimeAsync(20_000);
+    await p;
+
+    expect(itemsByStatus("failed")).toHaveLength(1);
+    // No resume attempt for a fatal error.
+    expect(mockedStartFile).toHaveBeenCalledTimes(1);
+  });
+
+  it("auto-resume OFF → a recoverable failure still fails immediately", async () => {
+    useUploadSettingsStore.setState({ autoResume: false });
+    addItem(ADDR, "A1");
+    mockedJobStatus.mockResolvedValue({
+      status: "failed",
+      error: "connection reset by peer",
+    } as Awaited<ReturnType<typeof jobStatus>>);
+
+    const p = useUploadQueueStore.getState().start();
+    await vi.advanceTimersByTimeAsync(20_000);
+    await p;
+
+    expect(itemsByStatus("failed")).toHaveLength(1);
+    expect(mockedStartFile).toHaveBeenCalledTimes(1);
+  });
+
+  it("Stop during a recovery backoff aborts cleanly without retrying", async () => {
+    addItem(ADDR, "A1");
+    // Always fail recoverably, so without a Stop it would loop + heal.
+    mockedJobStatus.mockResolvedValue({
+      status: "failed",
+      error: "connection reset by peer",
+    } as Awaited<ReturnType<typeof jobStatus>>);
+
+    void useUploadQueueStore.getState().start();
+    // Get into the first recovery's backoff window.
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(useUploadQueueStore.getState().items[0].recovering).toBe(true);
+    const startsBeforeStop = mockedStartFile.mock.calls.length;
+    const healsBeforeStop = mockedEnsurePayload.mock.calls.length;
+
+    useUploadQueueStore.getState().stop();
+    // Advance well past the 5s backoff + any heal poll.
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    // No further transfer start and no recovery heal after Stop.
+    expect(mockedStartFile.mock.calls.length).toBe(startsBeforeStop);
+    expect(mockedEnsurePayload.mock.calls.length).toBe(healsBeforeStop);
+    expect(useUploadQueueStore.getState().running).toBe(false);
+    // The stopped item must not be left claiming to be recovering.
+    const item = useUploadQueueStore.getState().items[0];
+    expect(item.recovering).toBe(false);
+    expect(item.status).not.toBe("running");
+  });
+
+  it("parallel: a console added mid-run is still drained (hot-add)", async () => {
+    useUploadSettingsStore.setState({ parallelConsoles: true });
+    // continueOnFailure=true is required for the re-loop to pick up new hosts.
+    useUploadQueueStore.setState({ continueOnFailure: true });
+    mockedJobStatus.mockResolvedValue({
+      status: "done",
+      bytes_sent: 100,
+    } as Awaited<ReturnType<typeof jobStatus>>);
+
+    addItem("192.168.1.10:9113", "A1");
+    const p = useUploadQueueStore.getState().start();
+    // Add a second console AFTER start() captured its initial host set.
+    addItem("192.168.1.20:9113", "B1");
+    await vi.advanceTimersByTimeAsync(10_000);
+    await p;
+
+    // Both consoles' items drained, not left stuck pending.
+    expect(itemsByStatus("done").map((i) => i.displayName).sort()).toEqual([
+      "A1",
+      "B1",
+    ]);
+    expect(itemsByStatus("pending")).toHaveLength(0);
+  });
+
+  it("gives up after the attempt cap and surfaces the failure", async () => {
+    addItem(ADDR, "A1");
+    // Always fail with a recoverable error: original + 3 recovery attempts,
+    // then terminal failed.
+    mockedJobStatus.mockResolvedValue({
+      status: "failed",
+      error: "connection reset by peer",
+    } as Awaited<ReturnType<typeof jobStatus>>);
+
+    const p = useUploadQueueStore.getState().start();
+    // 5s + 15s + 30s backoffs ⇒ well under 90s of fake time.
+    await vi.advanceTimersByTimeAsync(120_000);
+    await p;
+
+    expect(itemsByStatus("failed")).toHaveLength(1);
+    // 1 original + 3 recovery retries = 4 transfer starts.
+    expect(mockedStartFile).toHaveBeenCalledTimes(4);
   });
 });

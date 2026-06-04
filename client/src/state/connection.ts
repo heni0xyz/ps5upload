@@ -43,6 +43,7 @@ function persistHost(host: string) {
     // Best-effort — host persistence is nice-to-have.
   }
 }
+
 /** TCP port our payload listens on for FTX2 transfers. Also constant. */
 export const PS5_PAYLOAD_PORT = 9113;
 

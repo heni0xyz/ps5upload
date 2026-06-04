@@ -17,6 +17,7 @@ import {
 import { Button } from "../../components";
 import { humanizeJobErrorReason } from "../../api/ps5";
 import { formatBytes, formatDuration } from "../../lib/format";
+import { MAX_AUTO_RECOVER_ATTEMPTS } from "../../lib/uploadRecovery";
 import { useTr } from "../../state/lang";
 import { useConsoleLabel } from "../../state/roster";
 import {
@@ -204,6 +205,11 @@ function QueueRow({
       ? Math.max(0, Math.min(100, (item.bytesSent / item.totalBytes) * 100))
       : 0;
   const isActive = item.status === "running";
+  // Between auto-recovery attempts: the prior attempt failed for a
+  // recoverable reason and the runner is waiting out a backoff / re-deploying
+  // the payload before resuming. Status is still "running" so the row reads as
+  // in-flight, but we swap the (now-zeroed) progress bar for a recovery banner.
+  const isRecovering = isActive && !!item.recovering;
   // Finalize phase: all shards on the wire, engine waiting on PS5
   // commit. Drives a different chip + suppresses the stale ETA — see
   // the speed/eta render below. Gate on totalBytes > 0 so a row whose
@@ -241,10 +247,10 @@ function QueueRow({
         <StatusIcon status={item.status} />
         <div className="min-w-0 flex-1">
           <div className="truncate font-medium">{item.displayName}</div>
-          <div className="mt-0.5 truncate font-mono text-[11px] text-[var(--color-muted)]">
+          <div className="mt-0.5 truncate font-mono text-xs text-[var(--color-muted)]">
             → {item.resolvedDest}
           </div>
-          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-[var(--color-muted)]">
+          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-[var(--color-muted)]">
             {consoleLabel && (
               <span
                 className="inline-flex max-w-[12rem] items-center gap-1 truncate rounded bg-[var(--color-surface-2)] px-1.5 py-0.5 font-medium text-[var(--color-text)]"
@@ -324,9 +330,27 @@ function QueueRow({
         </div>
       </div>
 
-      {isActive && (
+      {isRecovering && (
+        <div className="mt-2 flex items-center gap-2 rounded-md bg-[var(--color-warn)]/10 px-2 py-1.5 text-xs text-[var(--color-warn)]">
+          <RotateCcw size={12} className="shrink-0 animate-spin" />
+          <span>
+            {tr(
+              "queue_recovering",
+              {
+                attempt: item.recoverAttempt ?? 1,
+                max: MAX_AUTO_RECOVER_ATTEMPTS,
+              },
+              `Connection lost — re-deploying payload & resuming (${
+                item.recoverAttempt ?? 1
+              }/${MAX_AUTO_RECOVER_ATTEMPTS})…`,
+            )}
+          </span>
+        </div>
+      )}
+
+      {isActive && !isRecovering && (
         <div className="mt-2">
-          <div className="mb-1 flex flex-wrap items-baseline justify-between gap-x-3 text-[11px] text-[var(--color-muted)]">
+          <div className="mb-1 flex flex-wrap items-baseline justify-between gap-x-3 text-xs text-[var(--color-muted)]">
             <span>
               {formatBytes(item.bytesSent)} / {formatBytes(item.totalBytes)}
               {/* Speed + ETA are honest signals only while bytes are
@@ -361,7 +385,7 @@ function QueueRow({
                 <>
                   {" · "}
                   <span
-                    className="rounded-full bg-[var(--color-warn)]/15 px-1.5 py-0.5 text-[10px] font-medium text-[var(--color-warn)]"
+                    className="rounded-full bg-[var(--color-warn)]/15 px-1.5 py-0.5 text-xs font-medium text-[var(--color-warn)]"
                     title={tr(
                       "queue_phase_finalizing_hint",
                       undefined,
@@ -401,7 +425,7 @@ function QueueRow({
             // sentence is what actually prevents the force-quit that
             // started this whole bug. Tooltip-hidden hints don't get
             // read on a Tauri desktop app — promote it.
-            <div className="mt-1 text-[11px] text-[var(--color-warn)]">
+            <div className="mt-1 text-xs text-[var(--color-warn)]">
               {tr(
                 "queue_phase_finalizing_hint",
                 undefined,
@@ -413,7 +437,7 @@ function QueueRow({
       )}
 
       {item.status === "done" && item.bytesPerSec > 0 && (
-        <div className="mt-2 text-[11px] text-[var(--color-muted)]">
+        <div className="mt-2 text-xs text-[var(--color-muted)]">
           {formatBytes(item.bytesSent)}
           {" · "}
           <span className="tabular-nums">
@@ -455,27 +479,27 @@ function FailedRowErrorCard({
   const tr = useTr();
   const humanized = humanizeJobErrorReason(reason ?? undefined);
   return (
-    <div className="mt-2 rounded-md border border-[var(--color-bad)] bg-[var(--color-surface-2)] p-2 text-[11px] text-[var(--color-bad)]">
+    <div className="mt-2 rounded-md border border-[var(--color-bad)] bg-[var(--color-surface-2)] p-2 text-xs text-[var(--color-bad)]">
       {humanized ? (
         <>
           <div className="font-medium">{humanized}</div>
           {detail && (
-            <div className="mt-1 text-[10px] text-[var(--color-muted)]">
+            <div className="mt-1 text-xs text-[var(--color-muted)]">
               {detail}
             </div>
           )}
           <details className="mt-1 cursor-pointer">
-            <summary className="text-[10px] text-[var(--color-muted)] hover:text-[var(--color-text)]">
+            <summary className="text-xs text-[var(--color-muted)] hover:text-[var(--color-text)]">
               {tr("queue_raw_error", "raw error")}
             </summary>
-            <code className="mt-1 block whitespace-pre-wrap break-all font-mono text-[10px] text-[var(--color-muted)]">
+            <code className="mt-1 block whitespace-pre-wrap break-all font-mono text-xs text-[var(--color-muted)]">
               {rawError}
               {reason && `\n[reason: ${reason}]`}
             </code>
           </details>
         </>
       ) : (
-        <code className="block whitespace-pre-wrap break-all font-mono text-[11px]">
+        <code className="block whitespace-pre-wrap break-all font-mono text-xs">
           {rawError}
         </code>
       )}

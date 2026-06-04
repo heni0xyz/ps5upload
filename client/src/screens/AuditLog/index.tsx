@@ -57,7 +57,7 @@ export default function AuditLogScreen() {
         <div className="max-h-[calc(100vh-12rem)] overflow-y-auto rounded-md border border-[var(--color-border)] bg-[var(--color-surface)]">
           <div className="overflow-x-auto">
           <table className="w-full min-w-[480px] text-xs">
-            <thead className="sticky top-0 bg-[var(--color-surface-2)] text-[10px] uppercase tracking-wide text-[var(--color-muted)]">
+            <thead className="sticky top-0 bg-[var(--color-surface-2)] text-xs uppercase tracking-wide text-[var(--color-muted)]">
               <tr>
                 <th className="px-2 py-1 text-left">
                   {tr("audit_when", undefined, "When")}
@@ -81,12 +81,12 @@ export default function AuditLogScreen() {
                     e.failed ? "text-[var(--color-bad)]" : ""
                   }`}
                 >
-                  <td className="px-2 py-1 tabular-nums text-[10px]">
+                  <td className="px-2 py-1 tabular-nums text-xs">
                     {new Date(e.ts).toLocaleString()}
                   </td>
-                  <td className="px-2 py-1 font-mono text-[10px]">{e.kind}</td>
+                  <td className="px-2 py-1 font-mono text-xs">{e.kind}</td>
                   <td className="px-2 py-1">{e.what}</td>
-                  <td className="px-2 py-1 truncate text-[10px] text-[var(--color-muted)]">
+                  <td className="px-2 py-1 truncate text-xs text-[var(--color-muted)]">
                     {e.context ?? ""}
                   </td>
                 </tr>

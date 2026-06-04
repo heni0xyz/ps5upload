@@ -16,6 +16,8 @@ const KEY_SHOW_FILES = "ps5upload.show_transfer_files";
 const KEY_BANDWIDTH_CAP = "ps5upload.bandwidth_cap_mbps";
 const KEY_UPLOAD_STREAMS = "ps5upload.upload_streams";
 const KEY_PARALLEL_CONSOLES = "ps5upload.parallel_consoles";
+const KEY_AUTO_RESUME = "ps5upload.auto_resume";
+const KEY_KEEP_PS5_AWAKE = "ps5upload.keep_ps5_awake";
 
 /** Upper bound on the user-selectable stream count, mirroring the engine's
  *  MAX_TRANSFER_STREAMS. The effective count is further clamped to whatever
@@ -60,17 +62,50 @@ function loadParallelConsoles(): boolean {
   return window.localStorage.getItem(KEY_PARALLEL_CONSOLES) === "true";
 }
 
+/** Default parallel upload streams for a fresh install.
+ *
+ *  1 (single stream = off). Multi-stream IS faster (hardware-validated
+ *  2026-06-02: ~1.7× on Fat, ~1.4× on Pro) but drives N concurrent
+ *  transactions against a payload whose memory/thread budget was tuned for
+ *  ONE transaction at a time (see payload/include/config.h). On some consoles
+ *  that sustained concurrency crashes the payload's transfer listener
+ *  mid-upload — it then refuses connections and the user is stuck until they
+ *  reload the payload (user-reported v2.24.0, 4-stream 74 GB folder, listener
+ *  died ~7 min in). So we ship the rock-solid single-stream path by default
+ *  and let users opt UP to 4 with an in-UI stability warning. */
+const DEFAULT_UPLOAD_STREAMS = 1;
+
 function loadUploadStreams(): number {
-  // Default 4 (hardware-validated 2026-06-02: ~1.7× on Fat, ~1.4× on Pro).
-  // Safe against older payloads — the effective count is min(setting, the
-  // payload's advertised max_transfer_streams), and a payload that predates
-  // multi-stream advertises nothing → clamps to 1 (single stream).
-  if (typeof window === "undefined") return MAX_UPLOAD_STREAMS;
+  // The effective count at upload time is min(setting, the payload's advertised
+  // max_transfer_streams), so an older payload that predates multi-stream still
+  // clamps to 1 regardless of this setting.
+  if (typeof window === "undefined") return DEFAULT_UPLOAD_STREAMS;
   const v = window.localStorage.getItem(KEY_UPLOAD_STREAMS);
-  if (!v) return MAX_UPLOAD_STREAMS;
+  if (!v) return DEFAULT_UPLOAD_STREAMS;
   const n = parseInt(v, 10);
-  if (!Number.isFinite(n)) return MAX_UPLOAD_STREAMS;
+  if (!Number.isFinite(n)) return DEFAULT_UPLOAD_STREAMS;
   return Math.min(Math.max(n, 1), MAX_UPLOAD_STREAMS);
+}
+
+/** Keep the PS5 awake during uploads. Default ON: while a transfer is running,
+ *  the app periodically sends a power-tick (sceSystemServicePowerTick) that
+ *  resets the console's auto-standby timer, so a long upload doesn't get
+ *  killed by the PS5 dropping into rest mode mid-transfer. Stored as "false"
+ *  only when disabled, so absence (fresh install) = ON. */
+function loadKeepPs5Awake(): boolean {
+  if (typeof window === "undefined") return true;
+  return window.localStorage.getItem(KEY_KEEP_PS5_AWAKE) !== "false";
+}
+
+/** Auto-resume after a failed upload. Default ON: when a job fails for a
+ *  recoverable reason (payload crashed, connection dropped), the runner waits
+ *  a short backoff, re-deploys the payload if it's down, and resumes — bounded
+ *  to a few attempts. Fatal errors (out of space, etc.) still surface at once.
+ *  Stored as the string "false" only when the user disables it, so the absence
+ *  of the key (fresh install) means ON. */
+function loadAutoResume(): boolean {
+  if (typeof window === "undefined") return true;
+  return window.localStorage.getItem(KEY_AUTO_RESUME) !== "false";
 }
 
 interface UploadSettingsState {
@@ -98,11 +133,20 @@ interface UploadSettingsState {
    *  serial (legacy). Opt-in because it multiplies host disk-read +
    *  network load across consoles. */
   parallelConsoles: boolean;
+  /** When true (default), a failed upload auto-recovers: backoff, re-deploy
+   *  the payload if it crashed, then resume. Bounded retries; fatal errors
+   *  still surface. */
+  autoResume: boolean;
+  /** When true (default), periodically defer the PS5's auto-standby timer
+   *  while an upload is running so it can't drop into rest mode mid-transfer. */
+  keepPs5Awake: boolean;
   setAlwaysOverwrite: (on: boolean) => void;
   setShowTransferFiles: (on: boolean) => void;
   setBandwidthCapMbps: (n: number) => void;
   setUploadStreams: (n: number) => void;
   setParallelConsoles: (on: boolean) => void;
+  setAutoResume: (on: boolean) => void;
+  setKeepPs5Awake: (on: boolean) => void;
 }
 
 export const useUploadSettingsStore = create<UploadSettingsState>((set) => ({
@@ -112,6 +156,8 @@ export const useUploadSettingsStore = create<UploadSettingsState>((set) => ({
   bandwidthCapMbps: loadBandwidthCap(),
   uploadStreams: loadUploadStreams(),
   parallelConsoles: loadParallelConsoles(),
+  autoResume: loadAutoResume(),
+  keepPs5Awake: loadKeepPs5Awake(),
   setAlwaysOverwrite: (alwaysOverwrite) => {
     window.localStorage.setItem(
       KEY_ALWAYS_OVERWRITE,
@@ -148,5 +194,16 @@ export const useUploadSettingsStore = create<UploadSettingsState>((set) => ({
       parallelConsoles ? "true" : "false",
     );
     set({ parallelConsoles });
+  },
+  setAutoResume: (autoResume) => {
+    window.localStorage.setItem(KEY_AUTO_RESUME, autoResume ? "true" : "false");
+    set({ autoResume });
+  },
+  setKeepPs5Awake: (keepPs5Awake) => {
+    window.localStorage.setItem(
+      KEY_KEEP_PS5_AWAKE,
+      keepPs5Awake ? "true" : "false",
+    );
+    set({ keepPs5Awake });
   },
 }));

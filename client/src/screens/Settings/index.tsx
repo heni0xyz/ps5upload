@@ -16,10 +16,13 @@ import {
   Gauge,
   Bell,
   ExternalLink,
+  Zap,
+  Trash2,
 } from "lucide-react";
 import { useThemeStore, type Theme } from "../../state/theme";
 
 import { PageHeader } from "../../components";
+import { useConfirm } from "../../components/ConfirmDialog";
 
 import { useKeepAwakeStore } from "../../state/keepAwake";
 import { useNotificationsStore } from "../../state/notifications";
@@ -29,7 +32,7 @@ import {
   MAX_UPLOAD_STREAMS,
 } from "../../state/uploadSettings";
 import { useConnectionStore } from "../../state/connection";
-import { userConfigPath } from "../../state/userConfig";
+import { userConfigPath, resetAllAppData } from "../../state/userConfig";
 import { useUpdateStore, type UpdatePhase } from "../../state/update";
 import type { LanguageCode } from "../../i18n";
 // Static imports for stores already pulled into the main bundle by
@@ -45,6 +48,17 @@ import {
 } from "../../state/notifications";
 // useAuditLogStore + AuditEntry moved to screens/AuditLog/index.tsx
 // (2.12.0 — promoted out of Settings junk drawer).
+
+/** Full-width band heading that visually groups the cards that follow it.
+ *  Implemented as a `col-span-full` sibling in the same grid (not a wrapper)
+ *  so it forces a new row and the cards under it flow as their own band. */
+function GroupHeading({ children }: { children: React.ReactNode }) {
+  return (
+    <h2 className="mt-2 border-b border-[var(--color-border)] pb-1.5 text-sm font-semibold text-[var(--color-text)] md:col-span-2 xl:col-span-3">
+      {children}
+    </h2>
+  );
+}
 
 function Section({
   title,
@@ -86,10 +100,16 @@ export default function SettingsScreen() {
     showTransferFiles,
     uploadStreams,
     parallelConsoles,
+    autoResume,
+    keepPs5Awake,
+    bandwidthCapMbps,
     setAlwaysOverwrite,
     setShowTransferFiles,
     setUploadStreams,
     setParallelConsoles,
+    setAutoResume,
+    setKeepPs5Awake,
+    setBandwidthCapMbps,
   } = useUploadSettingsStore();
   const payloadMaxStreams = useConnectionStore((s) => s.maxTransferStreams);
 
@@ -118,7 +138,11 @@ export default function SettingsScreen() {
       {/* Responsive grid — 2 columns at md, 3 at xl. Short/simple
           settings pack in; cards with warnings or long descriptions
           mark themselves `full` and take all columns. */}
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <div className="grid items-start gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <GroupHeading>
+          {tr("settings_group_general", undefined, "General")}
+        </GroupHeading>
+
         <Section title={tr("language", undefined, "Language")}>
           <label className="flex items-center gap-3 text-sm">
             <Globe size={14} className="text-[var(--color-muted)]" />
@@ -136,7 +160,11 @@ export default function SettingsScreen() {
           </label>
         </Section>
 
-        <Section title={tr("keep_awake", undefined, "Keep Awake")}>
+        <Section title={tr("settings_section_appearance", undefined, "Appearance")}>
+          <ThemePicker />
+        </Section>
+
+        <Section title={tr("keep_awake", undefined, "Keep computer awake")}>
           <label className="flex items-start gap-3 text-sm">
             <input
               type="checkbox"
@@ -179,35 +207,11 @@ export default function SettingsScreen() {
           </label>
         </Section>
 
-        <Section title={tr("notifications", undefined, "Notifications")}>
-          <label className="flex items-start gap-3 text-sm">
-            <input
-              type="checkbox"
-              checked={osNotifyEnabled}
-              onChange={(e) => setOsNotifyEnabled(e.target.checked)}
-              className="mt-0.5 accent-[var(--color-accent)]"
-            />
-            <div>
-              <div className="flex items-center gap-2 font-medium">
-                <Bell size={14} />
-                {tr(
-                  "os_notify_label",
-                  undefined,
-                  "Show system notifications",
-                )}
-              </div>
-              <div className="mt-0.5 text-xs text-[var(--color-muted)]">
-                {tr(
-                  "os_notify_hint",
-                  undefined,
-                  "Mirror in-app notifications (transfer done, errors, etc.) to your operating system's notification center — but only when the app is in the background, so you're not notified twice. You may be asked to grant notification permission.",
-                )}
-              </div>
-            </div>
-          </label>
-        </Section>
+        <GroupHeading>
+          {tr("settings_group_uploads", undefined, "Uploads")}
+        </GroupHeading>
 
-        <Section title={tr("upload", undefined, "Upload")}>
+        <Section title={tr("settings_card_upload_behavior", undefined, "Behavior")}>
           <div className="grid gap-3">
             <label className="flex items-start gap-3 text-sm">
               <input
@@ -252,6 +256,61 @@ export default function SettingsScreen() {
               </div>
             </label>
 
+            <label className="flex cursor-pointer items-start gap-3 text-sm">
+              <input
+                type="checkbox"
+                className="mt-0.5 h-4 w-4"
+                checked={autoResume}
+                onChange={(e) => setAutoResume(e.target.checked)}
+              />
+              <div>
+                <div className="font-medium">
+                  {tr(
+                    "upload_auto_resume",
+                    undefined,
+                    "Auto-resume uploads after a failure",
+                  )}
+                </div>
+                <div className="mt-0.5 text-xs text-[var(--color-muted)]">
+                  {tr(
+                    "upload_auto_resume_hint",
+                    undefined,
+                    "If an upload drops mid-transfer — most often because the PS5 payload crashed — automatically re-send the payload and resume from where it left off, retrying a few times before giving up. Fatal problems like the PS5 running out of space still stop right away. On by default.",
+                  )}
+                </div>
+              </div>
+            </label>
+
+            <label className="flex cursor-pointer items-start gap-3 text-sm">
+              <input
+                type="checkbox"
+                className="mt-0.5 h-4 w-4"
+                checked={keepPs5Awake}
+                onChange={(e) => setKeepPs5Awake(e.target.checked)}
+              />
+              <div>
+                <div className="flex items-center gap-2 font-medium">
+                  <Zap size={14} />
+                  {tr(
+                    "keep_ps5_awake",
+                    undefined,
+                    "Keep the PS5 awake during uploads",
+                  )}
+                </div>
+                <div className="mt-0.5 text-xs text-[var(--color-muted)]">
+                  {tr(
+                    "keep_ps5_awake_hint",
+                    undefined,
+                    "While an upload is running, periodically reset the PS5's auto-standby timer so it can't drop into rest mode mid-transfer (a common cause of failed uploads). On by default.",
+                  )}
+                </div>
+              </div>
+            </label>
+          </div>
+        </Section>
+
+        <Section title={tr("settings_card_upload_speed", undefined, "Speed")}>
+          <div className="grid gap-3">
             <div className="text-sm">
               <div className="flex items-center gap-3">
                 <label htmlFor="upload-streams" className="font-medium">
@@ -295,6 +354,17 @@ export default function SettingsScreen() {
                     )}
                   </div>
                 )}
+              {uploadStreams > 1 &&
+                payloadMaxStreams != null &&
+                payloadMaxStreams >= 2 && (
+                  <div className="mt-1 text-xs text-[var(--color-warn,#b8860b)]">
+                    {tr(
+                      "upload_streams_unstable",
+                      undefined,
+                      "Faster, but use with caution: more than 1 stream runs several transfers against the PS5 at once, and on some consoles that can crash the payload mid-upload (it then stops responding until you reload it). If uploads start failing or the payload drops, set this back to 1 — the single-stream path is the most stable.",
+                    )}
+                  </div>
+                )}
             </div>
 
             <label className="flex cursor-pointer items-start gap-3 text-sm">
@@ -321,8 +391,47 @@ export default function SettingsScreen() {
                 </div>
               </div>
             </label>
+
+            <BandwidthControl
+              value={bandwidthCapMbps}
+              onChange={setBandwidthCapMbps}
+            />
           </div>
         </Section>
+
+        <GroupHeading>
+          {tr("settings_section_notifications", undefined, "Notifications")}
+        </GroupHeading>
+
+        <Section title={tr("notifications", undefined, "Notifications")}>
+          <label className="flex items-start gap-3 text-sm">
+            <input
+              type="checkbox"
+              checked={osNotifyEnabled}
+              onChange={(e) => setOsNotifyEnabled(e.target.checked)}
+              className="mt-0.5 accent-[var(--color-accent)]"
+            />
+            <div>
+              <div className="flex items-center gap-2 font-medium">
+                <Bell size={14} />
+                {tr("os_notify_label", undefined, "Show system notifications")}
+              </div>
+              <div className="mt-0.5 text-xs text-[var(--color-muted)]">
+                {tr(
+                  "os_notify_hint",
+                  undefined,
+                  "Mirror in-app notifications (transfer done, errors, etc.) to your operating system's notification center — but only when the app is in the background, so you're not notified twice. You may be asked to grant notification permission.",
+                )}
+              </div>
+            </div>
+          </label>
+          <div className="my-3 border-t border-[var(--color-border)]" />
+          <NotifPrunePanel />
+        </Section>
+
+        <GroupHeading>
+          {tr("settings_group_updates", undefined, "Updates")}
+        </GroupHeading>
 
         {/* Updates takes the full row — the release-notes blob can
             be multiple paragraphs and deserves reading space. The
@@ -332,10 +441,12 @@ export default function SettingsScreen() {
           <UpdatesPanel />
         </Section>
 
+        <GroupHeading>
+          {tr("settings_group_data", undefined, "Data & reset")}
+        </GroupHeading>
+
         {/* Storage is the long row — path text is wide, so it takes
-            the whole grid width. Keeps it visually distinct as "info,
-            not settings" — you can't change where ps5upload writes
-            settings.json from the UI. */}
+            the whole grid width. */}
         <Section title={tr("storage", undefined, "Storage")} full>
           <div className="flex items-start gap-3 text-sm">
             <FileJson
@@ -358,13 +469,17 @@ export default function SettingsScreen() {
           </div>
         </Section>
 
-        <Section title={tr("settings_section_appearance", undefined, "Appearance")}>
-          <ThemePicker />
+        <Section title={tr("settings_section_backup", undefined, "Backup / restore")} full>
+          <BackupRestorePanel />
         </Section>
 
-        <Section title={tr("settings_section_bandwidth", undefined, "Bandwidth")}>
-          <BandwidthHelp />
+        <Section title={tr("settings_section_reset", undefined, "Reset")} full>
+          <ResetPanel />
         </Section>
+
+        <GroupHeading>
+          {tr("settings_section_diagnostic", undefined, "Diagnostics")}
+        </GroupHeading>
 
         <Section title={tr("settings_section_diagnostic", undefined, "Diagnostics")} full>
           <BugReportButton />
@@ -372,23 +487,15 @@ export default function SettingsScreen() {
           <CrashReportsButton />
         </Section>
 
-        <Section title={tr("settings_section_backup", undefined, "Backup / restore")} full>
-          <BackupRestorePanel />
-        </Section>
+        <GroupHeading>
+          {tr("settings_group_automation", undefined, "Automation")}
+        </GroupHeading>
 
         {/* 2.12.0: Audit log promoted out of Settings to its own
-            top-level route (/audit-log) under Diagnostics. It's a
-            permanent local safety record, conceptually adjacent to
-            Activity/Logs — burying it as a Settings card meant
-            users who wanted "what did I delete last week?" had to
-            scroll through preferences to find it. AuditLogPanel
+            top-level route (/audit-log) under Diagnostics. AuditLogPanel
             removed too. */}
         <Section title={tr("settings_section_schedules", undefined, "Schedules")} full>
           <SchedulesPanel />
-        </Section>
-
-        <Section title={tr("settings_section_notifications", undefined, "Notifications")} full>
-          <NotifPrunePanel />
         </Section>
       </div>
     </div>
@@ -430,7 +537,7 @@ function SchedulesPanel() {
 
   return (
     <div className="space-y-3 text-sm">
-      <p className="text-[11px] text-[var(--color-muted)]">
+      <p className="text-xs text-[var(--color-muted)]">
         {tr(
           "schedules_caveat",
           undefined,
@@ -461,7 +568,7 @@ function SchedulesPanel() {
               <button
                 type="button"
                 onClick={() => remove(s.id)}
-                className="ml-auto text-[10px] text-[var(--color-muted)] hover:text-[var(--color-bad)]"
+                className="ml-auto text-xs text-[var(--color-muted)] hover:text-[var(--color-bad)]"
               >
                 {tr("schedules_remove", undefined, "remove")}
               </button>
@@ -532,7 +639,7 @@ function NotifPrunePanel() {
 
   return (
     <div className="space-y-2 text-sm">
-      <div className="text-[11px] text-[var(--color-muted)]">
+      <div className="text-xs text-[var(--color-muted)]">
         {tr(
           "notif_prune_hint",
           undefined,
@@ -613,6 +720,10 @@ function BackupRestorePanel() {
     "ps5upload.keep_awake",
     "ps5upload.always_overwrite",
     "ps5upload.show_transfer_files",
+    "ps5upload.upload_streams",
+    "ps5upload.parallel_consoles",
+    "ps5upload.auto_resume",
+    "ps5upload.keep_ps5_awake",
   ];
 
   async function exportBundle() {
@@ -728,13 +839,13 @@ function BackupRestorePanel() {
         </button>
       </div>
       {info && (
-        <div className="flex items-center gap-1 text-[11px] text-[var(--color-good)]">
+        <div className="flex items-center gap-1 text-xs text-[var(--color-good)]">
           <CheckCircle2 size={11} />
           {info}
         </div>
       )}
       {error && (
-        <div className="flex items-start gap-1 text-[11px] text-[var(--color-bad)]">
+        <div className="flex items-start gap-1 text-xs text-[var(--color-bad)]">
           <AlertTriangle size={11} className="mt-0.5 shrink-0" />
           {error}
         </div>
@@ -804,7 +915,7 @@ function ThemePicker() {
           <span className="mt-0.5">{o.icon}</span>
           <span className="min-w-0 flex-1">
             <div className="text-sm font-medium">{o.label}</div>
-            <div className="text-[11px] text-[var(--color-muted)]">
+            <div className="text-xs text-[var(--color-muted)]">
               {o.description}
             </div>
           </span>
@@ -817,33 +928,120 @@ function ThemePicker() {
   );
 }
 
-/** Bandwidth-throttle hint. The actual per-job throttle UI lives in
- *  the Upload screen (BandwidthCard) and is wired end-to-end through
- *  the renderer → Tauri command → engine HTTP body since the most
- *  recent fix. The env-var fallback (FTX2_BANDWIDTH_MBPS) still works
- *  for headless engine runs but is no longer the user-facing path. */
-function BandwidthHelp() {
+/** Upload speed limit (bandwidth cap). A real control now — the old version
+ *  was just a blurb pointing at the Upload screen + an env var. 0 = no limit.
+ *  Shares the same `bandwidthCapMbps` store the Upload screen reads, so a cap
+ *  set here applies to the next started transfer. */
+function BandwidthControl({
+  value,
+  onChange,
+}: {
+  value: number;
+  onChange: (n: number) => void;
+}) {
   const tr = useTr();
   return (
-    <div className="space-y-2 text-sm">
-      <div className="flex items-start gap-2">
-        <Gauge size={14} className="mt-0.5 shrink-0 text-[var(--color-muted)]" />
-        <div className="min-w-0 flex-1">
-          <div className="font-medium">
-            {tr("settings_bandwidth_title", undefined, "Bandwidth throttle")}
-          </div>
-          <div className="mt-0.5 text-xs text-[var(--color-muted)]">
-            {tr(
-              "settings_bandwidth_hint",
-              undefined,
-              "Cap outbound transfer speed to leave headroom for video calls / game streaming. Set the cap on the Upload screen — it applies to the next started transfer. The FTX2_BANDWIDTH_MBPS env var still works for headless engine runs.",
-            )}
-          </div>
-          <div className="mt-2 rounded-md bg-[var(--color-surface)] px-2 py-1 font-mono text-[11px]">
-            FTX2_BANDWIDTH_MBPS=10  # headless / scripted only
-          </div>
-        </div>
+    <div className="text-sm">
+      <div className="flex items-center gap-2">
+        <Gauge size={14} className="shrink-0 text-[var(--color-muted)]" />
+        <label htmlFor="bw-cap" className="font-medium">
+          {tr("bandwidth_cap_label", undefined, "Upload speed limit")}
+        </label>
+        <input
+          id="bw-cap"
+          type="number"
+          min={0}
+          step={1}
+          value={value || ""}
+          placeholder="0"
+          onChange={(e) =>
+            onChange(Math.max(0, Math.floor(Number(e.target.value) || 0)))
+          }
+          className="w-20 rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-sm tabular-nums"
+        />
+        <span className="text-xs text-[var(--color-muted)]">MB/s</span>
       </div>
+      <div className="mt-0.5 text-xs text-[var(--color-muted)]">
+        {value > 0
+          ? tr(
+              "bandwidth_cap_on_hint",
+              { n: value },
+              `Uploads are capped at ${value} MB/s. Set to 0 to remove the limit.`,
+            )
+          : tr(
+              "bandwidth_cap_off_hint",
+              undefined,
+              "No limit. Set a cap if uploads saturate your Wi-Fi/LAN and make other devices laggy — it throttles the upload to leave headroom. Applies to the next started transfer.",
+            )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Danger zone: factory-reset. Deletes ALL local data + metadata (settings,
+ * roster, history, queues, caches, crash reports) and reloads the app fresh.
+ * Nothing on the PS5 is touched. Gated behind a destructive confirm dialog.
+ */
+function ResetPanel() {
+  const tr = useTr();
+  const { confirm, dialog } = useConfirm();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function doReset() {
+    const ok = await confirm({
+      title: tr("reset_confirm_title", undefined, "Reset PS5Upload?"),
+      message: tr(
+        "reset_confirm_body",
+        undefined,
+        "This permanently deletes ALL local PS5Upload data — settings, your saved PS5s, activity/queue history, payload caches, and crash reports. It does NOT touch anything on your PS5. The app reloads to a fresh state. This can't be undone.",
+      ),
+      confirmLabel: tr("reset_confirm_action", undefined, "Delete everything"),
+      destructive: true,
+    });
+    if (!ok) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await resetAllAppData();
+      // Reload so every store re-initialises from defaults.
+      window.location.reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-3 text-sm">
+      <p className="text-xs text-[var(--color-muted)]">
+        {tr(
+          "reset_hint",
+          undefined,
+          "Wipe every local trace of PS5Upload and start over: settings, saved PS5s, activity/queue history, payload caches, and crash reports. Nothing on your PS5 is affected. Export a backup above first if you might want it back.",
+        )}
+      </p>
+      <button
+        type="button"
+        onClick={doReset}
+        disabled={busy}
+        className="inline-flex items-center gap-1.5 rounded-md border border-[var(--color-bad)] px-3 py-1.5 text-xs text-[var(--color-bad)] hover:bg-[var(--color-bad)] hover:text-[var(--color-accent-contrast)] disabled:opacity-50"
+      >
+        {busy ? (
+          <Loader2 size={11} className="animate-spin" />
+        ) : (
+          <Trash2 size={11} />
+        )}
+        {tr("reset_action", undefined, "Reset all settings & data")}
+      </button>
+      {error && (
+        <div className="flex items-start gap-1 text-xs text-[var(--color-bad)]">
+          <AlertTriangle size={11} className="mt-0.5 shrink-0" />
+          {error}
+        </div>
+      )}
+      {dialog}
     </div>
   );
 }
@@ -946,23 +1144,23 @@ function BugReportButton() {
           : tr("bug_report_action", undefined, "Save bug report")}
       </button>
       {result && (
-        <div className="mt-2 flex items-center gap-1 text-[11px] text-[var(--color-good)]">
+        <div className="mt-2 flex items-center gap-1 text-xs text-[var(--color-good)]">
           <CheckCircle2 size={11} />
           {tr("bug_report_done", { path: result }, `Saved to ${result}`)}
         </div>
       )}
       {error && (
-        <div className="mt-2 flex items-start gap-1 text-[11px] text-[var(--color-bad)]">
+        <div className="mt-2 flex items-start gap-1 text-xs text-[var(--color-bad)]">
           <AlertTriangle size={11} className="mt-0.5 shrink-0" />
           {error}
         </div>
       )}
       {summary && (
-        <div className="mt-2 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-2 text-[11px]">
+        <div className="mt-2 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-2 text-xs">
           <div className="mb-1 font-medium text-[var(--color-muted)]">
             {tr("bug_report_includes", undefined, "Bundle includes")}
           </div>
-          <ul className="grid grid-cols-2 gap-x-4 gap-y-0.5 tabular-nums text-[10px]">
+          <ul className="grid grid-cols-2 gap-x-4 gap-y-0.5 tabular-nums text-xs">
             <li>
               {summary.logs} {tr("bug_report_logs", undefined, "log entries")}
             </li>
@@ -1122,7 +1320,7 @@ function CrashReportsButton() {
         )}
       </div>
       {stats?.dir && (
-        <div className="mt-0.5 break-all font-mono text-[10px] text-[var(--color-muted)]">
+        <div className="mt-0.5 break-all font-mono text-xs text-[var(--color-muted)]">
           {stats.dir}
         </div>
       )}
@@ -1158,7 +1356,7 @@ function CrashReportsButton() {
         </button>
       </div>
       {zipPath && (
-        <div className="mt-2 rounded-md border border-[var(--color-good)] bg-[var(--color-surface)] p-2 text-[11px]">
+        <div className="mt-2 rounded-md border border-[var(--color-good)] bg-[var(--color-surface)] p-2 text-xs">
           <div className="flex items-center gap-1 text-[var(--color-good)]">
             <CheckCircle2 size={11} />
             {tr("crash_reports_saved", { path: zipPath }, `Saved to ${zipPath}`)}
@@ -1181,7 +1379,7 @@ function CrashReportsButton() {
         </div>
       )}
       {error && (
-        <div className="mt-2 flex items-start gap-1 text-[11px] text-[var(--color-bad)]">
+        <div className="mt-2 flex items-start gap-1 text-xs text-[var(--color-bad)]">
           <AlertTriangle size={11} className="mt-0.5 shrink-0" />
           {error}
         </div>
@@ -1264,7 +1462,7 @@ function UpdatesPanel() {
           <button
             type="button"
             onClick={dismissDownload}
-            className="mt-2 text-[10px] underline-offset-2 hover:underline"
+            className="mt-2 text-xs underline-offset-2 hover:underline"
           >
             {tr("update_dismiss", undefined, "Dismiss")}
           </button>
@@ -1441,7 +1639,7 @@ function ReleaseNotes({
   if (!notes.trim()) return null;
   return (
     <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
-      <div className="mb-1 flex items-center justify-between text-[10px] uppercase tracking-wide text-[var(--color-muted)]">
+      <div className="mb-1 flex items-center justify-between text-xs uppercase tracking-wide text-[var(--color-muted)]">
         <span>{tr("whats_new_in", { version }, `What's new in v${version}`)}</span>
         {pubDate && (
           <span className="font-mono">

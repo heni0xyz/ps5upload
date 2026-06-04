@@ -170,6 +170,7 @@ export default function VolumesScreen() {
 
       {volumes === null && !loading && !error && (
         <EmptyState
+          fill
           message={tr(
             "library_waiting",
             undefined,
@@ -200,7 +201,7 @@ export default function VolumesScreen() {
           <header className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[var(--color-muted)]">
             <FileArchive size={13} />
             {tr("volumes_mounted_disk_images", undefined, "Mounted disk images")}
-            <span className="text-[10px] text-[var(--color-muted)]">
+            <span className="text-xs text-[var(--color-muted)]">
               · {mountedImages.length}
             </span>
           </header>
@@ -226,7 +227,7 @@ export default function VolumesScreen() {
           <header className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[var(--color-muted)]">
             <HardDrive size={13} />
             {tr("volumes_storage_drives", undefined, "Storage drives")}
-            <span className="text-[10px] text-[var(--color-muted)]">
+            <span className="text-xs text-[var(--color-muted)]">
               · {storageDrives.length}
             </span>
           </header>
@@ -278,19 +279,19 @@ function MountedImageCard({
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-semibold">{name}</div>
-          <div className="mt-0.5 truncate font-mono text-[11px] text-[var(--color-muted)]">
+          <div className="mt-0.5 truncate font-mono text-xs text-[var(--color-muted)]">
             {v.path}
           </div>
           {v.source_image && (
             <div
-              className="mt-2 truncate font-mono text-[11px] text-[var(--color-muted)]"
+              className="mt-2 truncate font-mono text-xs text-[var(--color-muted)]"
               title={v.source_image}
             >
               ← {v.source_image}
             </div>
           )}
         </div>
-        <span className="shrink-0 rounded-full border border-[var(--color-accent)] bg-[var(--color-accent-soft)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--color-accent)]">
+        <span className="shrink-0 rounded-full border border-[var(--color-accent)] bg-[var(--color-accent-soft)] px-2 py-0.5 text-xs font-medium uppercase tracking-wide text-[var(--color-accent)]">
           {tr("volumes_mounted", undefined, "mounted")}
         </span>
       </div>
@@ -317,7 +318,7 @@ function MountedImageCard({
         </div>
       )}
 
-      <div className="flex items-center justify-between gap-2 text-[11px] text-[var(--color-muted)]">
+      <div className="flex items-center justify-between gap-2 text-xs text-[var(--color-muted)]">
         <span>
           {v.fs_type} · {v.writable ? "rw" : "ro"}
         </span>
@@ -349,7 +350,7 @@ function StorageCard({ volume: v }: { volume: Volume }) {
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="truncate font-mono text-sm">{v.path}</div>
-          <div className="mt-0.5 text-[11px] text-[var(--color-muted)]">
+          <div className="mt-0.5 text-xs text-[var(--color-muted)]">
             {v.mount_from ? `${v.mount_from} · ` : ""}
             {v.fs_type}
             {" · "}
@@ -357,7 +358,7 @@ function StorageCard({ volume: v }: { volume: Volume }) {
           </div>
         </div>
         {!v.writable && (
-          <span className="shrink-0 rounded-full border border-[var(--color-border)] bg-[var(--color-surface-3)] px-2 py-0.5 text-[10px] uppercase tracking-wide text-[var(--color-muted)]">
+          <span className="shrink-0 rounded-full border border-[var(--color-border)] bg-[var(--color-surface-3)] px-2 py-0.5 text-xs uppercase tracking-wide text-[var(--color-muted)]">
             {tr("volumes_read_only", undefined, "read-only")}
           </span>
         )}

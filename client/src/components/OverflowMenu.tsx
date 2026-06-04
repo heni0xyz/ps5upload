@@ -138,7 +138,7 @@ export function OverflowMenu({
               )}
               <span className="flex-1">{item.label}</span>
               {item.loading && (
-                <span className="ml-2 text-[10px] text-[var(--color-muted)]">…</span>
+                <span className="ml-2 text-xs text-[var(--color-muted)]">…</span>
               )}
             </button>
           ))}

@@ -106,6 +106,7 @@ export default function DashboardScreen() {
 
       {payloadStatus !== "up" ? (
         <EmptyState
+          fill
           icon={LayoutDashboard}
           message={tr(
             "dashboard_no_payload",
@@ -190,11 +191,11 @@ export default function DashboardScreen() {
             title={`Running apps (${runningTitleIds.size})`}
           >
             {runningTitleIds.size === 0 ? (
-              <div className="text-[11px] text-[var(--color-muted)]">
+              <div className="text-xs text-[var(--color-muted)]">
                 {tr("dashboard_nothing_running", "Nothing currently running.")}
               </div>
             ) : (
-              <ul className="space-y-0.5 text-[11px]">
+              <ul className="space-y-0.5 text-xs">
                 {Array.from(runningTitleIds)
                   .slice(0, 5)
                   .map((tid) => (
@@ -216,11 +217,11 @@ export default function DashboardScreen() {
             title={tr("dashboard_recent_activity_title", "Recent activity")}
           >
             {recentActivity.length === 0 ? (
-              <div className="text-[11px] text-[var(--color-muted)]">
+              <div className="text-xs text-[var(--color-muted)]">
                 {tr("dashboard_no_recent_operations", "No recent operations.")}
               </div>
             ) : (
-              <ul className="space-y-0.5 text-[11px]">
+              <ul className="space-y-0.5 text-xs">
                 {recentActivity.map((e) => (
                   <li key={e.id} className="flex items-start gap-1">
                     {e.outcome === "done" && (
@@ -253,11 +254,11 @@ export default function DashboardScreen() {
             title={tr("dashboard_recent_notifications_title", "Recent notifications")}
           >
             {recentNotifs.length === 0 ? (
-              <div className="text-[11px] text-[var(--color-muted)]">
+              <div className="text-xs text-[var(--color-muted)]">
                 {tr("dashboard_no_notifications", "No notifications yet.")}
               </div>
             ) : (
-              <ul className="space-y-1 text-[11px]">
+              <ul className="space-y-1 text-xs">
                 {recentNotifs.map((n) => (
                   <li key={n.id}>
                     <span className="font-medium">{n.title}</span>
@@ -311,7 +312,7 @@ function KvRow({
   small?: boolean;
 }) {
   return (
-    <div className="flex items-center justify-between text-[11px]">
+    <div className="flex items-center justify-between text-xs">
       <span className="text-[var(--color-muted)]">{label}</span>
       <span
         className={`tabular-nums ${

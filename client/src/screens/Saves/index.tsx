@@ -311,6 +311,7 @@ export default function SavesScreen() {
 
       {payloadStatus !== "up" && (
         <EmptyState
+          fill
           icon={Save}
           message={tr(
             "saves_no_payload",
@@ -353,7 +354,7 @@ export default function SavesScreen() {
                 mgmtAddr={host?.trim() ? mgmtAddr(host.trim()) : null}
               />
               <h3 className="text-sm font-semibold">{title_id}</h3>
-              <span className="text-[11px] text-[var(--color-muted)]">
+              <span className="text-xs text-[var(--color-muted)]">
                 {entries.length} {tr("saves_folder", undefined, "folder")}
                 {entries.length === 1 ? "" : "s"}
               </span>
@@ -364,14 +365,14 @@ export default function SavesScreen() {
                   key={e.path}
                   className="flex items-center gap-3 rounded-md bg-[var(--color-surface)] px-2 py-1.5 text-xs"
                 >
-                  <span className="rounded bg-[var(--color-surface-3)] px-1.5 py-0.5 text-[10px] uppercase">
+                  <span className="rounded bg-[var(--color-surface-3)] px-1.5 py-0.5 text-xs uppercase">
                     {e.kind}
                   </span>
                   <div className="min-w-0 flex-1">
-                    <code className="block truncate text-[10px] text-[var(--color-muted)]">
+                    <code className="block truncate text-xs text-[var(--color-muted)]">
                       {e.path}
                     </code>
-                    <div className="text-[10px] text-[var(--color-muted)]">
+                    <div className="text-xs text-[var(--color-muted)]">
                       {tr("saves_user", undefined, "user")} {e.user_id} ·{" "}
                       {formatBytes(e.size)} ·{" "}
                       {new Date(e.mtime * 1000).toLocaleDateString()}

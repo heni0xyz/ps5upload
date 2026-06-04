@@ -595,7 +595,7 @@ function HistoryPanel({
           onClick={onClear}
           disabled={records.length === 0}
           title={tr("sendpayload_clear_history", undefined, "Clear history")}
-          className="flex items-center gap-1 rounded-md border border-[var(--color-border)] px-2 py-1 text-[11px] hover:bg-[var(--color-surface-3)] disabled:opacity-40"
+          className="flex items-center gap-1 rounded-md border border-[var(--color-border)] px-2 py-1 text-xs hover:bg-[var(--color-surface-3)] disabled:opacity-40"
         >
           <Trash2 size={11} />
           {tr("sendpayload_clear", undefined, "Clear")}
@@ -625,7 +625,7 @@ function HistoryPanel({
                   <div className="truncate font-mono">
                     {fileNameFrom(rec.path)}
                   </div>
-                  <div className="mt-0.5 flex items-center gap-2 text-[11px] text-[var(--color-muted)]">
+                  <div className="mt-0.5 flex items-center gap-2 text-xs text-[var(--color-muted)]">
                     <span>
                       {rec.host}:{rec.port}
                     </span>

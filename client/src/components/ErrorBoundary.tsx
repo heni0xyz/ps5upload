@@ -104,7 +104,7 @@ export class RootErrorBoundary extends Component<Props, State> {
               <summary className="cursor-pointer select-none">
                 {this.tr("errorboundary_show_stack", "Show stack trace")}
               </summary>
-              <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap rounded bg-[var(--color-surface)] p-3 font-mono text-[11px] leading-tight">
+              <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap rounded bg-[var(--color-surface)] p-3 font-mono text-xs leading-tight">
                 {err.stack ?? "(no stack)"}
                 {componentStack ? `\n\n${componentStack}` : ""}
               </pre>
@@ -141,7 +141,7 @@ export class RootErrorBoundary extends Component<Props, State> {
                 {this.tr("errorboundary_report_crash", "Report this crash")}
               </button>
             </div>
-            <div className="mt-3 text-[11px] text-[var(--color-muted)]">
+            <div className="mt-3 text-xs text-[var(--color-muted)]">
               {this.tr(
                 "errorboundary_recorded_in_logs",
                 "This was saved to a crash report automatically. Click “Report this crash” to package it and post it on Discord so we can fix it.",

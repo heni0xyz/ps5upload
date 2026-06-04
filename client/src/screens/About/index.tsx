@@ -100,7 +100,7 @@ export default function AboutScreen() {
               v{version}
             </span>
           )}
-          <span className="rounded-full border border-[var(--color-good)] bg-[var(--color-good-soft)] px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-good)]">
+          <span className="rounded-full border border-[var(--color-good)] bg-[var(--color-good-soft)] px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-[var(--color-good)]">
             GPL-3
           </span>
         </div>
@@ -154,7 +154,7 @@ export default function AboutScreen() {
         <Card>
           <div className="flex flex-col gap-3 text-sm md:flex-row md:items-center md:justify-between">
             <div>
-              <div className="text-[11px] uppercase tracking-wider text-[var(--color-muted)]">
+              <div className="text-xs uppercase tracking-wider text-[var(--color-muted)]">
                 {tr("created_by", undefined, "Created by")}
               </div>
               <button

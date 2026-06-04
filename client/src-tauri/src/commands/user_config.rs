@@ -151,3 +151,72 @@ pub async fn user_config_save(app: AppHandle, config: JsonValue) -> Result<(), S
     }
     Ok(())
 }
+
+/// Resolve the config BASE dir (`~/.ps5upload` on desktop, app_config_dir on
+/// mobile) — the parent that holds settings.json, crash-reports/, and any
+/// legacy config files.
+fn config_base_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        app.path()
+            .app_config_dir()
+            .map_err(|e| format!("cannot resolve app config dir: {e}"))
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        let home = app
+            .path()
+            .home_dir()
+            .map_err(|e| format!("cannot resolve home dir: {e}"))?;
+        Ok(home.join(".ps5upload"))
+    }
+}
+
+/// Factory-reset: delete ALL local ps5upload data + metadata so the next
+/// launch starts from defaults. Wipes:
+///   - the config base dir (`~/.ps5upload`): settings.json, crash-reports/,
+///     and any legacy `*.ini` / profile files — the whole dir is exclusively
+///     ours, so it's removed wholesale and recreated empty.
+///   - app_data caches (resume_txids.json, send_payload_history.json, the
+///     payloads/ cache) — removed surgically so we never touch the WebView's
+///     own storage that can also live under app_data_dir.
+///
+/// The renderer owns clearing its localStorage + reloading the window; this
+/// command only touches the filesystem. Returns a count of items removed.
+#[tauri::command]
+pub async fn app_data_reset(app: AppHandle) -> Result<usize, String> {
+    let mut removed = 0usize;
+
+    // 1. Config base dir — remove wholesale, then recreate empty so later
+    //    writes don't fail on a missing parent.
+    if let Ok(base) = config_base_dir(&app) {
+        if base.exists() {
+            std::fs::remove_dir_all(&base).map_err(|e| format!("remove {base:?}: {e}"))?;
+            removed += 1;
+        }
+        let _ = std::fs::create_dir_all(&base);
+    }
+
+    // 2. app_data caches — surgical (NOT the whole app_data_dir).
+    if let Ok(data) = app.path().app_data_dir() {
+        for entry in [
+            "resume_txids.json",
+            "send_payload_history.json",
+            "payloads",
+        ] {
+            let p = data.join(entry);
+            if !p.exists() {
+                continue;
+            }
+            let r = if p.is_dir() {
+                std::fs::remove_dir_all(&p)
+            } else {
+                std::fs::remove_file(&p)
+            };
+            r.map_err(|e| format!("remove {p:?}: {e}"))?;
+            removed += 1;
+        }
+    }
+
+    Ok(removed)
+}

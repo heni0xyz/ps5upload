@@ -41,12 +41,12 @@ export function PageHeader({
     <header className="mb-5">
       <div className="mb-1 flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3">
-          <Icon size={20} className="shrink-0 text-[var(--color-accent)]" />
-          <h1 className="truncate text-xl font-semibold tracking-tight">
+          <Icon size={22} className="shrink-0 text-[var(--color-accent)]" />
+          <h1 className="truncate text-2xl font-semibold tracking-tight">
             {title}
           </h1>
           {count !== undefined && (
-            <span className="shrink-0 rounded-full bg-[var(--color-surface-3)] px-2 py-0.5 text-[11px] tabular-nums text-[var(--color-muted)]">
+            <span className="shrink-0 rounded-full bg-[var(--color-surface-3)] px-2 py-0.5 text-xs tabular-nums text-[var(--color-muted)]">
               {count}
             </span>
           )}

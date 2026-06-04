@@ -813,7 +813,7 @@ function FanCurvePreview({ thresholdC }: { thresholdC: number }) {
     .join(" ");
   return (
     <div className="mb-3 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-2">
-      <div className="mb-1 flex items-center justify-between text-[10px] text-[var(--color-muted)]">
+      <div className="mb-1 flex items-center justify-between text-xs text-[var(--color-muted)]">
         <span>
           {tr("hardware_fan_curve_preview", "Fan curve preview (approximate)")}
         </span>
@@ -1032,7 +1032,7 @@ function SmpMetaCard({
         {busy && (
           <Loader2 size={12} className="animate-spin text-[var(--color-accent)]" />
         )}
-        <span className="ml-auto flex items-center gap-1 text-[10px] font-medium">
+        <span className="ml-auto flex items-center gap-1 text-xs font-medium">
           {running ? (
             <>
               <span className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--color-good)]" />
@@ -1047,7 +1047,7 @@ function SmpMetaCard({
         </span>
       </header>
 
-      <p className="mb-3 text-[11px] text-[var(--color-muted)]">
+      <p className="mb-3 text-xs text-[var(--color-muted)]">
         {tr(
           "smp_meta_blurb",
           "Background worker that copies missing icons + game art from /user/app into /user/appmeta. Fixes blank home-screen tiles caused by ShadowMountPlus. Off by default.",
@@ -1065,7 +1065,7 @@ function SmpMetaCard({
         </Button>
       ) : (
         <>
-          <dl className="mb-3 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px]">
+          <dl className="mb-3 grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
             <dt className="text-[var(--color-muted)]">
               {tr("smp_meta_games", "Games")}
             </dt>
@@ -1136,7 +1136,7 @@ function SmpMetaCard({
       )}
 
       {error && (
-        <div className="mt-2 flex items-start gap-1 text-[10px] text-[var(--color-bad)]">
+        <div className="mt-2 flex items-start gap-1 text-xs text-[var(--color-bad)]">
           <AlertTriangle size={11} className="mt-0.5 shrink-0" />
           <span className="font-mono break-all">{error}</span>
         </div>
@@ -1230,10 +1230,10 @@ function SystemLogSection({ host, payloadStatus }: SystemLogSectionProps) {
             </span>
           </div>
           {logErr && (
-            <div className="mb-2 text-[11px] text-[var(--color-bad)]">{logErr}</div>
+            <div className="mb-2 text-xs text-[var(--color-bad)]">{logErr}</div>
           )}
           {text ? (
-            <pre className="max-h-[480px] overflow-auto rounded border border-[var(--color-border)] bg-[var(--color-surface-2)] p-2 text-[11px] font-mono leading-snug whitespace-pre-wrap break-words">
+            <pre className="max-h-[480px] overflow-auto rounded border border-[var(--color-border)] bg-[var(--color-surface-2)] p-2 text-xs font-mono leading-snug whitespace-pre-wrap break-words">
               {text}
             </pre>
           ) : (

@@ -361,6 +361,7 @@ pub fn run() {
             commands::user_config_load, // ~/.ps5upload/settings.json read
             commands::user_config_save, // ~/.ps5upload/settings.json atomic write
             commands::user_config_path_resolved, // show-the-path for the Settings UI
+            commands::app_data_reset, // factory-reset: wipe all local data/metadata
             // ── Connectivity + payload lifecycle probes ─────────────
             // Used by the Connection + Send payload tabs for
             // reachability checks and payload delivery.

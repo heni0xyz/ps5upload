@@ -848,7 +848,7 @@ function Step2Options(props: {
         </button>
       </div>
       {preflightError && (
-        <div className="mt-2 rounded-md border border-[var(--color-bad)] bg-[var(--color-surface)] p-2 text-[11px] text-[var(--color-bad)]">
+        <div className="mt-2 rounded-md border border-[var(--color-bad)] bg-[var(--color-surface)] p-2 text-xs text-[var(--color-bad)]">
           {tr(
             "upload_preflight_failed",
             { msg: preflightError },
@@ -965,7 +965,7 @@ function MirrorToRosterButton({
           type="button"
           onClick={fanOut}
           disabled={busy}
-          className="rounded-md border border-[var(--color-border)] px-2 py-1 text-[11px] hover:bg-[var(--color-surface-2)] disabled:opacity-50"
+          className="rounded-md border border-[var(--color-border)] px-2 py-1 text-xs hover:bg-[var(--color-surface-2)] disabled:opacity-50"
         >
           {busy
             ? tr("upload_mirror_busy", undefined, "Mirroring…")
@@ -1246,7 +1246,7 @@ function TransferStatus({ phase }: { phase: TransferPhase }) {
             <button
               type="button"
               onClick={() => resetTransfer()}
-              className="rounded-md border border-[var(--color-border)] px-2 py-0.5 text-[10px] text-[var(--color-text)] hover:bg-[var(--color-surface-3)]"
+              className="rounded-md border border-[var(--color-border)] px-2 py-0.5 text-xs text-[var(--color-text)] hover:bg-[var(--color-surface-3)]"
               title={tr(
                 "upload_status_stop_tooltip",
                 "Stop watching this upload (engine job continues server-side until next BEGIN_TX preempts it)",
@@ -1368,7 +1368,7 @@ function TransferStatus({ phase }: { phase: TransferPhase }) {
           )}
         </dl>
         {phase.mountWarnings && phase.mountWarnings.length > 0 && (
-          <ul className="mt-2 space-y-1 rounded-md border border-[var(--color-warn)] bg-[var(--color-surface)] p-2 text-[11px] text-[var(--color-warn)]">
+          <ul className="mt-2 space-y-1 rounded-md border border-[var(--color-warn)] bg-[var(--color-surface)] p-2 text-xs text-[var(--color-warn)]">
             {phase.mountWarnings.map((w) => (
               <li key={w}>⚠ {w}</li>
             ))}
@@ -2067,7 +2067,7 @@ function ArchiveExtractModeCard({
                 <span className="mt-0.5 block text-xs text-[var(--color-muted)]">
                   {opt.desc}
                 </span>
-                <span className="mt-1 block truncate font-mono text-[11px] text-[var(--color-muted)]">
+                <span className="mt-1 block truncate font-mono text-xs text-[var(--color-muted)]">
                   {tr("upload_zip_extract_lands_at", "Lands at:")}{" "}
                   <span className="text-[var(--color-text)]">{opt.preview}</span>
                 </span>
@@ -2147,13 +2147,13 @@ function BandwidthCard() {
           <button
             type="button"
             onClick={() => setCap(0)}
-            className="text-[10px] text-[var(--color-muted)] underline-offset-2 hover:underline"
+            className="text-xs text-[var(--color-muted)] underline-offset-2 hover:underline"
           >
             {tr("upload_bandwidth_clear", undefined, "remove cap")}
           </button>
         )}
       </div>
-      <p className="mt-1 text-[11px] text-[var(--color-muted)]">
+      <p className="mt-1 text-xs text-[var(--color-muted)]">
         {cap > 0
           ? tr(
               "upload_bandwidth_active",

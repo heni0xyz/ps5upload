@@ -17,7 +17,8 @@
 //!     back to a TCP probe of :9021 (the universal payload-loader
 //!     port) on every host that did show up via mDNS for any reason.
 //!   - And, as a last-ditch fallback when mDNS turns up zero hosts,
-//!     a concurrent /24 sweep of the local subnet probing :9114 (our
+//!     a concurrent /24 sweep of EVERY local subnet (all network
+//!     interfaces — Ethernet + Wi-Fi + USB-tether) probing :9114 (our
 //!     own payload's mgmt port). Nothing else binds 9114, so a hit is
 //!     a near-certain PS5-with-our-payload signal. Keeps discovery
 //!     working when the LAN has mDNS suppressed (some routers/APs
@@ -448,60 +449,101 @@ async fn tcp_probe(ip: &str, port: u16) -> bool {
 /// across all jailbreak chains and would false-positive on PS5s
 /// running competing payloads, fooling the confidence score).
 ///
-/// Uses the same UDP-connect trick `lan_ip_for_ps5` uses to learn our
-/// outbound IPv4: the OS picks the routed interface without sending
-/// a packet. We then sweep that interface's /24. Multi-homed hosts
-/// only get one subnet swept; multi-homed discovery is a v2.17.0+
-/// concern (would need `if-addrs` crate dep and per-interface scan).
+/// Enumerates EVERY local IPv4 interface (Ethernet + Wi-Fi + USB-tether
+/// simultaneously, via the `if-addrs` crate) and sweeps each one's /24. A
+/// multi-homed host — e.g. a laptop wired to the PS5's LAN while also on
+/// Wi-Fi — gets all of its subnets probed, not just the default-route one.
+/// Falls back to the UDP-connect routing-table trick if interface
+/// enumeration yields nothing (so behaviour never regresses below the old
+/// single-subnet sweep).
 ///
-/// Returns Vec<(ip, hostname)>; hostname is reverse-DNS, best-effort.
-/// Capped at 254 concurrent connects (the /24 hostnumber range) with
-/// a short per-host timeout, so the whole sweep finishes in well under
-/// one wallclock second on a LAN.
+/// Restricted to private + link-local interface addresses so we never blast
+/// a public /24 the host happens to sit directly on. Subnets are deduped by
+/// /24, and total concurrency is capped by a semaphore (independent of how
+/// many interfaces exist) so a tri-homed host can't exhaust the process FD
+/// limit — macOS defaults to a 256 soft limit and a naive 3×254 fan-out
+/// would blow straight through it.
+///
+/// Returns Vec<(ip, hostname)>; hostname is left None (no reverse-DNS — PTR
+/// timeouts would dominate the sweep wallclock and home LANs rarely have a
+/// record for the PS5).
 async fn lan_sweep_for_payload_port() -> Vec<(Ipv4Addr, Option<String>)> {
-    // Routable IPv4-detection trick. UDP `connect` doesn't send a
-    // packet — just resolves the routing table — so this is a no-op
-    // on the network. We pick a public IP we won't actually talk to
-    // (1.1.1.1) so private-net users don't get a loopback fallback.
-    let local_ipv4 = match std::net::UdpSocket::bind("0.0.0.0:0")
-        .and_then(|s| s.connect("1.1.1.1:1").and_then(|_| s.local_addr()))
-    {
-        Ok(addr) => match addr.ip() {
-            IpAddr::V4(v4) if !v4.is_loopback() && !v4.is_unspecified() => v4,
-            // IPv6-only host or no route — nothing to sweep. Quiet
-            // return; mDNS-only behavior is the right answer here.
-            _ => return Vec::new(),
-        },
-        Err(_) => return Vec::new(),
-    };
+    use std::collections::HashSet;
+    use std::sync::Arc;
 
-    // Probe every host in the /24, skipping our own address (we're
-    // not the PS5) and the .0 / .255 network/broadcast addresses
-    // (which a TCP connect against would just fail anyway, but
-    // omitting them shaves two redundant probes).
-    let octets = local_ipv4.octets();
-    let mut tasks = Vec::with_capacity(253);
-    for host in 1u8..=254 {
-        let candidate = Ipv4Addr::new(octets[0], octets[1], octets[2], host);
-        if candidate == local_ipv4 {
-            continue;
-        }
-        tasks.push(tokio::spawn(async move {
-            if tcp_probe(&candidate.to_string(), PS5_MGMT_PORT).await {
-                Some(candidate)
-            } else {
-                None
+    // Collect every usable local IPv4. Private (10/8, 172.16/12, 192.168/16)
+    // and link-local (169.254/16) only — those are same-LAN reachable; a
+    // public interface address would mean sweeping strangers' hosts.
+    let mut locals: Vec<Ipv4Addr> = Vec::new();
+    if let Ok(ifaces) = if_addrs::get_if_addrs() {
+        for iface in ifaces {
+            if iface.is_loopback() {
+                continue;
             }
-        }));
+            if let IpAddr::V4(v4) = iface.ip() {
+                if v4.is_private() || v4.is_link_local() {
+                    locals.push(v4);
+                }
+            }
+        }
+    }
+    // Fallback: routing-table trick (UDP `connect` sends no packet) when
+    // enumeration found nothing usable.
+    if locals.is_empty() {
+        if let Ok(addr) = std::net::UdpSocket::bind("0.0.0.0:0")
+            .and_then(|s| s.connect("1.1.1.1:1").and_then(|_| s.local_addr()))
+        {
+            if let IpAddr::V4(v4) = addr.ip() {
+                if !v4.is_loopback() && !v4.is_unspecified() {
+                    locals.push(v4);
+                }
+            }
+        }
+    }
+    if locals.is_empty() {
+        // IPv6-only host or no route — nothing to sweep. mDNS-only is the
+        // right answer here.
+        return Vec::new();
+    }
+
+    // Our own addresses (skip them — we're not the PS5) and the set of
+    // distinct /24 subnets to sweep.
+    let self_ips: HashSet<Ipv4Addr> = locals.iter().copied().collect();
+    let mut swept_subnets: HashSet<[u8; 3]> = HashSet::new();
+
+    // Cap concurrent connects across ALL subnets so multi-homed hosts don't
+    // exhaust the FD limit. 200 < the 256 macOS soft default, leaving
+    // headroom for the app's other sockets; the sweep still finishes in
+    // well under a second on a LAN.
+    let sem = Arc::new(tokio::sync::Semaphore::new(200));
+    let mut tasks = Vec::new();
+    for local in &locals {
+        let o = local.octets();
+        let prefix = [o[0], o[1], o[2]];
+        if !swept_subnets.insert(prefix) {
+            continue; // two interfaces on the same /24 → sweep once
+        }
+        for host in 1u8..=254 {
+            let candidate = Ipv4Addr::new(prefix[0], prefix[1], prefix[2], host);
+            if self_ips.contains(&candidate) {
+                continue;
+            }
+            let sem = Arc::clone(&sem);
+            tasks.push(tokio::spawn(async move {
+                // Permit released on drop when the probe completes.
+                let _permit = sem.acquire_owned().await.ok()?;
+                if tcp_probe(&candidate.to_string(), PS5_MGMT_PORT).await {
+                    Some(candidate)
+                } else {
+                    None
+                }
+            }));
+        }
     }
 
     let mut hits = Vec::new();
     for t in tasks {
         if let Ok(Some(ip)) = t.await {
-            // We deliberately don't reverse-DNS — most home LANs
-            // don't have a PTR record for the PS5, and DNS timeouts
-            // would dominate the sweep wallclock. Hostname stays
-            // None for sweep-found hosts; renderer shows the IP.
             hits.push((ip, None));
         }
     }
@@ -587,6 +629,25 @@ mod tests {
     fn loader_port_alone_clears_threshold() {
         let s = score("foo.local", &[], &[], true, false);
         assert!(s >= confidence::HIGH_THRESHOLD);
+    }
+
+    /// Hardware-gated: runs the REAL all-interface LAN sweep and asserts the
+    /// PS5 named in `PS5_HW_SWEEP` (e.g. `192.168.86.99`) is found. Skipped
+    /// in CI / normal runs — set the env var to exercise it:
+    ///   PS5_HW_SWEEP=192.168.86.99 cargo test -p ps5upload-desktop sweep_finds -- --ignored --nocapture
+    #[tokio::test]
+    #[ignore]
+    async fn sweep_finds_real_ps5() {
+        let want = match std::env::var("PS5_HW_SWEEP") {
+            Ok(v) if !v.is_empty() => v.parse::<Ipv4Addr>().expect("valid IPv4"),
+            _ => return,
+        };
+        let hits = lan_sweep_for_payload_port().await;
+        println!("sweep hits: {hits:?}");
+        assert!(
+            hits.iter().any(|(ip, _)| *ip == want),
+            "expected {want} in sweep results {hits:?}"
+        );
     }
 
     #[test]

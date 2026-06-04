@@ -148,16 +148,17 @@ export default function Sidebar({
     <aside className="flex w-60 shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface-2)] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)]">
       {/* Brand header — compact, logo + name + version in a single
           row. Subtle border below separates it from the nav. */}
-      <div className="flex items-center gap-2.5 border-b border-[var(--color-border)] px-4 py-4">
+      <div className="flex items-center gap-3 border-b border-[var(--color-border)] px-4 py-3.5">
         <img
           src="/logo-square.png"
-          alt=""
-          aria-hidden
-          className="h-9 w-9 rounded-md"
+          alt="PS5Upload"
+          className="h-11 w-11 shrink-0 rounded-lg"
         />
         <div className="flex min-w-0 flex-col leading-tight">
-          <span className="truncate text-sm font-semibold">PS5Upload</span>
-          <span className="truncate text-[11px] text-[var(--color-muted)]">
+          <span className="truncate text-base font-bold tracking-tight">
+            PS5Upload
+          </span>
+          <span className="truncate text-xs text-[var(--color-muted)]">
             {version ? `v${version}` : "—"}
           </span>
         </div>
@@ -181,7 +182,7 @@ export default function Sidebar({
               {section && (
                 <div
                   className={clsx(
-                    "px-3 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-muted)]",
+                    "px-3 text-xs font-semibold uppercase tracking-wider text-[var(--color-muted)]",
                     idx === 0 ? "mb-1" : "mb-1 mt-3",
                   )}
                 >
@@ -206,7 +207,7 @@ export default function Sidebar({
                 </span>
                 {isLogs && errorCount > 0 && (
                   <span
-                    className="rounded-full bg-[var(--color-bad)] px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-white group-[.active]:bg-white group-[.active]:text-[var(--color-bad)]"
+                    className="rounded-full bg-[var(--color-bad)] px-1.5 py-0.5 text-xs font-semibold tabular-nums text-white group-[.active]:bg-white group-[.active]:text-[var(--color-bad)]"
                     title={tr(
                       errorCount === 1 ? "logged_error_one" : "logged_error_many",
                       { count: errorCount },

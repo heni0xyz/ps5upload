@@ -335,7 +335,7 @@ function PayloadCard({
             <button
               type="button"
               onClick={onOpenHomepage}
-              className="inline-flex items-center gap-1 text-[11px] text-[var(--color-muted)] hover:text-[var(--color-accent)]"
+              className="inline-flex items-center gap-1 text-xs text-[var(--color-muted)] hover:text-[var(--color-accent)]"
               title={info.homepage}
             >
               <ExternalLink size={11} />
@@ -350,7 +350,7 @@ function PayloadCard({
           </p>
         </div>
         <div className="flex flex-col items-end gap-2">
-          <div className="flex items-center gap-2 text-[11px]">
+          <div className="flex items-center gap-2 text-xs">
             {local ? (
               upToDate ? (
                 <span className="inline-flex items-center gap-1 text-[var(--color-good)]">
@@ -409,7 +409,7 @@ function PayloadCard({
                   value={selectedTag}
                   onChange={(e) => onSelectTag(e.target.value)}
                   disabled={busy}
-                  className="max-w-[12rem] rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 py-1 text-[11px]"
+                  className="max-w-[12rem] rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 py-1 text-xs"
                   title={tr(
                     "payloads_version_tooltip",
                     undefined,
@@ -472,7 +472,7 @@ function PayloadCard({
       </div>
 
       {release && (
-        <div className="mt-3 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-2 text-[11px]">
+        <div className="mt-3 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-2 text-xs">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[var(--color-muted)]">
             <span>
               {tr(
@@ -514,7 +514,7 @@ function PayloadCard({
             // user has no way to tell live data from N-day-stale
             // cache, and might wonder why the "latest" version
             // doesn't match a release they just saw on GitHub.
-            <div className="mt-2 flex items-start gap-1.5 rounded-md border border-[var(--color-warn)] bg-[var(--color-surface)] p-2 text-[11px] text-[var(--color-warn)]">
+            <div className="mt-2 flex items-start gap-1.5 rounded-md border border-[var(--color-warn)] bg-[var(--color-surface)] p-2 text-xs text-[var(--color-warn)]">
               <AlertTriangle size={11} className="mt-0.5 shrink-0" />
               <span>
                 {tr(
@@ -537,7 +537,7 @@ function PayloadCard({
       )}
 
       {error && (
-        <div className="mt-3 flex items-start gap-2 rounded-md border border-[var(--color-bad)] bg-[var(--color-surface)] p-2 text-[11px] text-[var(--color-bad)]">
+        <div className="mt-3 flex items-start gap-2 rounded-md border border-[var(--color-bad)] bg-[var(--color-surface)] p-2 text-xs text-[var(--color-bad)]">
           <AlertTriangle size={11} className="mt-0.5 shrink-0" />
           <span className="break-words">{error}</span>
         </div>

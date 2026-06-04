@@ -81,7 +81,7 @@ export default function RosterPicker() {
               <div className="truncate font-medium text-[var(--color-text)]">
                 {active.name}
               </div>
-              <div className="truncate text-[10px] text-[var(--color-muted)]">
+              <div className="truncate text-xs text-[var(--color-muted)]">
                 {active.host}
                 {fwLabel && ` · FW ${fwLabel}`}
               </div>
@@ -123,7 +123,7 @@ export default function RosterPicker() {
                     )}
                     <div className="min-w-0 flex-1">
                       <div className="truncate">{p.name}</div>
-                      <div className="truncate text-[10px] text-[var(--color-muted)]">
+                      <div className="truncate text-xs text-[var(--color-muted)]">
                         {p.host}
                       </div>
                     </div>
@@ -261,7 +261,7 @@ function RosterManageModal({ onClose }: { onClose: () => void }) {
                         undefined,
                         "Notes (e.g. firmware quirks, do-not-update warnings)",
                       )}
-                      className="w-full resize-y rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-[11px]"
+                      className="w-full resize-y rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-xs"
                     />
                     <div className="flex items-center gap-2">
                       <button
@@ -286,7 +286,7 @@ function RosterManageModal({ onClose }: { onClose: () => void }) {
                       <div className="font-medium">{p.name}</div>
                       <div className="text-[var(--color-muted)]">{p.host}</div>
                       {p.last_seen_at && (
-                        <div className="mt-0.5 text-[10px] text-[var(--color-muted)]">
+                        <div className="mt-0.5 text-xs text-[var(--color-muted)]">
                           {tr(
                             "roster_last_seen",
                             { when: new Date(p.last_seen_at * 1000).toLocaleString() },
@@ -297,7 +297,7 @@ function RosterManageModal({ onClose }: { onClose: () => void }) {
                         </div>
                       )}
                       {p.notes && (
-                        <div className="mt-1 whitespace-pre-wrap rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-[10px] italic text-[var(--color-muted)]">
+                        <div className="mt-1 whitespace-pre-wrap rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-xs italic text-[var(--color-muted)]">
                           {p.notes}
                         </div>
                       )}

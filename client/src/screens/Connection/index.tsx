@@ -339,6 +339,7 @@ export default function ConnectionScreen() {
   }
 
   async function handleSend() {
+    const target = host.trim();
     if (step1 !== "ok") return;
     if (step2 === "busy") return;
     // Mark version + kernel as stale the moment the user clicks Send.
@@ -370,11 +371,11 @@ export default function ConnectionScreen() {
         "busy",
         tr(
           "connection_sending_elf",
-          { elf, host, port: PS5_LOADER_PORT },
+          { elf, host: target, port: PS5_LOADER_PORT },
           "Sending {elf} to {host}:{port}…",
         ),
       );
-      await sendPayload(host, elf);
+      await sendPayload(target, elf);
     } catch (e) {
       // Send itself failed (loader-port unreachable, ELF missing,
       // etc.) — no new payload to probe; clear the probing flag so
@@ -407,7 +408,7 @@ export default function ConnectionScreen() {
         // payload answers, the VersionBlock flips to the new numbers
         // in lock-step with step2 going "ok".
         try {
-          const status = await payloadCheck(host);
+          const status = await payloadCheck(target);
           if (status.reachable) {
             // Guard against a host change mid-flight. handleSend
             // captured `host` in its closure when the user clicked
@@ -415,10 +416,10 @@ export default function ConnectionScreen() {
             // this probe resolved, the result we're holding is for
             // the OLD host. Don't pollute the store with it — let
             // AppShell's host-change effect handle the NEW host.
-            if (useConnectionStore.getState().host === host) {
+            if (useConnectionStore.getState().host === target) {
               setStatus({
                 payloadStatus: "up",
-                payloadStatusHost: host,
+                payloadStatusHost: target,
                 payloadVersion: status.payloadVersion,
                 ps5Kernel: status.ps5Kernel,
                 ucredElevated: status.ucredElevated,
@@ -443,7 +444,7 @@ export default function ConnectionScreen() {
       onResolved: (result) => {
         pollHandle.current = null;
         if (result === "ok") {
-          settleStep2("ok", tr("connection_payload_running", { host }, `Helper is running on ${host}`));
+          settleStep2("ok", tr("connection_payload_running", { host: target }, `Helper is running on ${target}`));
         } else {
           // Probe loop exhausted without a reachable payload. Clear
           // the rechecking flag so the banner doesn't dangle —
@@ -607,7 +608,7 @@ export default function ConnectionScreen() {
               variant="primary"
               size="md"
               leftIcon={<Send size={14} />}
-              onClick={handleSend}
+              onClick={() => void handleSend()}
               disabled={step2 === "busy"}
               loading={step2 === "busy"}
             >
@@ -773,14 +774,14 @@ function DiscoverResults({
   const tr = useTr();
   if (error) {
     return (
-      <div className="mt-2 rounded-md border border-[var(--color-bad)] bg-[var(--color-surface)] p-2 text-[11px] text-[var(--color-bad)]">
+      <div className="mt-2 rounded-md border border-[var(--color-bad)] bg-[var(--color-surface)] p-2 text-xs text-[var(--color-bad)]">
         {error}
       </div>
     );
   }
   if (candidates.length === 0) {
     return (
-      <div className="mt-2 rounded-md border border-dashed border-[var(--color-border)] bg-[var(--color-surface)] p-2 text-[11px] text-[var(--color-muted)]">
+      <div className="mt-2 rounded-md border border-dashed border-[var(--color-border)] bg-[var(--color-surface)] p-2 text-xs text-[var(--color-muted)]">
         {tr(
           "connection_discover_empty",
           { ms: scannedMs },
@@ -791,7 +792,7 @@ function DiscoverResults({
   }
   return (
     <div className="mt-2 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)]">
-      <div className="border-b border-[var(--color-border)] px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-muted)]">
+      <div className="border-b border-[var(--color-border)] px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-[var(--color-muted)]">
         {tr(
           "connection_discover_header",
           { count: candidates.length, ms: scannedMs },
@@ -878,14 +879,14 @@ function DiscoverRow({
             </span>
           )}
           <span
-            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${tierColor}`}
+            className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${tierColor}`}
             title={`confidence: ${row.confidence}/100`}
           >
             {tierLabel}
           </span>
         </div>
         {badges.length > 0 && (
-          <div className="mt-1 flex flex-wrap gap-1.5 text-[10px] text-[var(--color-muted)]">
+          <div className="mt-1 flex flex-wrap gap-1.5 text-xs text-[var(--color-muted)]">
             {badges.map((b) => (
               <span
                 key={b}
@@ -945,17 +946,17 @@ function BundledPayloadBanner() {
      *   - disk full
      *   - gzip in the bundle is corrupted (very rare; fresh build fixes) */
     return (
-      <div className="mb-3 rounded-md border border-[var(--color-bad)] bg-[var(--color-surface)] p-2 text-[11px] text-[var(--color-bad)]">
+      <div className="mb-3 rounded-md border border-[var(--color-bad)] bg-[var(--color-surface)] p-2 text-xs text-[var(--color-bad)]">
         <div className="font-semibold">
           {tr(
             "connection_bundled_payload_unavailable",
             "Bundled helper not available",
           )}
         </div>
-        <div className="mt-0.5 break-words font-mono text-[10px] opacity-90">
+        <div className="mt-0.5 break-words font-mono text-xs opacity-90">
           {err}
         </div>
-        <div className="mt-1 text-[10px] opacity-80">
+        <div className="mt-1 text-xs opacity-80">
           {tr(
             "connection_rebuild_shell_hint",
             "If you've just rebuilt the helper, also rebuild the desktop shell (",
@@ -983,7 +984,7 @@ function BundledPayloadBanner() {
   const basename = info.path.split(/[\\/]/).pop() ?? info.path;
   return (
     <div
-      className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-[11px] text-[var(--color-muted)]"
+      className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-xs text-[var(--color-muted)]"
       title={info.path}
     >
       <span>
@@ -1069,7 +1070,7 @@ function CompanionStrip({ host }: { host: string }) {
 
   return (
     <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2">
-      <div className="mb-1.5 flex items-center justify-between text-[10px] font-semibold uppercase tracking-wide text-[var(--color-muted)]">
+      <div className="mb-1.5 flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-[var(--color-muted)]">
         <span>
           {tr(
             "connection_scene_header",
@@ -1197,7 +1198,7 @@ function CompanionPill({ row }: { row: CompanionStatus }) {
         }
       />
       <span className="font-medium">{row.name}</span>
-      <span className="font-mono text-[10px] opacity-70">:{row.port}</span>
+      <span className="font-mono text-xs opacity-70">:{row.port}</span>
     </span>
   );
 }
@@ -1274,7 +1275,7 @@ function VersionBlock({ onResend }: { onResend?: () => void }) {
           {tr("connection_block_connected", undefined, "Connected")}
         </span>
         {payloadProbing && (
-          <span className="flex items-center gap-1 normal-case tracking-normal text-[10px] font-normal text-[var(--color-accent)]">
+          <span className="flex items-center gap-1 normal-case tracking-normal text-xs font-normal text-[var(--color-accent)]">
             <Loader2 size={10} className="animate-spin" />
             {tr(
               "connection_block_rechecking",
@@ -1303,7 +1304,7 @@ function VersionBlock({ onResend }: { onResend?: () => void }) {
             <dd className={valueClass}>
               v{payloadVersion}
               {!payloadProbing && appVersion && cmp === 0 && (
-                <span className="ml-2 text-[10px] font-normal text-[var(--color-good)]">
+                <span className="ml-2 text-xs font-normal text-[var(--color-good)]">
                   {tr(
                     "connection_block_match",
                     undefined,
@@ -1312,7 +1313,7 @@ function VersionBlock({ onResend }: { onResend?: () => void }) {
                 </span>
               )}
               {!payloadProbing && appVersion && cmp === 1 && (
-                <span className="ml-2 text-[10px] font-normal text-[var(--color-muted)]">
+                <span className="ml-2 text-xs font-normal text-[var(--color-muted)]">
                   {tr(
                     "connection_block_newer",
                     { app: appVersion },
@@ -1382,7 +1383,7 @@ function VersionBlock({ onResend }: { onResend?: () => void }) {
         )}
       </dl>
       {ps5Kernel && !ps5Firmware && (
-        <p className="mt-2 text-[11px] text-[var(--color-muted)]">
+        <p className="mt-2 text-xs text-[var(--color-muted)]">
           {tr(
             "connection_firmware_parse_failed",
             "Couldn't parse a firmware number from the kernel string. Look up the kernel ID on psdevwiki.com, or run",
@@ -1398,7 +1399,7 @@ function VersionBlock({ onResend }: { onResend?: () => void }) {
       )}
 
       {payloadIsOlder && appVersion && payloadVersion && !payloadProbing && (
-        <div className="mt-3 flex flex-wrap items-start gap-2 rounded-md border border-[var(--color-warn)] bg-[var(--color-surface-2)] p-2 text-[11px]">
+        <div className="mt-3 flex flex-wrap items-start gap-2 rounded-md border border-[var(--color-warn)] bg-[var(--color-surface-2)] p-2 text-xs">
           <AlertTriangle
             size={12}
             className="mt-0.5 shrink-0 text-[var(--color-warn)]"

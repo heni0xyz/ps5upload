@@ -87,7 +87,7 @@ export default function SpeedTestPanel({ mgmtAddr }: { mgmtAddr: string }) {
         </Button>
       </div>
       {error && (
-        <div className="mt-2 flex items-start gap-1 text-[11px] text-[var(--color-bad)]">
+        <div className="mt-2 flex items-start gap-1 text-xs text-[var(--color-bad)]">
           <AlertTriangle size={11} className="mt-0.5 shrink-0" />
           {error}
         </div>
@@ -122,7 +122,7 @@ export default function SpeedTestPanel({ mgmtAddr }: { mgmtAddr: string }) {
           </dd>
         </dl>
       )}
-      <p className="mt-3 text-[10px] text-[var(--color-muted)]">
+      <p className="mt-3 text-xs text-[var(--color-muted)]">
         {tr(
           "speed_test_explainer",
           undefined,
