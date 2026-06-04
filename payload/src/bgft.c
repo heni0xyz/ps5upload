@@ -456,10 +456,25 @@ static int appinst_install_start(const char *url,
         return -1;
     }
 
-    int32_t tid = appinst_task_register(pkg_info.content_id);
+    /* Prefer the caller's known-good content_id (the host-parsed pkg-header
+     * id Sony tracks the task under); fall back to Sony's OUTPUT field. For
+     * a local-path install Sony may leave pkg_info.content_id empty. */
+    const char *track_cid =
+        (content_id && content_id[0]) ? content_id : pkg_info.content_id;
+    int32_t tid = appinst_task_register(track_cid);
     if (tid < 0) {
         *out_err_code = BGFT_ERR_TASK_TABLE_FULL;
         return -1;
+    }
+    /* 2.25.x: when InstallByPackage installed from a LOCAL path (bare
+     * absolute path, not http://), tag the task with APPINST_VIA_LOCAL_FLAG
+     * so bgft_install_status takes the synthetic-DONE bypass and never calls
+     * GetInstallStatus — which segfaults the payload on the first poll for a
+     * locally-registered task (hardware-confirmed on FW 5.10; the comment on
+     * APPINST_VIA_LOCAL_FLAG documents the same crash on 9.60 for the
+     * AppInstallPkg variant). HTTP-source installs keep real status polling. */
+    if (url && url[0] == '/') {
+        tid |= APPINST_VIA_LOCAL_FLAG;
     }
     *out_task_id  = tid;
     *out_err_code = 0;
@@ -1102,40 +1117,20 @@ int bgft_install_start(const char *url,
      * first) bypass most of that gate, so Tier 1 works for most pkgs
      * without the ShellUI flash. */
 
-    /* ─── Tier 1a: dedicated local-disk installer (2.20.2) ───────────
-     * When the host staged the pkg to PS5 disk, `url` is a bare absolute
-     * path (e.g. /user/data/ps5upload/pkg_temp/<id>.pkg), NOT an http://
-     * URL — pkg_install.rs emits the raw path for staged installs. For
-     * that shape, sceAppInstUtilAppInstallPkg is the correct Sony entry
-     * point: it reads bytes straight off local disk, with no URI parse
-     * and no PlayGo HTTP pre-flight. InstallByPackage, by contrast,
-     * treats the path as a URI and on FW 9.60+ rejects it (0x80B21106 /
-     * 0x80B22404). We try the dedicated installer FIRST for local paths;
-     * on any failure we fall through to the unchanged ladder below
-     * (InstallByPackage → shellui-rpc → BGFT), so every previously-
-     * verified path remains a backstop. HTTP urls skip this tier
-     * entirely — there's no local file for AppInstallPkg to open. */
-    if (url[0] == '/') {
-        int32_t local_tid = -1;
-        uint32_t local_err = 0;
-        int local_rc = appinst_install_start_local(url, content_id,
-                                                    &local_tid, &local_err);
-        /* Surface the dedicated installer's outcome in the same diag
-         * field as the InstallByPackage tier — both are AppInstUtil
-         * calls, and register_path distinguishes which variant ran. */
-        g_last_appinst_err = local_err;
-        g_last_appinst_err_set = 1;
-        if (local_rc == 0) {
-            *out_task_id = local_tid;
-            *out_err_code = 0;
-            g_last_register_path = "appinst-local";
-            return 0;
-        }
-        fprintf(stderr,
-                "[bgft] appinst-local failed (rc=0x%08X), trying InstallByPackage\n",
-                (unsigned)local_err);
-    }
-
+    /* ─── Tier 1: in-process InstallByPackage (preferred for ALL urls) ──
+     * 2.25.x change — for a locally-staged pkg (`url` is a bare absolute
+     * path, e.g. /user/data/tmp/<id>.pkg), we now call
+     * sceAppInstUtilInstallByPackage with that path as the URI FIRST,
+     * exactly as etaHEN's DPI v2 does (verified launchable on FW 10.01 /
+     * 12.00). The previous order tried sceAppInstUtilAppInstallPkg first
+     * for local paths; that call *installs* the content but registers the
+     * title in a state the launcher rejects with "can't start the game or
+     * app" (CE-) — even though install/status reports success. Only the
+     * *HTTP* URI form of InstallByPackage hits the FW 9.60+ PlayGo reject
+     * (0x80B22404); a bare LOCAL path is read straight off disk and
+     * registers a launchable title. So: InstallByPackage(local) first;
+     * AppInstallPkg becomes a fallback below if InstallByPackage fails.
+     * HTTP urls also flow through here (same call, remote fetch). */
     int32_t app_tid = -1;
     uint32_t app_err = 0;
     int appinst_rc = appinst_install_start(url, content_id, title, &app_tid, &app_err);
@@ -1167,8 +1162,32 @@ int bgft_install_start(const char *url,
         return 0;
     }
     fprintf(stderr,
-            "[bgft] in-process AppInstUtil failed (rc=0x%08X), trying shellui-rpc fallback\n",
+            "[bgft] in-process InstallByPackage failed (rc=0x%08X)\n",
             (unsigned)app_err);
+
+    /* ─── Tier 1b fallback: dedicated local-disk installer ───────────────
+     * Only for locally-staged pkgs, and only if InstallByPackage(local)
+     * above failed. sceAppInstUtilAppInstallPkg reads bytes straight off
+     * disk with no URI parse; it's the historical local path (2.20.2) and
+     * a useful backstop on any FW where InstallByPackage rejects a bare
+     * local path. NOTE: this installs but may register an unlaunchable
+     * title on some firmwares (the bug this 2.25.x reorder fixes), so it
+     * is now a *fallback*, never the primary local path. */
+    if (url[0] == '/') {
+        int32_t local_tid = -1;
+        uint32_t local_err = 0;
+        int local_rc = appinst_install_start_local(url, content_id,
+                                                    &local_tid, &local_err);
+        if (local_rc == 0) {
+            *out_task_id = local_tid;
+            *out_err_code = 0;
+            g_last_register_path = "appinst-local";
+            return 0;
+        }
+        fprintf(stderr,
+                "[bgft] appinst-local fallback also failed (rc=0x%08X), trying shellui-rpc\n",
+                (unsigned)local_err);
+    }
 
     {
         /* Tier 2: ShellUI RPC fallback. Only reached when the in-process
