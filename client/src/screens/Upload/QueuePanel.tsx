@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   XCircle,
   CircleDashed,
+  ChevronRight,
   Play,
   Square,
   Trash2,
@@ -16,6 +17,7 @@ import {
 
 import { Button } from "../../components";
 import { humanizeJobErrorReason } from "../../api/ps5";
+import { hostOf } from "../../lib/addr";
 import { formatBytes, formatDuration } from "../../lib/format";
 import { MAX_AUTO_RECOVER_ATTEMPTS } from "../../lib/uploadRecovery";
 import { useTr } from "../../state/lang";
@@ -27,19 +29,53 @@ import {
 } from "../../state/uploadQueue";
 import { useTransferStore } from "../../state/transfer";
 
+/** One console's slice of the queue, in first-seen order. */
+interface ConsoleGroup {
+  host: string;
+  items: QueueItem[];
+}
+
+/** Partition the flat queue into per-console groups, preserving the order
+ *  each console first appears so the layout is stable as items run/finish. */
+function groupByConsole(items: QueueItem[]): ConsoleGroup[] {
+  const groups: ConsoleGroup[] = [];
+  const idx = new Map<string, number>();
+  for (const it of items) {
+    const h = hostOf(it.addr);
+    let gi = idx.get(h);
+    if (gi === undefined) {
+      gi = groups.length;
+      idx.set(h, gi);
+      groups.push({ host: h, items: [] });
+    }
+    groups[gi].items.push(it);
+  }
+  return groups;
+}
+
 /** Inline queue panel rendered below the single-shot upload UI on the
  *  Upload screen. Visible only when the queue has items OR while the
  *  user is hydrating from disk so a perpetual blank slot doesn't waste
- *  space on first launch. */
+ *  space on first launch.
+ *
+ *  The queue is GROUPED BY CONSOLE: each PS5 with queued work gets its
+ *  own collapsible section with its own Start/Stop, and the consoles
+ *  upload in parallel. The top-level Start all / Stop all drives every
+ *  console at once. This is what lets a queue holding games for 3
+ *  different consoles actually upload to all 3 — and reorder one
+ *  console's list while another console is mid-upload. */
 export function QueuePanel() {
   const tr = useTr();
   const items = useUploadQueueStore((s) => s.items);
   const continueOnFailure = useUploadQueueStore((s) => s.continueOnFailure);
   const running = useUploadQueueStore((s) => s.running);
+  const runningHosts = useUploadQueueStore((s) => s.runningHosts);
   const loaded = useUploadQueueStore((s) => s.loaded);
   const hydrate = useUploadQueueStore((s) => s.hydrate);
   const start = useUploadQueueStore((s) => s.start);
   const stop = useUploadQueueStore((s) => s.stop);
+  const startHost = useUploadQueueStore((s) => s.startHost);
+  const stopHost = useUploadQueueStore((s) => s.stopHost);
   const clear = useUploadQueueStore((s) => s.clear);
   const remove = useUploadQueueStore((s) => s.remove);
   const moveUp = useUploadQueueStore((s) => s.moveUp);
@@ -52,7 +88,7 @@ export function QueuePanel() {
   // transfer. The PS5 payload's transfer port is single-client,
   // so a queue Start while a one-shot is in flight would block at
   // the socket and the UI would show two "running" things. Gate
-  // the Start button on transferInFlight; the Upload screen's
+  // the Start buttons on transferInFlight; the Upload screen's
   // Upload button does the symmetric disable on `queueRunning`.
   const transferInFlight = useTransferStore(
     (s) => s.phase.kind === "starting" || s.phase.kind === "running",
@@ -71,12 +107,27 @@ export function QueuePanel() {
   const failedCount = items.filter((i) => i.status === "failed").length;
   const doneCount = items.filter((i) => i.status === "done").length;
 
+  const groups = groupByConsole(items);
+  // Single-console queues don't need a per-console sub-header — the
+  // top-level Start already targets that one console. Only fan out the
+  // grouped chrome once there's more than one console in play.
+  const multiConsole = groups.length > 1;
+
   return (
     <section className="mb-4 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-5">
       <header className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2 text-sm font-semibold">
           <ListOrdered size={14} />
           <span>{tr("queue_title", undefined, "Upload queue")}</span>
+          {multiConsole && (
+            <span className="rounded bg-[var(--color-surface-3)] px-1.5 py-0.5 text-xs font-medium text-[var(--color-muted)]">
+              {tr(
+                "queue_console_total",
+                { count: groups.length },
+                `${groups.length} consoles`,
+              )}
+            </span>
+          )}
           <span className="text-xs font-normal text-[var(--color-muted)]">
             ·{" "}
             {tr(
@@ -98,17 +149,12 @@ export function QueuePanel() {
               type="checkbox"
               checked={continueOnFailure}
               onChange={(e) => setContinueOnFailure(e.target.checked)}
-              disabled={running}
               className="h-3.5 w-3.5"
             />
-            {tr(
-              "queue_continue_on_failure",
-              undefined,
-              "Continue on failure",
-            )}
+            {tr("queue_continue_on_failure", undefined, "Continue on failure")}
           </label>
 
-          {failedCount > 0 && !running && (
+          {failedCount > 0 && (
             <Button
               variant="secondary"
               size="sm"
@@ -126,7 +172,9 @@ export function QueuePanel() {
               leftIcon={<Square size={12} />}
               onClick={stop}
             >
-              {tr("queue_stop", undefined, "Stop")}
+              {multiConsole
+                ? tr("queue_stop_all", undefined, "Stop all")
+                : tr("queue_stop", undefined, "Stop")}
             </Button>
           ) : (
             <Button
@@ -145,7 +193,9 @@ export function QueuePanel() {
                   : undefined
               }
             >
-              {tr("queue_start", undefined, "Start")}
+              {multiConsole
+                ? tr("queue_start_all", undefined, "Start all")
+                : tr("queue_start", undefined, "Start")}
             </Button>
           )}
 
@@ -166,40 +216,177 @@ export function QueuePanel() {
         </div>
       </header>
 
-      <ul className="grid gap-2">
-        {items.map((item) => (
-          <QueueRow
-            key={item.id}
-            item={item}
-            running={running}
-            onMoveUp={() => moveUp(item.id)}
-            onMoveDown={() => moveDown(item.id)}
-            onRemove={() => remove(item.id)}
+      <div className="grid gap-4">
+        {groups.map((g) => (
+          <ConsoleGroup
+            key={g.host}
+            host={g.host}
+            items={g.items}
+            hostRunning={!!runningHosts[g.host]}
+            transferInFlight={transferInFlight}
+            showHeader={multiConsole}
+            onStartHost={() => void startHost(g.host)}
+            onStopHost={() => stopHost(g.host)}
+            onMoveUp={moveUp}
+            onMoveDown={moveDown}
+            onRemove={remove}
           />
         ))}
-      </ul>
+      </div>
     </section>
+  );
+}
+
+/** One console's section: a header naming the PS5 with its own Start/Stop
+ *  + counts, then that console's queued rows. Collapsible so a queue with
+ *  several consoles stays scannable. */
+function ConsoleGroup({
+  host,
+  items,
+  hostRunning,
+  transferInFlight,
+  showHeader,
+  onStartHost,
+  onStopHost,
+  onMoveUp,
+  onMoveDown,
+  onRemove,
+}: {
+  host: string;
+  items: QueueItem[];
+  hostRunning: boolean;
+  transferInFlight: boolean;
+  showHeader: boolean;
+  onStartHost: () => void;
+  onStopHost: () => void;
+  onMoveUp: (id: string) => void;
+  onMoveDown: (id: string) => void;
+  onRemove: (id: string) => void;
+}) {
+  const tr = useTr();
+  const label = useConsoleLabel(host);
+  const [collapsed, setCollapsed] = useState(false);
+
+  const runningN = items.filter((i) => i.status === "running").length;
+  const pending = items.filter((i) => i.status === "pending").length;
+  const done = items.filter((i) => i.status === "done").length;
+  const failed = items.filter((i) => i.status === "failed").length;
+
+  const rows = (
+    <ul className="grid gap-2">
+      {items.map((item) => (
+        <QueueRow
+          key={item.id}
+          item={item}
+          onMoveUp={() => onMoveUp(item.id)}
+          onMoveDown={() => onMoveDown(item.id)}
+          onRemove={() => onRemove(item.id)}
+        />
+      ))}
+    </ul>
+  );
+
+  // Single-console queue: render the rows bare (the top-level header
+  // already names the only console in play).
+  if (!showHeader) return rows;
+
+  return (
+    <div
+      className={`rounded-md border ${
+        hostRunning
+          ? "border-[var(--color-accent)]"
+          : "border-[var(--color-border)]"
+      } bg-[var(--color-surface)]`}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+        <button
+          type="button"
+          onClick={() => setCollapsed((c) => !c)}
+          className="flex min-w-0 items-center gap-2 text-left"
+          title={
+            collapsed
+              ? tr("queue_group_expand", undefined, "Show this console's queue")
+              : tr("queue_group_collapse", undefined, "Hide this console's queue")
+          }
+        >
+          <ChevronRight
+            size={14}
+            className={`shrink-0 text-[var(--color-muted)] transition-transform ${
+              collapsed ? "" : "rotate-90"
+            }`}
+          />
+          <span aria-hidden>🖥</span>
+          <span className="truncate text-sm font-semibold">{label}</span>
+          <span className="shrink-0 font-mono text-xs text-[var(--color-muted)]">
+            {host}
+          </span>
+        </button>
+
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-[var(--color-muted)]">
+            {tr(
+              "queue_group_summary",
+              { running: runningN, pending, done, failed },
+              `${runningN} uploading · ${pending} queued · ${done} done${
+                failed ? ` · ${failed} failed` : ""
+              }`,
+            )}
+          </span>
+          {hostRunning ? (
+            <Button
+              variant="secondary"
+              size="sm"
+              leftIcon={<Square size={12} />}
+              onClick={onStopHost}
+            >
+              {tr("queue_stop", undefined, "Stop")}
+            </Button>
+          ) : (
+            <Button
+              variant="primary"
+              size="sm"
+              leftIcon={<Play size={12} />}
+              onClick={onStartHost}
+              disabled={pending === 0 || transferInFlight}
+              title={
+                transferInFlight
+                  ? tr(
+                      "queue_disabled_oneshot_in_flight",
+                      undefined,
+                      "A one-shot upload is in flight — wait for it to finish before starting the queue.",
+                    )
+                  : pending === 0
+                    ? tr(
+                        "queue_group_nothing_pending",
+                        undefined,
+                        "Nothing queued for this console",
+                      )
+                    : undefined
+              }
+            >
+              {tr("queue_start", undefined, "Start")}
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {!collapsed && <div className="px-3 pb-3">{rows}</div>}
+    </div>
   );
 }
 
 function QueueRow({
   item,
-  running,
   onMoveUp,
   onMoveDown,
   onRemove,
 }: {
   item: QueueItem;
-  running: boolean;
   onMoveUp: () => void;
   onMoveDown: () => void;
   onRemove: () => void;
 }) {
   const tr = useTr();
-  // Which console this job targets — every item carries an `addr`, and this
-  // maps it back to the roster's friendly name (or the bare IP). Shown so a
-  // multi-console queue makes clear which game is going to which PS5.
-  const consoleLabel = useConsoleLabel(item.addr);
   const pct =
     item.totalBytes > 0
       ? Math.max(0, Math.min(100, (item.bytesSent / item.totalBytes) * 100))
@@ -225,10 +412,12 @@ function QueueRow({
     item.bytesPerSec > 0 && remainingBytes > 0
       ? remainingBytes / item.bytesPerSec
       : null;
-  // Lock reorder + remove while the runner is touching this row;
-  // mutating the array under the runner's iterator would surprise
-  // both the user (item disappears mid-upload) and the engine (jobId
-  // drift on a shifted index).
+  // Lock reorder + remove ONLY while THIS row is the one actively
+  // uploading — mutating the array under the runner's iterator would
+  // surprise both the user (item disappears mid-upload) and the engine
+  // (jobId drift on a shifted index). Crucially this is now per-ROW, not
+  // a whole-queue lock: you can freely reorder a console's PENDING jobs
+  // while another job (even on the same console) is uploading.
   const lockRow = isActive;
 
   return (
@@ -251,15 +440,6 @@ function QueueRow({
             → {item.resolvedDest}
           </div>
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-[var(--color-muted)]">
-            {consoleLabel && (
-              <span
-                className="inline-flex max-w-[12rem] items-center gap-1 truncate rounded bg-[var(--color-surface-2)] px-1.5 py-0.5 font-medium text-[var(--color-text)]"
-                title={item.addr}
-              >
-                <span aria-hidden>🖥</span>
-                <span className="truncate">{consoleLabel}</span>
-              </span>
-            )}
             <span>
               {tr(
                 `queue_strategy_${item.strategy}`,
@@ -280,11 +460,7 @@ function QueueRow({
             )}
             {item.mountAfterUpload && (
               <span>
-                {tr(
-                  "queue_will_mount",
-                  undefined,
-                  "mount after upload",
-                )}
+                {tr("queue_will_mount", undefined, "mount after upload")}
               </span>
             )}
             {item.mountedAt && (
@@ -303,7 +479,7 @@ function QueueRow({
           <button
             type="button"
             onClick={onMoveUp}
-            disabled={lockRow || running}
+            disabled={lockRow}
             title={tr("queue_move_up", undefined, "Move up")}
             className="rounded p-1 text-[var(--color-muted)] hover:bg-[var(--color-surface-3)] disabled:opacity-30"
           >
@@ -312,7 +488,7 @@ function QueueRow({
           <button
             type="button"
             onClick={onMoveDown}
-            disabled={lockRow || running}
+            disabled={lockRow}
             title={tr("queue_move_down", undefined, "Move down")}
             className="rounded p-1 text-[var(--color-muted)] hover:bg-[var(--color-surface-3)] disabled:opacity-30"
           >
@@ -532,11 +708,7 @@ function StatusIcon({ status }: { status: QueueItemStatus }) {
       );
     case "failed":
       return (
-        <XCircle
-          size={18}
-          className="mt-0.5 shrink-0 text-[var(--color-bad)]"
-        />
+        <XCircle size={18} className="mt-0.5 shrink-0 text-[var(--color-bad)]" />
       );
   }
 }
-

@@ -25,6 +25,56 @@ export function moveItemDown<T extends { id: string }>(items: T[], id: string): 
   return next;
 }
 
+/** Move `id` earlier, but only past items in the SAME group (e.g. same
+ *  target console). Swaps with the nearest preceding same-group item so the
+ *  per-console grouped queue reorders within its console without disturbing
+ *  other consoles' rows. `groupOf` maps an item to its group key. Returns the
+ *  same reference when there's no earlier same-group item. Pure — exported for
+ *  tests. */
+export function moveItemUpWithinGroup<T extends { id: string }>(
+  items: T[],
+  id: string,
+  groupOf: (it: T) => string,
+): T[] {
+  const i = items.findIndex((it) => it.id === id);
+  if (i < 0) return items;
+  const g = groupOf(items[i]);
+  let j = -1;
+  for (let k = i - 1; k >= 0; k--) {
+    if (groupOf(items[k]) === g) {
+      j = k;
+      break;
+    }
+  }
+  if (j < 0) return items;
+  const next = items.slice();
+  [next[j], next[i]] = [next[i], next[j]];
+  return next;
+}
+
+/** Move `id` later within its group — the mirror of
+ *  `moveItemUpWithinGroup`. */
+export function moveItemDownWithinGroup<T extends { id: string }>(
+  items: T[],
+  id: string,
+  groupOf: (it: T) => string,
+): T[] {
+  const i = items.findIndex((it) => it.id === id);
+  if (i < 0) return items;
+  const g = groupOf(items[i]);
+  let j = -1;
+  for (let k = i + 1; k < items.length; k++) {
+    if (groupOf(items[k]) === g) {
+      j = k;
+      break;
+    }
+  }
+  if (j < 0) return items;
+  const next = items.slice();
+  [next[i], next[j]] = [next[j], next[i]];
+  return next;
+}
+
 /** Remove the item with `id`. Same-reference short-circuit when not
  *  found. */
 export function removeItem<T extends { id: string }>(items: T[], id: string): T[] {
@@ -84,7 +134,11 @@ export function resetFailedToPending<T extends { id: string; status: string }>(
  *  the live counters. Used by the queue's stop() so a stopped row
  *  doesn't keep displaying its last mid-flight bytes/sec readout
  *  against a frozen progress bar. Same shape as resetFailedToPending
- *  (same-reference short-circuit when nothing was running). */
+ *  (same-reference short-circuit when nothing was running).
+ *
+ *  `match` optionally narrows which running items reset — the per-console
+ *  Stop passes a host predicate so stopping console B doesn't disturb
+ *  console A's still-running row. Omit it to reset every running item. */
 export function resetRunningToPending<
   T extends {
     id: string;
@@ -95,10 +149,10 @@ export function resetRunningToPending<
     recovering?: boolean;
     recoverAttempt?: number;
   },
->(items: T[]): T[] {
+>(items: T[], match?: (it: T) => boolean): T[] {
   let changed = false;
   const next = items.map((it) => {
-    if (it.status === "running") {
+    if (it.status === "running" && (!match || match(it))) {
       changed = true;
       return {
         ...it,

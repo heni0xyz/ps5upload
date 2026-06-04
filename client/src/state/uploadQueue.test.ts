@@ -108,7 +108,7 @@ describe("nextPendingForHost", () => {
 
 // ── Runner: serial vs per-console parallel ───────────────────────────────────
 
-describe("upload runner concurrency", () => {
+describe("upload runner concurrency (per-console, parallel)", () => {
   beforeEach(() => {
     installLocalStorageStub();
     vi.useFakeTimers();
@@ -119,31 +119,17 @@ describe("upload runner concurrency", () => {
     useUploadQueueStore.setState({
       items: [],
       running: false,
+      runningHosts: {},
       continueOnFailure: true,
       loaded: true,
     });
-    useUploadSettingsStore.setState({ parallelConsoles: false });
   });
   afterEach(() => {
     useUploadQueueStore.getState().stop();
     vi.useRealTimers();
   });
 
-  it("serial (default): only ONE item runs at a time across consoles", async () => {
-    addItem("192.168.1.10:9113", "A1");
-    addItem("192.168.1.20:9113", "B1");
-
-    void useUploadQueueStore.getState().start();
-    // Flush preflight + mark-running + the first jobStatus poll (which keeps
-    // returning "running", so both items stay in-flight if they started).
-    await vi.advanceTimersByTimeAsync(50);
-
-    expect(itemsByStatus("running")).toHaveLength(1);
-    expect(itemsByStatus("pending")).toHaveLength(1);
-  });
-
-  it("parallel: items on DIFFERENT consoles run concurrently", async () => {
-    useUploadSettingsStore.setState({ parallelConsoles: true });
+  it("start() runs DIFFERENT consoles concurrently", async () => {
     addItem("192.168.1.10:9113", "A1");
     addItem("192.168.1.20:9113", "B1");
 
@@ -155,10 +141,15 @@ describe("upload runner concurrency", () => {
     expect(running).toHaveLength(2);
     const hosts = running.map((i) => i.addr).sort();
     expect(hosts).toEqual(["192.168.1.10:9113", "192.168.1.20:9113"]);
+    // Both hosts marked running, and the flat flag is true.
+    expect(useUploadQueueStore.getState().runningHosts).toEqual({
+      "192.168.1.10": true,
+      "192.168.1.20": true,
+    });
+    expect(useUploadQueueStore.getState().running).toBe(true);
   });
 
-  it("parallel: SAME console stays serial (its 2nd item waits)", async () => {
-    useUploadSettingsStore.setState({ parallelConsoles: true });
+  it("SAME console stays serial (its 2nd item waits)", async () => {
     addItem("192.168.1.10:9113", "A1");
     addItem("192.168.1.10:9113", "A2"); // same console
     addItem("192.168.1.20:9113", "B1");
@@ -173,8 +164,44 @@ describe("upload runner concurrency", () => {
     expect(itemsByStatus("pending").map((i) => i.displayName)).toEqual(["A2"]);
   });
 
-  it("parallel: both consoles drain to completion", async () => {
-    useUploadSettingsStore.setState({ parallelConsoles: true });
+  it("startHost drains ONLY its own console", async () => {
+    addItem("192.168.1.10:9113", "A1");
+    addItem("192.168.1.20:9113", "B1");
+
+    void useUploadQueueStore.getState().startHost("192.168.1.10");
+    await vi.advanceTimersByTimeAsync(50);
+
+    // Only console A is running; B stays pending and unstarted.
+    expect(itemsByStatus("running").map((i) => i.displayName)).toEqual(["A1"]);
+    expect(itemsByStatus("pending").map((i) => i.displayName)).toEqual(["B1"]);
+    expect(useUploadQueueStore.getState().runningHosts).toEqual({
+      "192.168.1.10": true,
+    });
+  });
+
+  it("stopHost stops ONE console while siblings keep running", async () => {
+    addItem("192.168.1.10:9113", "A1");
+    addItem("192.168.1.20:9113", "B1");
+
+    void useUploadQueueStore.getState().start();
+    await vi.advanceTimersByTimeAsync(50);
+    expect(itemsByStatus("running")).toHaveLength(2);
+
+    useUploadQueueStore.getState().stopHost("192.168.1.10");
+    await vi.advanceTimersByTimeAsync(50);
+
+    // A reset to pending, B still uploading.
+    const byName = (st: string) =>
+      itemsByStatus(st).map((i) => i.displayName).sort();
+    expect(byName("pending")).toEqual(["A1"]);
+    expect(byName("running")).toEqual(["B1"]);
+    expect(useUploadQueueStore.getState().runningHosts).toEqual({
+      "192.168.1.20": true,
+    });
+    expect(useUploadQueueStore.getState().running).toBe(true);
+  });
+
+  it("both consoles drain to completion (running clears)", async () => {
     addItem("192.168.1.10:9113", "A1");
     addItem("192.168.1.20:9113", "B1");
     // Let every job report done on the first poll.
@@ -190,6 +217,7 @@ describe("upload runner concurrency", () => {
 
     expect(itemsByStatus("done")).toHaveLength(2);
     expect(useUploadQueueStore.getState().running).toBe(false);
+    expect(useUploadQueueStore.getState().runningHosts).toEqual({});
   });
 });
 
@@ -207,10 +235,11 @@ describe("upload runner auto-resume", () => {
     useUploadQueueStore.setState({
       items: [],
       running: false,
+      runningHosts: {},
       continueOnFailure: false,
       loaded: true,
     });
-    useUploadSettingsStore.setState({ parallelConsoles: false, autoResume: true });
+    useUploadSettingsStore.setState({ autoResume: true });
   });
   afterEach(() => {
     useUploadQueueStore.getState().stop();
@@ -328,8 +357,7 @@ describe("upload runner auto-resume", () => {
     expect(item.status).not.toBe("running");
   });
 
-  it("parallel: a console added mid-run is still drained (hot-add)", async () => {
-    useUploadSettingsStore.setState({ parallelConsoles: true });
+  it("a console added mid-run is still drained (hot-add)", async () => {
     // continueOnFailure=true is required for the re-loop to pick up new hosts.
     useUploadQueueStore.setState({ continueOnFailure: true });
     mockedJobStatus.mockResolvedValue({

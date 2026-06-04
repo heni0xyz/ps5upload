@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   moveItemDown,
+  moveItemDownWithinGroup,
   moveItemUp,
+  moveItemUpWithinGroup,
   nextPending,
   patchItem,
   removeItem,
@@ -169,5 +171,62 @@ describe("resetRunningToPending", () => {
     const next = resetRunningToPending(arr);
     expect(next[0]).toBe(done);
     expect(next[1]).not.toBe(running);
+  });
+
+  it("only resets running items matching the predicate (per-console stop)", () => {
+    type HostItem = RunItem & { addr: string };
+    const a = { ...runItem("a", "running", 1, 2, 3), addr: "10.0.0.1" };
+    const b = { ...runItem("b", "running", 1, 2, 3), addr: "10.0.0.2" };
+    const next = resetRunningToPending<HostItem>(
+      [a, b],
+      (it) => it.addr === "10.0.0.1",
+    );
+    expect(next[0].status).toBe("pending"); // host .1 reset
+    expect(next[1].status).toBe("running"); // host .2 untouched
+    expect(next[1]).toBe(b);
+  });
+});
+
+// ── Group-aware reorder (per-console queue) ──────────────────────────────────
+
+describe("moveItemUpWithinGroup / moveItemDownWithinGroup", () => {
+  type G = { id: string; host: string };
+  const groupOf = (it: G) => it.host;
+  // Interleaved across two consoles: A B A B A
+  const arr: G[] = [
+    { id: "a1", host: "A" },
+    { id: "b1", host: "B" },
+    { id: "a2", host: "A" },
+    { id: "b2", host: "B" },
+    { id: "a3", host: "A" },
+  ];
+
+  it("up swaps with the nearest EARLIER same-group item, skipping other consoles", () => {
+    // a2 (index 2) up → swaps with a1 (index 0), leaving b1 at index 1.
+    const next = moveItemUpWithinGroup(arr, "a2", groupOf);
+    expect(next.map((i) => i.id)).toEqual(["a2", "b1", "a1", "b2", "a3"]);
+    // B's relative order is untouched.
+    expect(next.filter((i) => i.host === "B").map((i) => i.id)).toEqual([
+      "b1",
+      "b2",
+    ]);
+  });
+
+  it("down swaps with the nearest LATER same-group item", () => {
+    // a2 (index 2) down → swaps with a3 (index 4).
+    const next = moveItemDownWithinGroup(arr, "a2", groupOf);
+    expect(next.map((i) => i.id)).toEqual(["a1", "b1", "a3", "b2", "a2"]);
+  });
+
+  it("returns same reference when item is first/last in its group", () => {
+    expect(moveItemUpWithinGroup(arr, "a1", groupOf)).toBe(arr); // a1 first A
+    expect(moveItemDownWithinGroup(arr, "a3", groupOf)).toBe(arr); // a3 last A
+    expect(moveItemUpWithinGroup(arr, "b1", groupOf)).toBe(arr); // b1 first B
+    expect(moveItemDownWithinGroup(arr, "b2", groupOf)).toBe(arr); // b2 last B
+  });
+
+  it("returns same reference when id is absent", () => {
+    expect(moveItemUpWithinGroup(arr, "nope", groupOf)).toBe(arr);
+    expect(moveItemDownWithinGroup(arr, "nope", groupOf)).toBe(arr);
   });
 });
