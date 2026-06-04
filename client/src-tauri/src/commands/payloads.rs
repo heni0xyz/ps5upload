@@ -186,8 +186,8 @@ const CATALOGUE: &[CatalogueEntry] = &[
         // user choice in the autoload list, not the marker.
         id: "kstuff-lite-drakmor",
         display_name: "kstuff-lite (drakmor — fpkg-optimized)",
-        role: "Kernel exploit + R/W primitive — 3-4× faster .ffpkg mounting",
-        description: "Fork of EchoStretch/kstuff-lite with a hot path for .ffpkg (UFS) mounts and lower overhead in repeated mount/unmount cycles — measured 3-4× faster end-to-end than the upstream lite build. Supports FW 3.00 → 10.01 (narrower than the EchoStretch full kstuff; pick this only if your firmware is in range). Recommended when your primary workflow is ShadowMount+ with .ffpkg or .exfat images. Same load-first ordering as any other kstuff: must boot before ShadowMount+ or ps5upload.",
+        role: "Kernel exploit + R/W primitive — faster .ffpkg/PFS mounting",
+        description: "Fork of EchoStretch/kstuff-lite with a hot path for .ffpkg (UFS) + PFS mounts and lower overhead in repeated mount/unmount cycles. Recent builds extended firmware coverage through FW 12.xx (the '12.xx Support' update) on top of the original 3.00→10.01 range — check the release notes for your exact firmware. Adds an option to disable automatic mounting (noautomount) for a controlled startup. Recommended when your primary workflow is ShadowMount+ with .ffpkg/.exfat/PFS images. Same load-first ordering as any other kstuff: must boot before ShadowMount+ or ps5upload.",
         repo_host: "github.com",
         repo_owner: "drakmor",
         repo_name: "kstuff-lite",
@@ -202,8 +202,8 @@ const CATALOGUE: &[CatalogueEntry] = &[
     CatalogueEntry {
         id: "shadowmountplus",
         display_name: "ShadowMount+",
-        role: "Auto-mount daemon for game backups",
-        description: "Watches /mnt/usb*, /mnt/ext*, /data for .ffpkg/.exfat/.ffpfs game images and auto-mounts + registers them. Includes fakelib (backports) overlay and kstuff autopause.",
+        role: "Auto-mount + register daemon for game backups",
+        description: "Watches scan folders (/mnt/usb*, /mnt/ext*, /data/homebrew, /mnt/shadowmnt) AND /data/shadowmount/manual.lst for game folders and .ffpkg/.exfat/.ffpfs/.ffpfsc images, then auto-mounts (LVD/MD), stages sce_sys + appmeta + trophy data, and registers them on the home screen — no per-image command, it's fully autonomous. Newer builds add nested/compressed-PFS (.ffpfsc) containers, trophy-data copy, and a watched manual-install list. Includes fakelib (backports) overlay + per-game kstuff autopause. Needs kstuff-lite v1.07+ loaded first.",
         repo_host: "github.com",
         repo_owner: "drakmor",
         repo_name: "shadowMountPlus",
@@ -477,6 +477,36 @@ const CATALOGUE: &[CatalogueEntry] = &[
         autoload_priority: 4,
         autoload_delay_ms: 200,
         homepage: "https://github.com/ps5-payload-dev/klogsrv",
+    },
+    CatalogueEntry {
+        // drakmor/nanoDNS — a tiny DNS server that runs ON the console.
+        // Blocks PlayStation Network / update domains by default (maps
+        // them to 0.0.0.0) and can redirect any domain to a LAN IP. The
+        // user points the PS5's DNS at it (default bind 127.0.0.1 =
+        // console-local; set bind=0.0.0.0 in the ini to serve the LAN).
+        // Config is auto-created at /data/nanodns/nanodns.ini on first run.
+        //
+        // CRITICAL asset pick: the release ships BOTH `nanodns.elf` (PS5)
+        // and `nanodns-ps4.elf` (PS4) as separate assets. The hint
+        // `nanodns.elf` is a substring of "nanodns.elf" but NOT of
+        // "nanodns-ps4.elf" (which reads "...-ps4.elf"), so pick_asset
+        // selects the PS5 build. Releases are PRE-RELEASE, so they only
+        // show via the releases-list path (payloads_releases), not
+        // /releases/latest.
+        id: "nanodns",
+        display_name: "nanoDNS",
+        role: "On-console DNS server — block PSN / redirect domains",
+        description: "A minimal DNS server that runs on the PS5 (UDP :53). Ships blocking PlayStation Network + update domains by default (0.0.0.0), and can redirect any domain to a LAN IP — handy for staying offline-friendly while jailbroken. Point the console's DNS at it (set bind=0.0.0.0 in the ini to serve the LAN). Config: /data/nanodns/nanodns.ini (auto-created with sane defaults). PS5 build only — never the -ps4 asset.",
+        repo_host: "github.com",
+        repo_owner: "drakmor",
+        repo_name: "nanoDNS",
+        asset_name_hint: "nanodns.elf",
+        on_console_marker_path: Some("/data/nanodns/nanodns.ini"),
+        process_name_hint: Some("nanodns.elf"),
+        ports: &[53],
+        autoload_priority: 4,
+        autoload_delay_ms: 300,
+        homepage: "https://github.com/drakmor/nanoDNS",
     },
 ];
 

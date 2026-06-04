@@ -22,6 +22,7 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 
 import {
   useUploadStore,
+  payloadCanMountImage,
   type ExcludeMode,
   type PickedSource,
   type SourceKind,
@@ -576,7 +577,12 @@ function Step2Options(props: {
     source.kind === "folder" ||
     source.kind === "game-folder" ||
     source.kind === "archive";
-  const showMountToggle = source.kind === "image";
+  // Only offer ps5upload's own mount-after-upload for images the payload can
+  // attach itself (exFAT/UFS/PFS). A .ffpfsc (compressed/nested PFS container)
+  // is mountable only by ShadowMount+, so we hide the toggle and let SMP pick
+  // it up from a scan folder.
+  const showMountToggle =
+    source.kind === "image" && payloadCanMountImage(source.path);
   const inFlight =
     transferPhase.kind === "starting" || transferPhase.kind === "running";
   // (2.11.0) Mutual-exclusion with QueuePanel. The PS5 payload's

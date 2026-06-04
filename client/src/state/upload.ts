@@ -99,11 +99,29 @@ const defaultExcludes: ExcludeRule[] = [
   { pattern: ".git/**", enabled: true },
 ];
 
-/** Lowercase extension test covering both disk-image types we
- *  support — `.exfat` (exFAT) and `.ffpkg` (UFS2). */
-function isImagePath(path: string): boolean {
+/** Lowercase extension test for all PS5 disk-image formats we accept for
+ *  upload — `.exfat` (exFAT), `.ffpkg` (UFS2), `.ffpfs` (PFS), and `.ffpfsc`
+ *  (compressed/nested PFS container). All four can be dropped in a
+ *  ShadowMount+ scan folder and SMP will mount + register them. */
+export function isImagePath(path: string): boolean {
   const p = path.toLowerCase();
-  return p.endsWith(".exfat") || p.endsWith(".ffpkg");
+  return (
+    p.endsWith(".exfat") ||
+    p.endsWith(".ffpkg") ||
+    p.endsWith(".ffpfs") ||
+    p.endsWith(".ffpfsc")
+  );
+}
+
+/** Which images ps5upload's OWN mount path can attach directly (LVD/MD)
+ *  without ShadowMount+: exFAT, UFS (.ffpkg), and PFS (.ffpfs). The payload's
+ *  fs_mount_detect_fstype handles exactly these (runtime.c). `.ffpfsc`
+ *  (compressed/nested PFS container) is NOT directly mountable — only
+ *  ShadowMount+ can open those — so the "mount after upload" option is hidden
+ *  for it; upload it into a scan folder and let SMP handle it. */
+export function payloadCanMountImage(path: string): boolean {
+  const p = path.toLowerCase();
+  return p.endsWith(".exfat") || p.endsWith(".ffpkg") || p.endsWith(".ffpfs");
 }
 
 /** A `.zip` game dump — the engine decompresses it on the host and streams
