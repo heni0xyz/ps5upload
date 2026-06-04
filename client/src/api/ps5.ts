@@ -5,6 +5,10 @@
 // TCP send) stay in-process.
 
 import { invoke, Channel } from "@tauri-apps/api/core";
+import {
+  appendManualListLine,
+  SMP_MANUAL_LIST_PATH,
+} from "../lib/smpManualList";
 
 export interface FolderInspectResult {
   path: string;
@@ -1894,6 +1898,37 @@ export async function fsWriteText(
   createOnly = false,
 ): Promise<FsWriteBytesResult> {
   return fsWriteBytes(addr, path, new TextEncoder().encode(text), createOnly);
+}
+
+/** Hand a game off to ShadowMount+ by appending its PS5-side source path
+ *  (a game folder or a .ffpkg/.exfat/.ffpfs/.ffpfsc image) to SMP's watched
+ *  `manual.lst`. SMP mounts + registers it on the next scan tick — so when SMP
+ *  is running, ps5upload uses THIS instead of its own mount/register (which
+ *  would race SMP for /user/app + app.db).
+ *
+ *  Read-modify-write of the small list file; idempotent (skips if the path is
+ *  already listed). `added` is false when it was already present. SMP creates
+ *  `/data/shadowmount/` itself, so this is only meaningful while SMP runs. */
+export async function smpManualInstall(
+  addr: string,
+  path: string,
+): Promise<{ added: boolean }> {
+  let existing = "";
+  try {
+    const r = await fsReadPreview(addr, SMP_MANUAL_LIST_PATH);
+    if (r.base64) {
+      const bin = atob(r.base64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      existing = new TextDecoder().decode(bytes);
+    }
+  } catch {
+    existing = ""; // list/dir may not exist yet — fsWriteText creates it
+  }
+  const next = appendManualListLine(existing, path);
+  if (next === null) return { added: false };
+  await fsWriteText(addr, SMP_MANUAL_LIST_PATH, next);
+  return { added: true };
 }
 
 /** Mount a LWFS patch overlay (sceFsMountLwfs). Lets a title see

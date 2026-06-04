@@ -4,6 +4,8 @@ import {
   fsMount,
   generateTxIdHex,
   jobStatus,
+  smpManualInstall,
+  smpStatus,
   startTransferDir,
   startTransferDirReconcile,
   startTransferFile,
@@ -33,7 +35,7 @@ import type { UploadStrategy } from "./transfer";
 import { useUploadSettingsStore } from "./uploadSettings";
 import { useRecentHostMetricsStore } from "./recentHostMetrics";
 import { pushNotification } from "./notifications";
-import { hostOf } from "../lib/addr";
+import { hostOf, mgmtAddr } from "../lib/addr";
 import { ensurePayloadCurrent } from "../lib/ensurePayloadCurrent";
 import { effectiveUploadStreams } from "../lib/uploadStreams";
 import {
@@ -399,46 +401,68 @@ export const useUploadQueueStore = create<QueueState>((set, get) => {
           item.sourceKind === "image" &&
           item.mountAfterUpload
         ) {
+          // Mount point lives next to the source file (same logic as
+          // transfer.ts): strip the image extension from the resolved
+          // destination so /data/homebrew/MyGame.ffpkg mounts at
+          // /data/homebrew/MyGame/. Source + mount discoverable by
+          // every PS5 manager that scans /data/homebrew/.
+          const finalDest = snap.dest ?? item.resolvedDest;
+          const mgmt = mgmtAddr(hostOf(item.addr));
+          // ShadowMount+ hand-off: when SMP is running it OWNS mount +
+          // register, so doing our OWN mount here would race it for
+          // /user/app + app.db (the exact conflict SMP's own "duplicate
+          // uninstall / blocked PPSA" fixes had to handle). Hand the image
+          // off via SMP's watched manual.lst and skip the native mount.
+          // Best-effort: if the SMP status probe or the list write fails,
+          // fall back to mounting it ourselves.
+          let handedToSmp = false;
           try {
-            // Mount point lives next to the source file (same logic as
-            // transfer.ts): strip the image extension from the resolved
-            // destination so /data/homebrew/MyGame.ffpkg mounts at
-            // /data/homebrew/MyGame/. Source + mount discoverable by
-            // every PS5 manager that scans /data/homebrew/.
-            const finalDest = snap.dest ?? item.resolvedDest;
-            const mountPoint = finalDest.replace(/\.(exfat|ffpkg|ffpfs)$/i, "");
-            const mounted = await fsMount(
-              item.addr,
-              finalDest,
-              { mountPoint, readOnly: item.mountReadOnly },
-            );
-            mountedAt = mounted.mount_point;
-            // Surface non-fatal mount diagnostics — same warnings the
-            // Library row's Mount button shows. Pre-2.2.52 this path
-            // dropped them silently, so an upload-then-mount user with
-            // a misshapen .ffpkg got "all green" feedback for an image
-            // that wouldn't register or wouldn't accept writes.
-            if (mounted.layout_valid === false) {
-              mountWarnings.push(
-                "Image is missing sce_sys/param.json at root — Register/Launch will fail. Re-build the image with files at root (no extra folder).",
-              );
+            const smp = await smpStatus(mgmt);
+            if (smp.running) {
+              const r = await smpManualInstall(mgmt, finalDest);
+              handedToSmp = true;
+              mountedAt = r.added
+                ? "handed to ShadowMount+"
+                : "already in ShadowMount+ list";
             }
-            if (mounted.kernel_ro && !item.mountReadOnly) {
-              mountWarnings.push(
-                "Kernel mounted this read-only despite the RW pick — common for UFS .ffpkg images on some firmwares. Reads work; writes through the mount will fail.",
+          } catch {
+            handedToSmp = false; // SMP unreachable → mount it ourselves
+          }
+          if (!handedToSmp) {
+            try {
+              const mountPoint = finalDest.replace(
+                /\.(exfat|ffpkg|ffpfs)$/i,
+                "",
               );
+              const mounted = await fsMount(item.addr, finalDest, {
+                mountPoint,
+                readOnly: item.mountReadOnly,
+              });
+              mountedAt = mounted.mount_point;
+              // Surface non-fatal mount diagnostics — same warnings the
+              // Library row's Mount button shows.
+              if (mounted.layout_valid === false) {
+                mountWarnings.push(
+                  "Image is missing sce_sys/param.json at root — Register/Launch will fail. Re-build the image with files at root (no extra folder).",
+                );
+              }
+              if (mounted.kernel_ro && !item.mountReadOnly) {
+                mountWarnings.push(
+                  "Kernel mounted this read-only despite the RW pick — common for UFS .ffpkg images on some firmwares. Reads work; writes through the mount will fail.",
+                );
+              }
+            } catch (e) {
+              const wrapped = new Error(
+                `upload completed, but mount failed: ${
+                  e instanceof Error ? e.message : String(e)
+                }`,
+              );
+              // Preserve the original error so downstream consumers can
+              // inspect the underlying mount failure (eslint's
+              // preserve-caught-error rule enforces this).
+              (wrapped as Error & { cause?: unknown }).cause = e;
+              throw wrapped;
             }
-          } catch (e) {
-            const wrapped = new Error(
-              `upload completed, but mount failed: ${
-                e instanceof Error ? e.message : String(e)
-              }`,
-            );
-            // Preserve the original error so downstream consumers can
-            // inspect the underlying mount failure (eslint's
-            // preserve-caught-error rule enforces this).
-            (wrapped as Error & { cause?: unknown }).cause = e;
-            throw wrapped;
           }
         }
         // Final readout = total bytes / total elapsed. Prefer the
