@@ -4,6 +4,17 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 2.25.3
+
+- **A much better Installed Apps screen.** Every game now has a **Play** button
+  to launch it straight from the app. Titles are grouped by what they are —
+  installed games & apps, disc images, folder homebrew, and system — and each is
+  tagged **PS4** or **PS5**. The screen also warns you when **kstuff** isn't
+  active (so you know games won't launch) and when a disc image needs
+  **ShadowMount+**, with a one-tap button to send it to the console.
+
+---
+
 ## 2.25.2
 
 - **Installed packages actually launch now.** Installing a `.pkg` from the
