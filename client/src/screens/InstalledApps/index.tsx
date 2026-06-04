@@ -10,7 +10,6 @@ import {
   AlertTriangle,
   Play,
   Loader2,
-  CheckCircle2,
   Download,
   ShieldCheck,
 } from "lucide-react";
@@ -29,6 +28,7 @@ import { PageHeader, EmptyState, ErrorCard, WarningCard, Button } from "../../co
 // Direct import to avoid the barrel's circular-dep warning at build.
 import { useConfirm } from "../../components/ConfirmDialog";
 import { humanizePs5Error } from "../../lib/humanizeError";
+import { pushNotification } from "../../state/notifications";
 import { useTr } from "../../state/lang";
 import { transferAddr, mgmtAddr, hostOf } from "../../lib/addr";
 import { useStaleHostGuard } from "../../lib/staleHostGuard";
@@ -151,7 +151,6 @@ function AppCard({
   title,
   busy,
   launching,
-  launchResult,
   discNeedsSmp,
   onUninstall,
   onLaunch,
@@ -160,7 +159,6 @@ function AppCard({
   title: InstalledTitle;
   busy: boolean;
   launching: boolean;
-  launchResult?: { ok: boolean; text: string };
   /** True for a disc-image title while ShadowMount+ isn't running. */
   discNeedsSmp: boolean;
   onUninstall: (t: InstalledTitle) => void;
@@ -169,87 +167,89 @@ function AppCard({
   const tr = useTr();
   const canPlay = !title.system;
   return (
-    <div className="flex flex-col gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3">
-      <Cover host={host} title={title} />
-      <div className="min-w-0">
-        <div className="truncate text-sm font-medium" title={title.titleName}>
-          {title.titleName}
+    <div className="group flex flex-col overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)]">
+      {/* Cover with corner overlays: platform (top-left), SMP warning
+          (top-right) — keeps the body clean + every card the same height. */}
+      <div className="relative">
+        <Cover host={host} title={title} />
+        <div className="absolute left-2 top-2 drop-shadow">
+          <PlatformBadge title={title} />
         </div>
-        <div className="truncate font-mono text-xs text-[var(--color-muted)]">
-          {title.titleId}
-        </div>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-1.5">
-        <PlatformBadge title={title} />
-        <KindBadge title={title} />
-      </div>
-
-      {/* Play — the primary action. Launches the title on the PS5. */}
-      {canPlay ? (
-        <Button
-          variant="primary"
-          size="sm"
-          disabled={launching}
-          onClick={() => onLaunch(title)}
-          title={tr("installed_play_tooltip", undefined, "Launch this title on the PS5")}
-        >
-          {launching ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
-          {launching
-            ? tr("installed_launching", undefined, "Launching…")
-            : tr("installed_play", undefined, "Play")}
-        </Button>
-      ) : null}
-
-      {launchResult ? (
-        <div
-          className={`flex items-center gap-1 text-xs ${
-            launchResult.ok ? "text-[var(--color-good)]" : "text-[var(--color-bad)]"
-          }`}
-        >
-          {launchResult.ok ? (
-            <CheckCircle2 size={12} className="shrink-0" />
-          ) : (
-            <AlertTriangle size={12} className="shrink-0" />
-          )}
-          <span className="min-w-0">{launchResult.text}</span>
-        </div>
-      ) : null}
-
-      {discNeedsSmp ? (
-        <div className="flex items-start gap-1 text-xs text-[var(--color-warn)]">
-          <Disc3 size={12} className="mt-0.5 shrink-0" />
-          <span>
-            {tr(
+        {discNeedsSmp ? (
+          <span
+            className="absolute right-2 top-2 inline-flex items-center gap-1 rounded bg-[var(--color-warn)] px-1.5 py-0.5 text-xs font-semibold text-black drop-shadow"
+            title={tr(
               "installed_disc_needs_smp_row",
               undefined,
               "Needs ShadowMount+ running to mount + launch.",
             )}
+          >
+            <AlertTriangle size={11} />
+            {tr("installed_badge_smp_needed", undefined, "SMP")}
           </span>
-        </div>
-      ) : null}
+        ) : null}
+      </div>
 
-      {title.source ? (
-        <div
-          className="truncate font-mono text-xs text-[var(--color-muted)]"
-          title={title.source}
-        >
-          {title.source}
+      {/* Body: name → type + id → actions pinned to the bottom (mt-auto) so
+          rows of cards line their buttons up regardless of name length. */}
+      <div className="flex flex-1 flex-col gap-2 p-3">
+        <div className="min-w-0">
+          <div className="truncate text-sm font-semibold" title={title.titleName}>
+            {title.titleName}
+          </div>
+          <div
+            className="mt-1 flex min-w-0 items-center gap-2"
+            title={title.source || title.titleId}
+          >
+            <KindBadge title={title} />
+            <span className="truncate font-mono text-xs text-[var(--color-muted)]">
+              {title.titleId}
+            </span>
+          </div>
         </div>
-      ) : null}
 
-      <Button
-        variant="danger"
-        size="sm"
-        disabled={busy}
-        onClick={() => onUninstall(title)}
-        title={tr("installed_uninstall", undefined, "Uninstall")}
-      >
-        <Trash2 size={14} />
-        {busy
-          ? tr("installed_uninstalling", undefined, "Removing…")
-          : tr("installed_uninstall", undefined, "Uninstall")}
-      </Button>
+        <div className="mt-auto flex items-center gap-2 pt-1">
+          {canPlay ? (
+            <Button
+              variant="primary"
+              size="md"
+              loading={launching}
+              leftIcon={<Play size={15} />}
+              className="flex-1"
+              onClick={() => onLaunch(title)}
+              title={tr(
+                "installed_play_tooltip",
+                undefined,
+                "Launch this title on the PS5",
+              )}
+            >
+              {launching
+                ? tr("installed_launching", undefined, "Launching…")
+                : tr("installed_play", undefined, "Play")}
+            </Button>
+          ) : (
+            <span className="flex-1 truncate text-xs text-[var(--color-muted)]">
+              {tr("installed_badge_system", undefined, "System")}
+            </span>
+          )}
+          {/* Uninstall — de-emphasized icon button (destructive action stays
+              out of the way; turns red on hover). */}
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => onUninstall(title)}
+            title={tr("installed_uninstall", undefined, "Uninstall")}
+            aria-label={tr("installed_uninstall", undefined, "Uninstall")}
+            className="shrink-0 rounded-md border border-[var(--color-border)] p-2.5 text-[var(--color-muted)] transition-colors hover:border-[var(--color-bad)] hover:text-[var(--color-bad)] disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {busy ? (
+              <Loader2 size={15} className="animate-spin" />
+            ) : (
+              <Trash2 size={15} />
+            )}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -257,11 +257,13 @@ function AppCard({
 // ── Section wrapper ──────────────────────────────────────────────────────────
 
 function Section({
+  icon: Icon,
   title,
   hint,
   count,
   children,
 }: {
+  icon: React.ComponentType<{ size?: number; className?: string }>;
   title: string;
   hint: string;
   count: number;
@@ -269,11 +271,17 @@ function Section({
 }) {
   return (
     <section className="flex flex-col gap-3">
-      <div>
-        <h2 className="text-sm font-semibold">
-          {title} <span className="text-[var(--color-muted)]">({count})</span>
-        </h2>
-        <p className="text-xs text-[var(--color-muted)]">{hint}</p>
+      <div className="flex items-start gap-2">
+        <Icon size={16} className="mt-0.5 shrink-0 text-[var(--color-muted)]" />
+        <div className="min-w-0">
+          <h2 className="text-sm font-semibold">
+            {title}{" "}
+            <span className="font-normal text-[var(--color-muted)]">
+              ({count})
+            </span>
+          </h2>
+          <p className="text-xs text-[var(--color-muted)]">{hint}</p>
+        </div>
       </div>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
         {children}
@@ -299,9 +307,6 @@ export default function InstalledAppsScreen() {
   const [registeredUnavailable, setRegisteredUnavailable] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [launchingId, setLaunchingId] = useState<string | null>(null);
-  const [launchResults, setLaunchResults] = useState<
-    Record<string, { ok: boolean; text: string }>
-  >({});
   const [smpSending, setSmpSending] = useState(false);
   const [smpMsg, setSmpMsg] = useState<string | null>(null);
   // Native window.confirm() is a no-op in Tauri's webview; use the in-tree
@@ -344,32 +349,23 @@ export default function InstalledAppsScreen() {
       if (!host?.trim()) return;
       const probe = guard.capture();
       setLaunchingId(t.titleId);
-      setLaunchResults((m) => {
-        const next = { ...m };
-        delete next[t.titleId];
-        return next;
-      });
       try {
         await appLaunch(transferAddr(probe.host), t.titleId);
         if (probe.isStale()) return;
-        setLaunchResults((m) => ({
-          ...m,
-          [t.titleId]: {
-            ok: true,
-            text: tr(
-              "installed_launch_sent",
-              undefined,
-              "Launch sent — check your PS5",
-            ),
-          },
-        }));
+        // Toast (not inline) so the card grid stays a uniform height.
+        pushNotification("info", t.titleName, {
+          body: tr(
+            "installed_launch_sent",
+            undefined,
+            "Launch sent — check your PS5",
+          ),
+        });
       } catch (e) {
         if (probe.isStale()) return;
         const raw = e instanceof Error ? e.message : String(e);
-        setLaunchResults((m) => ({
-          ...m,
-          [t.titleId]: { ok: false, text: humanizePs5Error(raw) },
-        }));
+        pushNotification("error", t.titleName, {
+          body: humanizePs5Error(raw),
+        });
       } finally {
         setLaunchingId(null);
       }
@@ -484,7 +480,6 @@ export default function InstalledAppsScreen() {
     title: t,
     busy: busyId === t.titleId,
     launching: launchingId === t.titleId,
-    launchResult: launchResults[t.titleId],
     discNeedsSmp: kindOf(t) === "disc" && !smpRunning,
     onUninstall: handleUninstall,
     onLaunch: handleLaunch,
@@ -625,6 +620,7 @@ export default function InstalledAppsScreen() {
 
           {installed.length > 0 ? (
             <Section
+              icon={Package}
               title={tr("installed_section_installed", undefined, "Games & apps")}
               hint={tr(
                 "installed_section_installed_hint",
@@ -641,6 +637,7 @@ export default function InstalledAppsScreen() {
 
           {discs.length > 0 ? (
             <Section
+              icon={Disc3}
               title={tr("installed_section_disc", undefined, "Disc images")}
               hint={tr(
                 "installed_section_disc_hint",
@@ -657,6 +654,7 @@ export default function InstalledAppsScreen() {
 
           {folders.length > 0 ? (
             <Section
+              icon={FolderOpen}
               title={tr("installed_section_folder", undefined, "Folder homebrew")}
               hint={tr(
                 "installed_section_folder_hint",
@@ -673,6 +671,7 @@ export default function InstalledAppsScreen() {
 
           {system.length > 0 ? (
             <Section
+              icon={AlertTriangle}
               title={tr("installed_section_system", undefined, "System")}
               hint={tr(
                 "installed_section_system_hint",
