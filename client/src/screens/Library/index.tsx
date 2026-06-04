@@ -39,6 +39,8 @@ import {
   appLaunch,
   appRegister,
   appUnregister,
+  smpManualInstall,
+  smpStatus,
   fsOpStatus,
   fsOpCancel,
   fetchVolumes,
@@ -1715,14 +1717,40 @@ function LibraryRow({
     let okOutcome = true;
     let errMsg: string | null = null;
     try {
-      const res = await appRegister(`${host}:${PS5_PAYLOAD_PORT}`, entry.path, {
-        patchDrmType: opts.patchDrmType,
-      });
-      const drmSuffix = opts.patchDrmType ? " (DRM type patched to standard)" : "";
-      setMountNote(
-        `Registered ${res.title_name || res.title_id} (${res.title_id})${drmSuffix}. Launch should now succeed; tile appears in the PS5 home screen.`,
-      );
-      onChanged();
+      // ShadowMount+ hand-off: when SMP is running it OWNS register (stages
+      // sce_sys, copies trophy data, nullfs-binds, calls AppInstUtil). Append
+      // this source to its watched manual.lst instead of registering it
+      // ourselves — doing both races SMP for /user/app + app.db. Best-effort:
+      // fall back to our own register if SMP is unreachable.
+      const mgmt = mgmtAddr(host);
+      let handedToSmp = false;
+      try {
+        const smp = await smpStatus(mgmt);
+        if (smp.running) {
+          const r = await smpManualInstall(mgmt, entry.path);
+          handedToSmp = true;
+          setMountNote(
+            r.added
+              ? `Handed "${entry.name}" to ShadowMount+ — it will mount + register it shortly (watch your PS5 for the toast).`
+              : `"${entry.name}" is already in ShadowMount+'s install list.`,
+          );
+          onChanged();
+        }
+      } catch {
+        handedToSmp = false; // SMP unreachable → register it ourselves
+      }
+      if (!handedToSmp) {
+        const res = await appRegister(`${host}:${PS5_PAYLOAD_PORT}`, entry.path, {
+          patchDrmType: opts.patchDrmType,
+        });
+        const drmSuffix = opts.patchDrmType
+          ? " (DRM type patched to standard)"
+          : "";
+        setMountNote(
+          `Registered ${res.title_name || res.title_id} (${res.title_id})${drmSuffix}. Launch should now succeed; tile appears in the PS5 home screen.`,
+        );
+        onChanged();
+      }
     } catch (e) {
       okOutcome = false;
       errMsg = e instanceof Error ? e.message : String(e);
