@@ -133,24 +133,29 @@ int main(void) {
             memset(&playgo_info, 0, sizeof(playgo_info));
             memset(&pkg_info, 0, sizeof(pkg_info));
 
-            if (buffer[0] == '/') {
-                /* Local absolute path → AppInstallPkg (elf-arsenal path).
-                 * No URI parse, no PlayGo HTTP gate — the path that works
-                 * without the 0x80B22404 reject. The caller stages the
-                 * .pkg under /user/data first. */
-                ret = sceAppInstUtilAppInstallPkg(buffer, &pkg_info);
-            } else {
-                /* http(s):// URL → InstallByPackage (ezremote-dpi path).
-                 * Kept for firmware/setups where the HTTP fetch isn't
-                 * gated. */
-                metainfo.uri                = buffer;
-                metainfo.ex_uri             = "";
-                metainfo.playgo_scenario_id = "";
-                metainfo.content_id         = "";
-                metainfo.content_name       = buffer;
-                metainfo.icon_url           = "";
-                ret = sceAppInstUtilInstallByPackage(&metainfo, &pkg_info, &playgo_info);
-            }
+            /* Install via InstallByPackage with the input as the URI — the
+             * etaHEN DPI v2 / upstream ezremote-dpi recipe. A bare local
+             * absolute path (the staged-pkg case, buffer[0]=='/') and an
+             * http(s):// URL are BOTH accepted as the uri.
+             *
+             * 2.25.2 — CRITICAL: this used to route local paths to
+             * sceAppInstUtilAppInstallPkg, which registers the title's
+             * METADATA only (the tile shows up) but installs NO launchable
+             * CONTENT — so the game failed with "can't start the game or
+             * app" when launched. That was the wrong API. InstallByPackage
+             * with the bare local path installs the full content and the
+             * game launches (exactly what etaHEN DPI v2 and ext-HDD installs
+             * do). The 0x80B22404 PlayGo reject that AppInstallPkg was
+             * chosen to avoid only fires for real http:// URLs that need the
+             * HTTP pre-flight; a bare local path skips it. The caller stages
+             * the .pkg on the console's disk first. */
+            metainfo.uri                = buffer;
+            metainfo.ex_uri             = "";
+            metainfo.playgo_scenario_id = "";
+            metainfo.content_id         = "";
+            metainfo.content_name       = buffer;
+            metainfo.icon_url           = "";
+            ret = sceAppInstUtilInstallByPackage(&metainfo, &pkg_info, &playgo_info);
             if (ret != 0) {
                 notify("ezRemote DPI install failed\nError Code: 0x%08X", (unsigned)ret);
             }

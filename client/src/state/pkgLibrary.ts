@@ -475,39 +475,99 @@ export const usePkgLibrary = create<PkgLibraryState>((set, get) => ({
       // Inside the try so any throw still hits `finally` and clears the
       // `installing` flag — otherwise a wedged flag would lock the screen.
       patch({ status: "installing", lastResult: undefined });
-      // 1. Ensure the DPI daemon is up (reuses a live one, else sends the
-      //    bundled ezremote-dpi.elf to the loader — swapping our payload out).
-      const ens = (await invoke("dpi_ensure", { ip })) as {
-        ok?: boolean;
-        error?: string;
-      };
-      if (!ens.ok) {
-        throw new Error(ens.error || "the DPI daemon didn't come up on :9040");
-      }
-      // 2. Install the staged pkg via DPI.
-      let resp: { ok?: boolean; rc?: number; err_message?: string } = {};
+
+      // PRIMARY (2.25.2): install via the MAIN PAYLOAD's InstallByPackage
+      // (engine /api/pkg/install/start). The main payload runs in the FULL
+      // jailbreak context — exactly like etaHEN's DPI — and that's what
+      // actually installs LAUNCHABLE content into /user/app/<title>. The
+      // standalone DPI daemon (the fallback below) runs from a pristine
+      // elfldr context that only registers the title's METADATA (icons/
+      // param land in /user/appmeta, but /user/app stays empty) — the title
+      // shows up but fails with "can't start the game or app". HW-confirmed
+      // on FW 5.10: main-payload path → /user/app populated; daemon path →
+      // /user/app empty. So we try the main payload FIRST and only fall back
+      // to the daemon if it's rejected (some firmware reject installs issued
+      // from the jailbroken context — the original reason the daemon existed).
+      let installed = false;
+      let mainErr = "";
+      // The library entry carries the content id parsed at upload time —
+      // pass it so the engine doesn't need to re-read a PC-side file (the
+      // pkg is already staged on the PS5).
+      const entry = get().entries.find((e) => e.path === path);
       try {
-        resp = (await invoke("pkg_dpi_install", {
+        const r = (await invoke("pkg_install_start", {
           ps5Addr: mgmtAddr(host),
+          path: null,
+          splitRoot: null,
+          packageTypeOverride: null,
           localPs5Path: path,
-        })) as typeof resp;
-      } catch (e) {
-        resp = { ok: false, rc: 0, err_message: pkgError(e) };
-      }
-      // 3. Restore our main payload — the daemon replaced it on a
-      //    single-payload loader. Best-effort.
-      try {
-        const bp = (await invoke("payload_bundled_path")) as {
-          ok?: boolean;
-          path?: string;
+          contentId: entry?.contentId || null,
+        })) as {
+          err_code?: number;
+          register_path?: string;
+          err_message?: string;
         };
-        if (bp?.ok && bp.path) {
-          await invoke("payload_send", { ip, path: bp.path, port: null });
+        const rc = (r.err_code ?? 0) >>> 0;
+        if (rc === 0) {
+          installed = true;
+        } else {
+          mainErr =
+            r.err_message ||
+            `0x${rc.toString(16).padStart(8, "0")}`;
         }
-      } catch {
-        /* best-effort restore */
+      } catch (e) {
+        mainErr = pkgError(e);
       }
-      if (resp.ok) {
+
+      if (!installed) {
+        // FALLBACK: the jailbroken-context install was rejected. Try the
+        // standalone DPI daemon (replaces our payload on the single-payload
+        // loader, installs, then we restore the payload). This may register
+        // the title without launchable content on newer firmware — better
+        // than nothing, and it surfaces the main-payload reject code so the
+        // failure is diagnosable.
+        const ens = (await invoke("dpi_ensure", { ip })) as {
+          ok?: boolean;
+          error?: string;
+        };
+        if (!ens.ok) {
+          throw new Error(
+            ens.error ||
+              `Main-payload install failed (${mainErr}) and the DPI daemon didn't come up on :9040`,
+          );
+        }
+        let resp: { ok?: boolean; rc?: number; err_message?: string } = {};
+        try {
+          resp = (await invoke("pkg_dpi_install", {
+            ps5Addr: mgmtAddr(host),
+            localPs5Path: path,
+          })) as typeof resp;
+        } catch (e) {
+          resp = { ok: false, rc: 0, err_message: pkgError(e) };
+        }
+        // Restore our main payload — the daemon replaced it. Best-effort.
+        try {
+          const bp = (await invoke("payload_bundled_path")) as {
+            ok?: boolean;
+            path?: string;
+          };
+          if (bp?.ok && bp.path) {
+            await invoke("payload_send", { ip, path: bp.path, port: null });
+          }
+        } catch {
+          /* best-effort restore */
+        }
+        installed = !!resp.ok;
+        if (!installed) {
+          const rc = (resp.rc ?? 0) >>> 0;
+          mainErr =
+            resp.err_message ||
+            mainErr ||
+            `Install was rejected (0x${rc.toString(16).padStart(8, "0")}).`;
+        }
+      }
+
+      if (installed) {
         patch({ status: "idle", lastResult: { ok: true, message: "Installed." } });
         // Optional: auto-delete the spent staged .pkg so the library
         // doesn't accumulate installed packages. Best-effort + awaited so
@@ -517,15 +577,9 @@ export const usePkgLibrary = create<PkgLibraryState>((set, get) => ({
           await get().remove(path, host);
         }
       } else {
-        const rc = (resp.rc ?? 0) >>> 0;
         patch({
           status: "idle",
-          lastResult: {
-            ok: false,
-            message:
-              resp.err_message ||
-              `Install was rejected (0x${rc.toString(16).padStart(8, "0")}).`,
-          },
+          lastResult: { ok: false, message: mainErr || "Install was rejected." },
         });
       }
     } catch (e) {

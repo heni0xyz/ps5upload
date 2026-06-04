@@ -31,7 +31,8 @@ use ps5upload_core::pkg_install::{
     PkgInstallResponse, PkgInstallStatus,
 };
 use ps5upload_pkg::{
-    extract_from_ffpkg, inspect_ffpkg, parse_pkg, parse_split_pkg, PkgMetadata, SplitPkgMetadata,
+    extract_from_ffpkg, inspect_ffpkg, parse_pkg, parse_split_pkg, PkgKind, PkgMetadata,
+    SplitPkgMetadata,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -236,6 +237,13 @@ pub struct InstallStartRequest {
     /// When `None`, falls back to the http://{lan-ip}:{port} flow —
     /// the engine hosts bytes for Sony's BGFT downloader.
     pub local_ps5_path: Option<String>,
+    /// Caller-supplied content id for the staged-pkg case. When the pkg
+    /// is already on the PS5 (`local_ps5_path` set) there's no PC-side
+    /// file to parse, so the client passes the content id it parsed at
+    /// upload time. Optional — the payload re-parses it from the staged
+    /// pkg itself, so an empty value still installs.
+    #[serde(default)]
+    pub content_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1090,8 +1098,38 @@ async fn resolve_parts_and_meta(
         let meta = parse_pkg(std::path::Path::new(p)).map_err(|e| format!("{e}"))?;
         let size = meta.size;
         Ok((vec![meta.path.clone()], vec![size], size, meta))
+    } else if req
+        .local_ps5_path
+        .as_deref()
+        .map(|p| !p.is_empty())
+        .unwrap_or(false)
+    {
+        // Staged-pkg install: the .pkg is already on the PS5's disk and
+        // there's no PC-side file to parse. Build minimal metadata from the
+        // caller-provided fields (the client parsed the header at upload
+        // time). The install URL is just the raw PS5 path and the payload
+        // re-parses the content id from the staged pkg itself, so empty
+        // values here are fine. parts/size are unused for a local install
+        // (nothing is HTTP-served). This is what lets the Install Package
+        // page route a staged pkg through the main payload's
+        // InstallByPackage (which installs launchable content) instead of
+        // the metadata-only DPI daemon.
+        let lp = req.local_ps5_path.clone().unwrap_or_default();
+        let meta = PkgMetadata {
+            path: PathBuf::from(&lp),
+            size: 0,
+            kind: PkgKind::Standard,
+            content_id: req.content_id.clone().unwrap_or_default(),
+            title: String::new(),
+            title_id: String::new(),
+            category: String::new(),
+            package_type: req.package_type_override.clone(),
+            icon_png_base64: None,
+            warnings: vec![],
+        };
+        Ok((vec![PathBuf::from(lp)], vec![0], 0, meta))
     } else {
-        Err("either `path` or `split_root` is required".into())
+        Err("either `path`, `split_root`, or `local_ps5_path` is required".into())
     }
 }
 

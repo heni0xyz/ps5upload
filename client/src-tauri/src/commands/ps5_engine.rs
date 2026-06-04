@@ -1167,6 +1167,7 @@ pub async fn pkg_install_start(
     split_root: Option<String>,
     package_type_override: Option<String>,
     local_ps5_path: Option<String>,
+    content_id: Option<String>,
 ) -> Result<JsonValue, String> {
     let url = format!("{}/api/pkg/install/start", engine::url());
     let body = serde_json::json!({
@@ -1175,6 +1176,7 @@ pub async fn pkg_install_start(
         "split_root": split_root,
         "package_type_override": package_type_override,
         "local_ps5_path": local_ps5_path,
+        "content_id": content_id,
     });
     post_json(&url, &body).await
 }
