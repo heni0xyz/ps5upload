@@ -4,6 +4,13 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 2.27.1
+
+- Routine dependency updates (frontend libraries and a networking crate). No
+  user-facing changes — just keeping things current and secure.
+
+---
+
 ## 2.27.0
 
 - **Report a bug without leaving the app.** A new **Bug Report** page (under
