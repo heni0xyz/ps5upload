@@ -593,6 +593,17 @@ fight — the payload doesn't lock by destination, it commits the
 shards each transfer ACKs in arrival order. For routine use ("one
 person uploading, another browsing"), no coordination is needed.
 
+**Q: Opening the Hardware screen drops the connection ("Couldn't read
+hardware info — connection refused").**
+A single hardware reading that misbehaves on a particular firmware or
+ELF-loader could take the whole helper down — you'd see "connection
+refused" and have to re-send the payload. Fixed in 2.28.1: a reading that
+misbehaves now just shows as a dash for that one field instead of dropping
+the connection, and the helper logs exactly which reading misbehaved so a
+bug report pinpoints it. If you're on an older build, update; if a console
+ever still drops, re-send the payload from the Connection tab (reboot the
+PS5 only if it won't reconnect).
+
 ---
 
 ## Transferring

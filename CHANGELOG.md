@@ -4,6 +4,14 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 2.28.2
+
+- Docs only: added a troubleshooting entry for the Hardware screen dropping
+  the connection (the actual fix shipped in 2.28.1) with the recovery steps.
+  No app changes from 2.28.1.
+
+---
+
 ## 2.28.1
 
 - **Fixes a crash that could drop the PS5 connection when opening the Hardware
