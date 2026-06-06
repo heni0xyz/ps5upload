@@ -107,3 +107,62 @@ body,
 button {
   font: inherit;
 }
+
+/* ── Responsive width safety net ──────────────────────────────────────────
+ * Hard requirement: content must always fit the viewport WIDTH (vertical
+ * scrolling is fine). Three rules, validated on a real Android device (Pixel,
+ * 448 CSS-px wide) via CDP — they take an overflowing page from 105 clipped
+ * elements to 0 with no horizontal scroll:
+ *
+ * 1. `min-width: 0` on everything. Flex AND grid items default to
+ *    `min-width: auto`, which refuses to shrink below their content's
+ *    min-content size — so a single wide child (a long path, or a <select>
+ *    whose widest option is a CJK language name) blows out a whole grid track
+ *    or flex row and pushes the page wider than the screen. Resetting to 0
+ *    lets them shrink. This is specificity (0,0,0), so any intentional
+ *    Tailwind `min-w-[Npx]` (e.g. tables inside `overflow-x-auto`, which are
+ *    SUPPOSED to scroll within their own block) still wins.
+ * 2. `overflow-wrap: anywhere` (inherited from body) lets long unbreakable
+ *    tokens — PS5 paths, content-ids, kernel build strings, MACs — wrap
+ *    instead of forcing width. Normal prose is unaffected (spaces break
+ *    first); it only acts when a word would otherwise overflow.
+ * 3. media + form controls never exceed their container.
+ *
+ * `flex-shrink: 0` (Tailwind `shrink-0`, e.g. icons) still pins size, so this
+ * doesn't squish things that must keep their dimensions. */
+*,
+*::before,
+*::after {
+  min-width: 0;
+}
+
+body {
+  overflow-wrap: anywhere;
+}
+
+img,
+svg,
+video,
+canvas,
+select,
+input,
+textarea {
+  max-width: 100%;
+}
+
+/* ── Touch-target sizing ──────────────────────────────────────────────────
+ * On touch devices (phones/tablets — `pointer: coarse`), make interactive
+ * controls at least ~44px tall so they're comfortable to tap for an average
+ * finger (Apple HIG 44pt / Material 48dp). Desktop (`pointer: fine`, a mouse)
+ * is untouched, keeping its denser layout. Body text stays at the 18px root,
+ * which is already very legible on a phone — the gap was tap size, not read
+ * size. Checkboxes/radios keep their intrinsic size. */
+@media (pointer: coarse) {
+  button,
+  [role="button"],
+  select,
+  textarea,
+  input:not([type="checkbox"]):not([type="radio"]) {
+    min-height: 44px;
+  }
+}

@@ -434,25 +434,30 @@ function AndroidStorageAccessBanner() {
 
   return (
     <div className="border-b border-[var(--color-border)] bg-[var(--color-warn-soft)] px-3 py-2 text-[var(--color-text)]">
-      <div className="mx-auto flex max-w-6xl items-center gap-3">
-        <Lock size={18} className="shrink-0 text-[var(--color-warn)]" />
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium">
-            {tr(
-              "android_storage_prompt_title",
-              undefined,
-              "Allow file access for Android uploads",
-            )}
-          </p>
-          <p className="text-xs text-[var(--color-muted)]">
-            {tr(
-              "android_storage_prompt_body",
-              undefined,
-              "Grant All files access so PS5Upload can upload game folders, .zip dumps, and .pkg files from your phone.",
-            )}
-          </p>
+      {/* Stack on phones (text block over buttons); single row on sm+. The
+          old single-row layout squished the text into a narrow column on a
+          phone because the button group is shrink-0. */}
+      <div className="mx-auto flex max-w-6xl flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+        <div className="flex min-w-0 flex-1 items-start gap-3">
+          <Lock size={18} className="mt-0.5 shrink-0 text-[var(--color-warn)]" />
+          <div className="min-w-0">
+            <p className="text-sm font-medium">
+              {tr(
+                "android_storage_prompt_title",
+                undefined,
+                "Allow file access for Android uploads",
+              )}
+            </p>
+            <p className="text-xs text-[var(--color-muted)]">
+              {tr(
+                "android_storage_prompt_body",
+                undefined,
+                "Grant All files access so PS5Upload can upload game folders, .zip dumps, and .pkg files from your phone.",
+              )}
+            </p>
+          </div>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
           <Button
             variant="primary"
             size="sm"
@@ -601,7 +606,12 @@ export default function AppShell() {
         )}
 
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          <div className="flex-1 overflow-auto">
+          {/* Vertical scroll only. overflow-x-hidden is a backstop: the
+              index.css width safety net makes content fit, but this guarantees
+              the page can never scroll sideways. Nested blocks that are meant
+              to scroll horizontally (tables in overflow-x-auto, code) have
+              their own scroll context and are unaffected. */}
+          <div className="flex-1 overflow-y-auto overflow-x-hidden">
             <Outlet />
           </div>
         </main>

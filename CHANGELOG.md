@@ -4,6 +4,17 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 2.28.3
+
+- **The app fits your phone screen now.** Pages that used to run off the right
+  edge on Android (Settings and others) always fit the screen width — only
+  vertical scrolling, the way it should be. This holds in every language,
+  including the longer ones.
+- **Easier to tap.** Buttons and controls are now finger-sized (44px) on phones
+  and tablets, while desktop keeps its compact layout.
+
+---
+
 ## 2.28.2
 
 - Docs only: added a troubleshooting entry for the Hardware screen dropping
