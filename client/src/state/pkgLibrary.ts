@@ -23,16 +23,49 @@ import { useInstallSettingsStore } from "./installSettings";
  * without re-uploading. The source of truth is the on-PS5 directory listing,
  * not local state — so the list survives app restarts.
  *
- * Install always goes through the **DPI daemon** (the only method now):
- * `dpi_ensure` brings up (or reuses) the :9040 daemon, `pkg_dpi_install`
- * runs `sceAppInstUtilAppInstallPkg` from that clean loader process, then we
- * re-send the main payload (the single-payload loader swapped it out).
+ * Install PRIMARY path (since 2.25.2): the main payload's
+ * `sceAppInstUtilInstallByPackage` run in the full jailbreak context, which
+ * installs LAUNCHABLE content. If that's rejected we fall back to the DPI
+ * daemon on :9040 (also InstallByPackage since 2.25.2), then re-send the main
+ * payload (the single-payload loader swapped it out). The payload's own tier
+ * ladder (bgft.c) only drops to the unlaunchable `sceAppInstUtilAppInstallPkg`
+ * as an absolute last resort, flagging it so we warn the user — see
+ * `pkgInstallMayNotLaunch`.
  *
  * IMPORTANT: the library dir is deliberately NOT `pkg_temp/` — the payload
  * sweeps that on boot (`runtime_sweep_stale_pkg_temp`), which would wipe the
  * user's library. `pkg_library/` is left untouched.
  */
 export const PKG_LIBRARY_DIR = "/user/data/ps5upload/pkg_library";
+
+/** Warning copy shown when an install lands via the unlaunchable last-resort
+ *  path (register_path "appinst-local"); see `pkgInstallMayNotLaunch`. */
+export const PKG_MAY_NOT_LAUNCH_MESSAGE =
+  "Installed, but via a fallback that may not launch on this firmware. If the game won't start (“can't start the game or app”), re-install it from the PS5: Settings → System → Debug Settings → Game → Package Installer.";
+
+/** Whether an install response indicates the title may not launch. True only
+ *  when the engine flags `may_not_launch`, or (older engines that don't send
+ *  the flag) when the payload reports the unlaunchable `appinst-local`
+ *  last-resort path. Every launchable tier (appinst / shellui-rpc / intdebug /
+ *  regular) → false. */
+export function pkgInstallMayNotLaunch(r: {
+  register_path?: string;
+  may_not_launch?: boolean;
+}): boolean {
+  return r.may_not_launch ?? r.register_path === "appinst-local";
+}
+
+/** The lastResult for a SUCCESSFUL primary install — amber warn when the title
+ *  may not launch, plain green success otherwise. */
+export function installedLastResult(mayNotLaunch: boolean): {
+  ok: true;
+  message: string;
+  warn?: boolean;
+} {
+  return mayNotLaunch
+    ? { ok: true, warn: true, message: PKG_MAY_NOT_LAUNCH_MESSAGE }
+    : { ok: true, message: "Installed." };
+}
 
 export type PkgStatus = "idle" | "queued" | "uploading" | "installing";
 
@@ -63,8 +96,13 @@ export interface PkgEntry {
   bytes?: number;
   /** Total bytes for the active upload. */
   totalBytes?: number;
-  /** Outcome of the last install attempt this session, for inline feedback. */
-  lastResult?: { ok: boolean; message: string };
+  /** Outcome of the last install attempt this session, for inline feedback.
+   *  `warn` marks a soft-success: the install was accepted but via the
+   *  unlaunchable last-resort path (`register_path === "appinst-local"`), so
+   *  the title may not start on some firmwares (notably FW 12.xx). Rendered
+   *  amber rather than green so the user knows to re-install via the PS5's
+   *  Settings → Package Installer if it won't boot. */
+  lastResult?: { ok: boolean; message: string; warn?: boolean };
 }
 
 /** PS5 title ids look like `CUSA12345` / `PPSA01234` — four letters then five
@@ -490,6 +528,11 @@ export const usePkgLibrary = create<PkgLibraryState>((set, get) => ({
       // from the jailbroken context — the original reason the daemon existed).
       let installed = false;
       let mainErr = "";
+      // True when the install was accepted only via the unlaunchable
+      // last-resort path (sceAppInstUtilAppInstallPkg, register_path
+      // "appinst-local"). The title installs but may not start on some
+      // firmwares (notably FW 12.xx) — surface a caution, not a clean OK.
+      let mayNotLaunch = false;
       // The library entry carries the content id parsed at upload time —
       // pass it so the engine doesn't need to re-read a PC-side file (the
       // pkg is already staged on the PS5).
@@ -506,10 +549,12 @@ export const usePkgLibrary = create<PkgLibraryState>((set, get) => ({
           err_code?: number;
           register_path?: string;
           err_message?: string;
+          may_not_launch?: boolean;
         };
         const rc = (r.err_code ?? 0) >>> 0;
         if (rc === 0) {
           installed = true;
+          mayNotLaunch = pkgInstallMayNotLaunch(r);
         } else {
           mainErr =
             r.err_message ||
@@ -568,7 +613,7 @@ export const usePkgLibrary = create<PkgLibraryState>((set, get) => ({
       }
 
       if (installed) {
-        patch({ status: "idle", lastResult: { ok: true, message: "Installed." } });
+        patch({ status: "idle", lastResult: installedLastResult(mayNotLaunch) });
         // Optional: auto-delete the spent staged .pkg so the library
         // doesn't accumulate installed packages. Best-effort + awaited so
         // the row vanishes deterministically; remove() swallows its own

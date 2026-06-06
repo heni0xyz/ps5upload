@@ -1165,29 +1165,19 @@ int bgft_install_start(const char *url,
             "[bgft] in-process InstallByPackage failed (rc=0x%08X)\n",
             (unsigned)app_err);
 
-    /* ─── Tier 1b fallback: dedicated local-disk installer ───────────────
-     * Only for locally-staged pkgs, and only if InstallByPackage(local)
-     * above failed. sceAppInstUtilAppInstallPkg reads bytes straight off
-     * disk with no URI parse; it's the historical local path (2.20.2) and
-     * a useful backstop on any FW where InstallByPackage rejects a bare
-     * local path. NOTE: this installs but may register an unlaunchable
-     * title on some firmwares (the bug this 2.25.x reorder fixes), so it
-     * is now a *fallback*, never the primary local path. */
-    if (url[0] == '/') {
-        int32_t local_tid = -1;
-        uint32_t local_err = 0;
-        int local_rc = appinst_install_start_local(url, content_id,
-                                                    &local_tid, &local_err);
-        if (local_rc == 0) {
-            *out_task_id = local_tid;
-            *out_err_code = 0;
-            g_last_register_path = "appinst-local";
-            return 0;
-        }
-        fprintf(stderr,
-                "[bgft] appinst-local fallback also failed (rc=0x%08X), trying shellui-rpc\n",
-                (unsigned)local_err);
-    }
+    /* ─── 2.27.x reorder — FW-12 "installs but won't launch" fix ─────────
+     * The dedicated local-disk installer (sceAppInstUtilAppInstallPkg) USED
+     * to run HERE, immediately after InstallByPackage(local) failed. It
+     * installs content but can register an UNLAUNCHABLE title on some
+     * firmwares ("can't start the game or app", CE-) — the exact FW-12.xx
+     * symptom users report. Running it second meant a single InstallByPackage
+     * rejection on 12.xx silently produced a dead tile AND reported success,
+     * never reaching the two LAUNCHABLE fallbacks below (shellui-rpc, legacy
+     * BGFT IntDebug). It is now the ABSOLUTE LAST RESORT — see the
+     * `try_appinst_local_last_resort:` label at the end of this function. It
+     * is reached only after every launchable path has failed, and on success
+     * it tags g_last_register_path = "appinst-local" so the host warns the
+     * title may not launch instead of showing a clean success. */
 
     {
         /* Tier 2: ShellUI RPC fallback. Only reached when the in-process
@@ -1249,7 +1239,7 @@ int bgft_install_start(const char *url,
         *out_err_code = saved_app_err != 0
                           ? saved_app_err
                           : BGFT_ERR_LIB_NOT_LOADABLE;
-        return -1;
+        goto try_appinst_local_last_resort;
     }
 
     pthread_mutex_lock(&g_mtx);
@@ -1334,7 +1324,7 @@ int bgft_install_start(const char *url,
                 "[bgft] sceBgftServiceDownloadRegisterTask failed: 0x%08X "
                 "(content_id=%s, url=%s)\n",
                 (unsigned)rc, content_id, url);
-        return -1;
+        goto try_appinst_local_last_resort;
     }
 
     rc = g_bgft_start(task_id);
@@ -1346,12 +1336,47 @@ int bgft_install_start(const char *url,
         fprintf(stderr,
                 "[bgft] sceBgftServiceIntDownloadStartTask(%d) failed: 0x%08X\n",
                 task_id, (unsigned)rc);
-        return -1;
+        goto try_appinst_local_last_resort;
     }
 
     *out_task_id = task_id;
     pthread_mutex_unlock(&g_mtx);
     return 0;
+
+try_appinst_local_last_resort:
+    /* ─── Last resort: local-disk AppInstallPkg (may not launch) ──────────
+     * Reached only after EVERY launchable path failed: in-process
+     * InstallByPackage, shellui-rpc, and legacy BGFT IntDebug. As a final
+     * attempt we try sceAppInstUtilAppInstallPkg for a locally-staged pkg —
+     * an install the user can re-trigger beats no install at all. This call
+     * can register a title the launcher rejects ("can't start the game or
+     * app") on some firmwares, so on success we report register_path
+     * "appinst-local": the host treats that as "installed, but may not
+     * launch" and tells the user to re-install from the PS5's
+     * Settings → Package Installer if it won't boot.
+     *
+     * HTTP-sourced installs have nothing staged on local disk (url is an
+     * http(s):// URL, not a bare path), so this is skipped for them and we
+     * surface the launchable-tier failure code set by whichever path jumped
+     * here. */
+    if (url[0] == '/') {
+        int32_t local_tid = -1;
+        uint32_t local_err = 0;
+        int local_rc = appinst_install_start_local(url, content_id,
+                                                    &local_tid, &local_err);
+        if (local_rc == 0) {
+            *out_task_id = local_tid;
+            *out_err_code = 0;
+            g_last_register_path = "appinst-local";
+            return 0;
+        }
+        fprintf(stderr,
+                "[bgft] appinst-local last-resort also failed (rc=0x%08X)\n",
+                (unsigned)local_err);
+    }
+    /* *out_err_code already holds the launchable-tier failure code set by
+     * the path that jumped here — surface that as the real cause. */
+    return -1;
 }
 
 /* ─── Public API: install status ──────────────────────────────────── */

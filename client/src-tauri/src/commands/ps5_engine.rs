@@ -1195,8 +1195,9 @@ pub async fn pkg_install_start(
 }
 
 /// Install a staged .pkg through the DPI daemon on :9040 (the engine
-/// POSTs the bare PS5 path; the daemon runs sceAppInstUtilAppInstallPkg).
-/// Long-deadline client — AppInstallPkg ingests the pkg before replying.
+/// POSTs the bare PS5 path; the daemon runs sceAppInstUtilInstallByPackage
+/// with that local path — the launchable path, since 2.25.2). Long-deadline
+/// client — the installer ingests the pkg before replying.
 #[tauri::command]
 pub async fn pkg_dpi_install(
     ps5_addr: String,

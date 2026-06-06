@@ -239,26 +239,42 @@ int hw_info_get_text(char *out, size_t out_cap, size_t *out_written,
         }
         if (physmem == 0) physmem = 16ULL * 1024 * 1024 * 1024;
 
-        /* Precise firmware version WAS read here via the SDK's kernel-R/W
-         * helper (kernel_get_fw_version → KERNEL_ADDRESS_DATA_BASE + a
-         * FW-specific offset). Disabled on the always-on Hardware-tab path:
-         * it's the only kernel-memory read in that path, and a kernel read
-         * at a wrong/unmapped offset faults hard and kills the helper —
-         * unlike a Sony-API miss, which just returns an error.
+        /* Precise firmware word via the SDK's kernel-R/W helper
+         * (kernel_get_fw_version → KERNEL_ADDRESS_DATA_BASE + a FW-specific
+         * offset). This is the ONLY kernel-memory read on the Hardware-tab
+         * path, and a read at a wrong/unmapped offset faults hard and kills
+         * the helper — unlike a Sony-API miss, which just returns an error.
          *
-         * Symptom: on PS5 Slim (CFI-2000) the Hardware tab dropped the
-         * payload the instant it loaded. The disconnect fix was validated
-         * on Pro 9.60 + phat 5.10, but the Slim is a different SKU/FW the
-         * SDK's data-base offset isn't proven against; the speculative
-         * kernel read is not worth crashing the whole tab for.
+         * Symptom when it goes wrong: on PS5 Slim (CFI-2000) the Hardware
+         * tab dropped the payload the instant it loaded. The disconnect fix
+         * was validated on Pro 9.60 + phat 5.10, but the Slim is a different
+         * SKU/FW the SDK's data-base offset isn't proven against.
          *
-         * Cost of disabling: none functionally — the desktop already
-         * derives the firmware family from the kern.version string when
-         * this word is 0 (its documented fallback). We report 0 here. If
-         * Settings-grade precision is ever wanted back, do it behind an
-         * explicit, user-initiated read (like the on-demand sensor button),
-         * never on the auto-poll. */
+         * 2.27.x — re-enabled as an explicit, GUARDED opt-in:
+         *   - DEFAULT: kfw stays 0, identical to the previously-disabled
+         *     behaviour. The desktop derives the FW family from the
+         *     kern.version string when this word is 0 (its documented
+         *     fallback), so nothing regresses.
+         *   - Set PS5UPLOAD_PRECISE_FW=1 in the payload's environment to
+         *     attempt the precise read. hw_info is built once and cached
+         *     forever, so even when enabled the kernel read runs AT MOST
+         *     ONCE per payload lifetime — never on a repeated/auto poll.
+         *
+         * Enable ONLY on a SKU/FW whose SDK offset you've validated — on an
+         * unproven target it can still crash the helper. Intended for
+         * FW-12.xx point-release triage (e.g. telling 12.00 from 12.40 while
+         * diagnosing the install-launch bug), not for general use. */
         uint32_t kfw = 0;
+        {
+            const char *precise = getenv("PS5UPLOAD_PRECISE_FW");
+            if (precise != NULL && precise[0] == '1' && precise[1] == '\0') {
+                kfw = kernel_get_fw_version();
+                fprintf(stderr,
+                        "[hw_info] PS5UPLOAD_PRECISE_FW=1 — "
+                        "kernel_get_fw_version()=0x%08X\n",
+                        (unsigned)kfw);
+            }
+        }
 
         int n = snprintf(g_hwinfo_buf, sizeof(g_hwinfo_buf),
             "model=%s\n"

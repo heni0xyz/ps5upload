@@ -278,6 +278,13 @@ pub struct InstallStartResponse {
     /// the SceShellUI RPC fallback did, or the legacy direct-BGFT
     /// path. See `ps5upload_core::pkg_install::via_tier`.
     pub via: String,
+    /// True when the install was accepted via the unlaunchable last-resort
+    /// path (`register_path == "appinst-local"`). The title installs but may
+    /// fail to start ("can't start the game or app") on some firmwares —
+    /// notably FW 12.xx. The UI shows a warning and points the user at the
+    /// PS5's Settings → Package Installer to re-install if it won't boot.
+    /// See `ps5upload_core::pkg_install::install_may_not_launch`.
+    pub may_not_launch: bool,
 }
 
 async fn install_start_handler(
@@ -559,6 +566,9 @@ async fn install_start_handler(
         err_code: resp.err_code,
         err_message,
         detail: resp.detail,
+        // Borrow register_path for may_not_launch BEFORE the move below —
+        // struct fields evaluate in source order.
+        may_not_launch: ps5upload_core::pkg_install::install_may_not_launch(&resp.register_path),
         register_path: resp.register_path,
         intdebug_avail: resp.intdebug_avail,
         kernel_rw: resp.kernel_rw,
@@ -603,6 +613,12 @@ pub struct StatusResponse {
     /// can read it without correlating against the start ack). See
     /// `ps5upload_core::pkg_install::via_tier`.
     pub via: String,
+    /// True when this install was accepted via the unlaunchable last-resort
+    /// path (`register_path == "appinst-local"`) — re-derived every poll so
+    /// the status response is self-contained. The title installs but may not
+    /// start on some firmwares (notably FW 12.xx). See
+    /// `ps5upload_core::pkg_install::install_may_not_launch`.
+    pub may_not_launch: bool,
 }
 
 /// Default maximum age (seconds) of an install session before the
@@ -788,6 +804,7 @@ fn build_status_response(
         err_message: err_code_message(status.err_code).map(|s| s.to_string()),
         detail: status.detail,
         cancelled,
+        may_not_launch: ps5upload_core::pkg_install::install_may_not_launch(&status.register_path),
         register_path: status.register_path,
         intdebug_avail: status.intdebug_avail,
         kernel_rw: status.kernel_rw,

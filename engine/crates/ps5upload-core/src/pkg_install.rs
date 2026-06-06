@@ -237,6 +237,24 @@ pub fn via_tier(task_id: i32) -> &'static str {
     }
 }
 
+/// Whether the install tier that accepted this request registers a title
+/// that may **not launch** ("can't start the game or app", CE-).
+///
+/// `register_path == "appinst-local"` is the payload's
+/// `sceAppInstUtilAppInstallPkg` path. On some firmwares (the FW-12.xx
+/// symptom users report) it installs content but registers the title in a
+/// state the PS5 launcher rejects. Since 2.27.x the payload's bgft.c reaches
+/// this path only as an ABSOLUTE LAST RESORT — after the in-process
+/// `InstallByPackage`, the SceShellUI RPC fallback, AND legacy BGFT IntDebug
+/// have all failed — so seeing it means "installed, but it may not boot."
+/// Every other `register_path` ("appinst", "shellui-rpc", "intdebug",
+/// "regular") is a launchable path. The host surfaces a warning for this
+/// case instead of a clean success, steering the user to re-install via the
+/// PS5's Settings → Package Installer if the title won't start.
+pub fn install_may_not_launch(register_path: &str) -> bool {
+    register_path == "appinst-local"
+}
+
 pub fn err_code_message(code: u32) -> Option<&'static str> {
     match code {
         0x0000_0000 => None, // success — no message
@@ -323,6 +341,20 @@ mod tests {
         assert_eq!(via_tier(0x60000003), "shellui-rpc");
         // Tier-0 worker (scaffolded v2.16.1): TIER0_FLAG + TASK_ID_FLAG.
         assert_eq!(via_tier(0x50000007), "tier0-worker");
+    }
+
+    #[test]
+    fn may_not_launch_only_for_appinst_local() {
+        // The unlaunchable last-resort path (sceAppInstUtilAppInstallPkg).
+        assert!(install_may_not_launch("appinst-local"));
+        // Every launchable path must NOT warn.
+        assert!(!install_may_not_launch("appinst"));
+        assert!(!install_may_not_launch("shellui-rpc"));
+        assert!(!install_may_not_launch("intdebug"));
+        assert!(!install_may_not_launch("regular"));
+        assert!(!install_may_not_launch("tier0-worker"));
+        assert!(!install_may_not_launch("none"));
+        assert!(!install_may_not_launch(""));
     }
 
     #[test]

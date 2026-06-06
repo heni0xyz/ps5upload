@@ -11,6 +11,7 @@ import {
   Loader2,
   CheckCircle2,
   XCircle,
+  AlertTriangle,
   Gamepad2,
   Info,
   HardDrive,
@@ -196,16 +197,22 @@ function PkgRow({
         </div>
       )}
 
-      {/* Last install result */}
+      {/* Last install result. `warn` is a soft-success: installed, but via
+          the unlaunchable last-resort path — amber, with a triangle, so the
+          user knows it may not boot (the FW-12 "can't start the game" case). */}
       {!busy && entry.lastResult && (
         <div
           className={`flex items-start gap-1.5 text-xs ${
-            entry.lastResult.ok
-              ? "text-[var(--color-good)]"
-              : "text-[var(--color-bad)]"
+            entry.lastResult.warn
+              ? "text-[var(--color-warn)]"
+              : entry.lastResult.ok
+                ? "text-[var(--color-good)]"
+                : "text-[var(--color-bad)]"
           }`}
         >
-          {entry.lastResult.ok ? (
+          {entry.lastResult.warn ? (
+            <AlertTriangle size={13} className="mt-px shrink-0" />
+          ) : entry.lastResult.ok ? (
             <CheckCircle2 size={13} className="mt-px shrink-0" />
           ) : (
             <XCircle size={13} className="mt-px shrink-0" />

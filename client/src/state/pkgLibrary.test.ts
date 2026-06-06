@@ -16,6 +16,9 @@ import {
   titleIdFromContentId,
   usePkgLibrary,
   isFinishedPkg,
+  pkgInstallMayNotLaunch,
+  installedLastResult,
+  PKG_MAY_NOT_LAUNCH_MESSAGE,
   type PkgEntry,
 } from "./pkgLibrary";
 
@@ -48,6 +51,43 @@ describe("titleIdFromContentId", () => {
     expect(titleIdFromContentId("HB0000-CUSA0020_00-X")).toBeNull();
     // lowercase letters not accepted
     expect(titleIdFromContentId("HB0000-cusa00207_00-X")).toBeNull();
+  });
+});
+
+// ── may-not-launch surfacing (the 2.27.x FW-12 install fix) ─────────────────
+
+describe("pkgInstallMayNotLaunch", () => {
+  it("trusts the engine's explicit may_not_launch flag", () => {
+    expect(pkgInstallMayNotLaunch({ may_not_launch: true })).toBe(true);
+    expect(pkgInstallMayNotLaunch({ may_not_launch: false })).toBe(false);
+    // Flag wins even if register_path would say otherwise.
+    expect(
+      pkgInstallMayNotLaunch({ may_not_launch: false, register_path: "appinst-local" }),
+    ).toBe(false);
+  });
+
+  it("falls back to register_path for older engines without the flag", () => {
+    // Only the unlaunchable last-resort path warns.
+    expect(pkgInstallMayNotLaunch({ register_path: "appinst-local" })).toBe(true);
+    // Every launchable tier does not.
+    for (const rp of ["appinst", "shellui-rpc", "intdebug", "regular", "tier0-worker", "none", ""]) {
+      expect(pkgInstallMayNotLaunch({ register_path: rp })).toBe(false);
+    }
+    // Nothing at all (very old engine) → no warning.
+    expect(pkgInstallMayNotLaunch({})).toBe(false);
+  });
+});
+
+describe("installedLastResult", () => {
+  it("plain green success when launchable", () => {
+    expect(installedLastResult(false)).toEqual({ ok: true, message: "Installed." });
+  });
+  it("amber warn with re-install guidance when may not launch", () => {
+    const r = installedLastResult(true);
+    expect(r.ok).toBe(true);
+    expect(r.warn).toBe(true);
+    expect(r.message).toBe(PKG_MAY_NOT_LAUNCH_MESSAGE);
+    expect(r.message).toMatch(/Package Installer/);
   });
 });
 

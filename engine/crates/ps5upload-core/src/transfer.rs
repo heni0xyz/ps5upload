@@ -873,6 +873,24 @@ impl<'a> PipelinedSender<'a> {
         record_count: u32,
         flags: u32,
     ) -> Result<()> {
+        self.send_prehashed_with_progress(shard_seq, data, digest, record_count, flags, None)
+    }
+
+    /// Core shard send. When `progress` is `Some`, the shard BODY is reported
+    /// into the counter in ~1 MiB increments as the kernel accepts it (smooth
+    /// speed/ETA on slow links) — see `Connection::send_frame_split_progress`.
+    /// Callers pass `Some` ONLY for non-packed shards (body bytes == file-data
+    /// bytes) and then skip their own per-shard `fetch_add`; packed/zip shards
+    /// pass `None` and keep their `planned_shard_data_len` accounting.
+    fn send_prehashed_with_progress(
+        &mut self,
+        shard_seq: u64,
+        data: &[u8],
+        digest: [u8; 32],
+        record_count: u32,
+        flags: u32,
+        progress: Option<&std::sync::atomic::AtomicU64>,
+    ) -> Result<()> {
         // Abort at the shard boundary if cancellation was requested. Bailing
         // before sending the next shard leaves the transaction un-committed; the
         // payload marks it interrupted on disconnect, so a later resume can pick
@@ -894,8 +912,15 @@ impl<'a> PipelinedSender<'a> {
             flags,
         }
         .encode();
-        self.c
-            .send_frame_split(FrameType::StreamShard, &hdr_bytes, data)?;
+        match progress {
+            Some(p) => {
+                self.c
+                    .send_frame_split_progress(FrameType::StreamShard, &hdr_bytes, data, p)?
+            }
+            None => self
+                .c
+                .send_frame_split(FrameType::StreamShard, &hdr_bytes, data)?,
+        }
         self.inflight.push_back((shard_seq, data.len()));
         self.inflight_bytes += data.len();
         // Pace AFTER the frame is on the wire — gives a tighter bound
@@ -907,9 +932,42 @@ impl<'a> PipelinedSender<'a> {
         Ok(())
     }
 
+    /// Send a non-packed shard, reporting body bytes into `progress` as they go
+    /// on the wire. The caller must NOT also `fetch_add` for this shard.
+    fn send_with_progress(
+        &mut self,
+        shard_seq: u64,
+        data: &[u8],
+        record_count: u32,
+        flags: u32,
+        progress: &std::sync::atomic::AtomicU64,
+    ) -> Result<()> {
+        let digest = hash_shard(data);
+        self.send_prehashed_with_progress(
+            shard_seq,
+            data,
+            digest,
+            record_count,
+            flags,
+            Some(progress),
+        )
+    }
+
     /// Pre-hashed single-shard send (record_count=1, flags=0).
     fn send_prehashed(&mut self, shard_seq: u64, data: &[u8], digest: [u8; 32]) -> Result<()> {
         self.send_prehashed_with(shard_seq, data, digest, 1, 0)
+    }
+
+    /// Pre-hashed single-shard send with fine-grained body progress (non-packed
+    /// single-file path). Caller must NOT also `fetch_add` for this shard.
+    fn send_prehashed_progress(
+        &mut self,
+        shard_seq: u64,
+        data: &[u8],
+        digest: [u8; 32],
+        progress: &std::sync::atomic::AtomicU64,
+    ) -> Result<()> {
+        self.send_prehashed_with_progress(shard_seq, data, digest, 1, 0, Some(progress))
     }
 
     /// Receive and validate the ACK at the head of the queue.
@@ -1357,15 +1415,24 @@ fn transfer_file_path_with_flags(
                     Err(_) => break, // producer ended early (cancel handled below)
                 };
                 debug_assert_eq!(prepared.seq, next);
-                sender.send_prehashed(
-                    prepared.seq,
-                    &prepared.buf[..prepared.len],
-                    prepared.digest,
-                )?;
-                shards_sent += 1;
-                if let Some(p) = &cfg.progress_bytes {
-                    p.fetch_add(prepared.len as u64, std::sync::atomic::Ordering::Relaxed);
+                // Single-file shards are always non-packed → report body bytes
+                // as they go on the wire so a big single file's speed/ETA stays
+                // smooth on slow links (no per-64-MiB sawtooth).
+                if let Some(p) = cfg.progress_bytes.as_deref() {
+                    sender.send_prehashed_progress(
+                        prepared.seq,
+                        &prepared.buf[..prepared.len],
+                        prepared.digest,
+                        p,
+                    )?;
+                } else {
+                    sender.send_prehashed(
+                        prepared.seq,
+                        &prepared.buf[..prepared.len],
+                        prepared.digest,
+                    )?;
                 }
+                shards_sent += 1;
                 let _ = empty_tx.send(prepared.buf); // recycle
                 next += 1;
             }
@@ -1846,16 +1913,26 @@ pub fn transfer_dir_with_flags(
             let body = materialise_body(ps, cfg.progress_files.as_deref())?;
             let (record_count, flags) = planned_shard_meta(ps);
             shards_sent += 1;
-            sender.send_with(seq, &body, record_count, flags)?;
-            if let Some(p) = &cfg.progress_bytes {
-                // File-data bytes only — packed shards carry per-record
-                // framing that isn't part of the plan total (the progress
-                // denominator), so counting body.len() pushed the bar past
-                // 100% on dirs of many small files.
-                p.fetch_add(
-                    planned_shard_data_len(ps),
-                    std::sync::atomic::Ordering::Relaxed,
-                );
+            // Non-packed shards (large-file bodies) report their body bytes as
+            // the kernel accepts them, so the speed/ETA stays smooth on slow
+            // links instead of jumping once per 64 MiB shard (the "speed keeps
+            // dropping" sawtooth). Packed (small-file) shards keep per-shard
+            // file-data accounting — their body carries per-record framing the
+            // progress denominator excludes.
+            if flags & SHARD_FLAG_PACKED == 0 {
+                if let Some(p) = cfg.progress_bytes.as_deref() {
+                    sender.send_with_progress(seq, &body, record_count, flags, p)?;
+                } else {
+                    sender.send_with(seq, &body, record_count, flags)?;
+                }
+            } else {
+                sender.send_with(seq, &body, record_count, flags)?;
+                if let Some(p) = &cfg.progress_bytes {
+                    p.fetch_add(
+                        planned_shard_data_len(ps),
+                        std::sync::atomic::Ordering::Relaxed,
+                    );
+                }
             }
         }
         sender.drain()?;
@@ -2109,16 +2186,26 @@ pub fn transfer_file_list_with_flags(
             let body = materialise_body(ps, cfg.progress_files.as_deref())?;
             let (record_count, flags) = planned_shard_meta(ps);
             shards_sent += 1;
-            sender.send_with(seq, &body, record_count, flags)?;
-            if let Some(p) = &cfg.progress_bytes {
-                // File-data bytes only — packed shards carry per-record
-                // framing that isn't part of the plan total (the progress
-                // denominator), so counting body.len() pushed the bar past
-                // 100% on dirs of many small files.
-                p.fetch_add(
-                    planned_shard_data_len(ps),
-                    std::sync::atomic::Ordering::Relaxed,
-                );
+            // Non-packed shards (large-file bodies) report their body bytes as
+            // the kernel accepts them, so the speed/ETA stays smooth on slow
+            // links instead of jumping once per 64 MiB shard (the "speed keeps
+            // dropping" sawtooth). Packed (small-file) shards keep per-shard
+            // file-data accounting — their body carries per-record framing the
+            // progress denominator excludes.
+            if flags & SHARD_FLAG_PACKED == 0 {
+                if let Some(p) = cfg.progress_bytes.as_deref() {
+                    sender.send_with_progress(seq, &body, record_count, flags, p)?;
+                } else {
+                    sender.send_with(seq, &body, record_count, flags)?;
+                }
+            } else {
+                sender.send_with(seq, &body, record_count, flags)?;
+                if let Some(p) = &cfg.progress_bytes {
+                    p.fetch_add(
+                        planned_shard_data_len(ps),
+                        std::sync::atomic::Ordering::Relaxed,
+                    );
+                }
             }
         }
         sender.drain()?;

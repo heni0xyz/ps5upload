@@ -327,6 +327,57 @@ impl Connection {
         Ok(())
     }
 
+    /// Like `send_frame_split`, but reports `rest` (the shard body) bytes into
+    /// `progress` as they are accepted by the socket, in ~1 MiB increments.
+    ///
+    /// Why: a shard body is 64 MiB. On a slow link a whole shard lands as one
+    /// progress jump every tens of seconds, so the upload's bytes-counter is
+    /// flat in between and the rolling-rate readout decays toward zero —
+    /// the "speed keeps dropping" sawtooth users report on Wi-Fi. Reporting the
+    /// body in 1 MiB steps (the stream is an unbuffered TcpStream, so each
+    /// `write_all` blocks until the kernel accepts those bytes) keeps the
+    /// speed/ETA smooth and honest. Use ONLY for non-packed shards, where the
+    /// body bytes equal the file-data bytes the progress denominator counts;
+    /// packed (small-file) shards carry per-record framing and must keep their
+    /// per-shard `planned_shard_data_len` accounting instead.
+    pub fn send_frame_split_progress(
+        &mut self,
+        ft: FrameType,
+        prefix: &[u8],
+        rest: &[u8],
+        progress: &std::sync::atomic::AtomicU64,
+    ) -> Result<()> {
+        let body_len = (prefix.len() + rest.len()) as u64;
+        let hdr = FrameHeader::new(ft, 0, body_len, 0);
+        let hdr_bytes = hdr.encode();
+        // Frame header + shard prefix first (tiny) — one vectored write.
+        let head: [&[u8]; 2] = [&hdr_bytes, prefix];
+        let mut trimmed: [&[u8]; 2] = [&[], &[]];
+        let mut count = 0;
+        for s in head {
+            if !s.is_empty() {
+                trimmed[count] = s;
+                count += 1;
+            }
+        }
+        if count > 0 {
+            write_all_parts(&mut self.stream, &trimmed[..count])
+                .context("write frame split hdr")?;
+        }
+        // Body in progress-sized chunks; bump the counter as the kernel takes
+        // each chunk. ~1 MiB keeps the readout smooth even at <2 MB/s without
+        // adding meaningful syscall overhead on a 64 MiB shard.
+        const PROGRESS_CHUNK: usize = 1 << 20;
+        use std::sync::atomic::Ordering;
+        for chunk in rest.chunks(PROGRESS_CHUNK) {
+            self.stream
+                .write_all(chunk)
+                .context("write frame split body")?;
+            progress.fetch_add(chunk.len() as u64, Ordering::Relaxed);
+        }
+        Ok(())
+    }
+
     // ── Receive ───────────────────────────────────────────────────────────────
 
     /// Read just the frame header. Call `recv_body_exact` or `drain_body` next.

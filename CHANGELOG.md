@@ -4,6 +4,22 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 2.28.0
+
+- **Fixes games that install but won't start on newer firmware.** Installing a
+  package now always prefers the methods that produce a *launchable* game and
+  only falls back to the riskier last-resort method when everything else
+  fails. If it ever has to use that fallback, the app clearly warns you — and
+  points you to the PS5's own Package Installer — instead of showing a
+  misleading "Installed." This targets the "can't start the game or app" error
+  some people hit on recent firmware.
+- **Smoother upload speed readout.** Speed and ETA now update continuously as
+  data goes out instead of jumping once per chunk, so they no longer sawtooth
+  on Wi-Fi or slower links.
+- Plus better firmware diagnostics and more install-path test coverage.
+
+---
+
 ## 2.27.1
 
 - Routine dependency updates (frontend libraries and a networking crate). No

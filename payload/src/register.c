@@ -249,6 +249,37 @@ static void *reg_dlsym_default(const char *sym) {
     return p;
 }
 
+/* Resolve a Sony symbol that may carry DIFFERENT NAMES across firmware
+ * revisions. Sony has renamed install-API exports across major releases
+ * (e.g. 12.x), so for the install/launch-critical entry points we try a
+ * list of candidate names in priority order and take the first that
+ * resolves.
+ *
+ * Unlike reg_dlsym_default(), this LOGS the outcome: which candidate
+ * resolved, or — critically for FW-12 install bug reports — that ALL
+ * candidates missed. A silent NULL was previously indistinguishable from
+ * "symbol present but install rejected later"; the log line makes a
+ * renamed/removed symbol immediately diagnosable from a user's payload log.
+ *
+ * `names` is a NULL-terminated array of candidate symbol names; `role` is a
+ * short human label for the log line (e.g. "app-install-title-dir"). To add
+ * support for a firmware that renamed a symbol, append the new name to that
+ * symbol's candidate list below — no other change required. */
+static void *reg_dlsym_first(const char *const *names, const char *role) {
+    for (const char *const *n = names; n && *n; n++) {
+        void *p = reg_dlsym_default(*n);
+        if (p) {
+            fprintf(stderr, "[register] %s resolved via '%s'\n", role, *n);
+            return p;
+        }
+    }
+    fprintf(stderr,
+            "[register] WARN: %s unresolved — no candidate symbol exported on "
+            "this firmware; install/launch via this API will fail cleanly\n",
+            role);
+    return NULL;
+}
+
 /* -- Public module init / shutdown -------------------------------------
  *
  * First-touch lazy init: pthread_once guarantees this runs exactly
@@ -289,13 +320,34 @@ static void register_module_init_impl(void) {
      * Install requests fail cleanly on any firmware where the API
      * isn't actually exported. */
     reg_dlopen_sideload(REG_LIB_APPINSTUTIL);
-    g_reg.app_install_title_dir = (app_install_title_dir_fn_t)
-        reg_dlsym_default("sceAppInstUtilAppInstallTitleDir");
+    /* Install/launch-critical symbols go through reg_dlsym_first so a
+     * firmware that renamed one (Sony has done this across major releases,
+     * incl. 12.x) can be supported by appending the new name to the
+     * candidate list — and so an unresolved symbol is LOGGED rather than
+     * silently NULL (key for diagnosing FW-12 "install won't launch" bug
+     * reports). The canonical name is listed first; add FW-specific
+     * alternates after it as they're identified. */
+    {
+        static const char *const title_dir_names[] = {
+            "sceAppInstUtilAppInstallTitleDir",
+            /* add FW-12.x renamed export here when identified */
+            NULL,
+        };
+        g_reg.app_install_title_dir = (app_install_title_dir_fn_t)
+            reg_dlsym_first(title_dir_names, "app-install-title-dir");
+    }
     /* Correct name — capital I in UnInstall. The old code used
      * sceAppInstUtilAppUnInstallTitle (with "Title" suffix)
      * which doesn't exist → uninstall was silently a no-op. */
-    g_reg.app_uninstall = (app_uninstall_fn_t)
-        reg_dlsym_default("sceAppInstUtilAppUnInstall");
+    {
+        static const char *const uninstall_names[] = {
+            "sceAppInstUtilAppUnInstall",
+            /* add FW-12.x renamed export here when identified */
+            NULL,
+        };
+        g_reg.app_uninstall = (app_uninstall_fn_t)
+            reg_dlsym_first(uninstall_names, "app-uninstall");
+    }
     g_reg.app_inst_util_initialize = (app_inst_util_initialize_fn_t)
         reg_dlsym_default("sceAppInstUtilInitialize");
 
