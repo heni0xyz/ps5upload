@@ -598,6 +598,11 @@ test-payload: payload
 		exit 1; \
 	}
 	@echo "✓ $(PAYLOAD_ELF) exists and is an ELF binary"
+	@echo "Running hw-guard fault-recovery self-test (host build)..."
+	@cc -O2 -Wall -Wextra -Werror -o /tmp/ps5upload-hw-guard-selftest \
+		$(PAYLOAD_DIR)/tests/hw_guard_selftest.c
+	@/tmp/ps5upload-hw-guard-selftest
+	@echo "✓ hw-guard recovers Sony-getter faults without dropping the helper"
 
 test-client: setup-client
 	@echo "Testing client build..."

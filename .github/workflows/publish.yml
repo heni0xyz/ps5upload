@@ -76,7 +76,7 @@ jobs:
 
       - name: Download PS5 Payload SDK
         env:
-          PS5_SDK_TAG: v0.39
+          PS5_SDK_TAG: v0.40
         run: |
           curl --retry 3 --retry-delay 5 --retry-connrefused \
             --fail --location --silent --show-error \

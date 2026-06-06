@@ -12,6 +12,7 @@
 #include "runtime.h"
 #include "register.h"
 #include "shellui_rpc.h"
+#include "hw_guard.h"
 
 /* Sony "debugger" / system-process authid. Setting our process's
  * ucred authid to this value grants the credentials Sony's kernel
@@ -99,6 +100,14 @@ static runtime_state_t *g_state = NULL;
 volatile int g_ucred_elevation_rc = -1;
 
 static void handle_fatal(int sig) {
+    /* First: if this thread faulted INSIDE a guarded Sony hardware getter,
+     * recover instead of dying — hw_guard_try_recover() siglongjmp's back to
+     * the guard (does not return) for SIGSEGV/SIGBUS/SIGILL while armed, so a
+     * getter that faults under a given loader context degrades that one field
+     * to "unavailable" rather than dropping the whole helper. Returns 0 (and
+     * we fall through to normal fatal handling) for any non-guarded crash. */
+    if (hw_guard_try_recover(sig)) return; /* unreachable when it recovers */
+
     /* If we crashed mid-RPC, we may be holding a ptrace attach to
      * SceShellUI. Without a detach the kernel keeps ShellUI in
      * SIGSTOP until our process is fully reaped, which freezes the
@@ -284,6 +293,7 @@ int main(void) {
     signal(SIGSEGV, handle_fatal);
     signal(SIGABRT, handle_fatal);
     signal(SIGBUS,  handle_fatal);
+    signal(SIGILL,  handle_fatal);  /* hw_guard recovers faulting Sony getters */
     signal(SIGTERM, handle_fatal);
     signal(SIGHUP,  handle_fatal);
     /* CRITICAL: ignore SIGPIPE. Without this, every client disconnect

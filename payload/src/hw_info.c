@@ -28,11 +28,69 @@
 #include <sys/sysctl.h>
 #include <sys/types.h>
 #include <dlfcn.h>
+#include <setjmp.h>
+#include <signal.h>
+#include <string.h>
 
 #include <ps5/kernel.h>
 
 #include "hw_info.h"
+#include "hw_guard.h"
 #include "shellui_rpc.h"
+
+/* ── Fault guard for Sony hardware getters ────────────────────────
+ *
+ * See hw_guard.h for the why. Per-thread state: the mgmt model runs one
+ * thread per connection, and several can read hardware concurrently, so the
+ * jump buffer + armed flag must be thread-local (a shared buffer would let
+ * one thread's siglongjmp resume another thread's stack = instant corruption).
+ */
+static __thread sigjmp_buf            g_hwg_jmp;
+static __thread volatile sig_atomic_t g_hwg_armed = 0;
+static __thread const char           *g_hwg_call = "";
+static __thread size_t                g_hwg_call_len = 0;
+
+int hw_guard_try_recover(int sig) {
+    if (!g_hwg_armed) return 0;
+    /* Only recover from genuine memory-fault signals; let everything else
+     * (SIGTERM/SIGHUP/SIGABRT) take the normal fatal path. */
+    if (sig != SIGSEGV && sig != SIGBUS && sig != SIGILL) return 0;
+    g_hwg_armed = 0;
+    /* Async-signal-safe breadcrumb only — fprintf is NOT safe in a signal
+     * handler (stdio lock). write(2) with a pre-stored length is. This line
+     * lands in the payload's captured stderr / PS5 log so the faulting getter
+     * is named even when no debugger is attached. */
+    static const char pfx[] = "[hw_info] FAULT in Sony getter: ";
+    static const char sfx[] = " (skipped, reported unavailable)\n";
+    (void)write(2, pfx, sizeof(pfx) - 1);
+    if (g_hwg_call && g_hwg_call_len) (void)write(2, g_hwg_call, g_hwg_call_len);
+    (void)write(2, sfx, sizeof(sfx) - 1);
+    siglongjmp(g_hwg_jmp, sig);
+    return 1; /* unreachable — siglongjmp does not return */
+}
+
+/* Run `stmt` (a Sony hw getter call) under the fault guard. `label` MUST be a
+ * string literal (used for both the breadcrumb and sizeof-length). Emits an
+ * always-on breadcrumb BEFORE the call (so a hang — not just a fault — leaves
+ * the last-attempted getter in the log), then arms the per-thread jump. On a
+ * fault inside `stmt`, control resumes at the sigsetjmp with a non-zero
+ * return and `stmt`'s effects are skipped — callers must have a safe default
+ * already in place and should read results through a `volatile` so the value
+ * is well-defined on the longjmp path. */
+#define HW_GUARD(label, stmt)                                              \
+    do {                                                                   \
+        fprintf(stderr, "[hw_info] -> %s\n", (label));                     \
+        fflush(stderr);                                                    \
+        g_hwg_call = (label);                                              \
+        g_hwg_call_len = sizeof(label) - 1;                                \
+        if (sigsetjmp(g_hwg_jmp, 1) == 0) {                                \
+            g_hwg_armed = 1;                                               \
+            stmt;                                                          \
+            g_hwg_armed = 0;                                               \
+        } else {                                                           \
+            g_hwg_armed = 0;                                               \
+        }                                                                  \
+    } while (0)
 
 /* ── Fan control (/dev/icc_fan) ──────────────────────────────────
  *
@@ -209,10 +267,25 @@ int hw_info_get_text(char *out, size_t out_cap, size_t *out_written,
         char osrelease[64]    = {0};
         int  ncpu             = 0;
 
-        if (!g_hw.model_name || g_hw.model_name(model_name) != 0 || model_name[0] == '\0') {
+        /* model + serial come from dlsym'd Sony getters that can FAULT in
+         * some loader/host-process contexts (see hw_guard.h) — guard each so
+         * a fault degrades the field to a default instead of dropping the
+         * helper. `volatile` so the result is well-defined on the longjmp
+         * (fault) path; the default is already set, so a fault → fallback. */
+        volatile int model_ok = 0;
+        if (g_hw.model_name) {
+            HW_GUARD("sceKernelGetHwModelName",
+                     model_ok = (g_hw.model_name(model_name) == 0));
+        }
+        if (!model_ok || model_name[0] == '\0') {
             snprintf(model_name, sizeof(model_name), "%s", "PlayStation 5");
         }
-        if (!g_hw.serial || g_hw.serial(serial) != 0 || serial[0] == '\0') {
+        volatile int serial_ok = 0;
+        if (g_hw.serial) {
+            HW_GUARD("sceKernelGetHwSerialNumber",
+                     serial_ok = (g_hw.serial(serial) == 0));
+        }
+        if (!serial_ok || serial[0] == '\0') {
             snprintf(serial, sizeof(serial), "%s", "N/A");
         }
         sysctl_string("hw.machine",     hw_machine, sizeof(hw_machine));
@@ -224,7 +297,13 @@ int hw_info_get_text(char *out, size_t out_cap, size_t *out_written,
          * first (most accurate), then sysctl variants, then page
          * math, then the 16 GiB default every PS5 is known to have. */
         uint64_t physmem = 0;
-        if (g_hw.direct_mem) physmem = (uint64_t)g_hw.direct_mem();
+        if (g_hw.direct_mem) {
+            /* volatile temp so the value is well-defined on the fault path. */
+            volatile uint64_t dm = 0;
+            HW_GUARD("sceKernelGetDirectMemorySize",
+                     dm = (uint64_t)g_hw.direct_mem());
+            physmem = dm;
+        }
         if (physmem == 0) sysctl_uint64("hw.physmem", &physmem);
         if (physmem == 0) sysctl_uint64("hw.realmem", &physmem);
         if (physmem == 0) sysctl_uint64("hw.usermem", &physmem);
@@ -268,7 +347,13 @@ int hw_info_get_text(char *out, size_t out_cap, size_t *out_written,
         {
             const char *precise = getenv("PS5UPLOAD_PRECISE_FW");
             if (precise != NULL && precise[0] == '1' && precise[1] == '\0') {
-                kfw = kernel_get_fw_version();
+                /* Guarded: a kernel read at a wrong/unmapped offset faults —
+                 * the original Slim crash. With the guard a fault degrades to
+                 * kfw=0 (string-parse fallback) instead of dropping the
+                 * helper. volatile temp for the longjmp path. */
+                volatile uint32_t fw = 0;
+                HW_GUARD("kernel_get_fw_version", fw = kernel_get_fw_version());
+                kfw = fw;
                 fprintf(stderr,
                         "[hw_info] PS5UPLOAD_PRECISE_FW=1 — "
                         "kernel_get_fw_version()=0x%08X\n",
@@ -403,10 +488,18 @@ int hw_temps_get_text_ex(int flags, char *out, size_t out_cap,
         soc_temp     = g_temps_cache.soc_temp;
         cpu_freq_mhz = g_temps_cache.cpu_freq_mhz;
     } else {
-        int t = 0;
-        if (g_hw.cpu_temp && g_hw.cpu_temp(&t) == 0 &&
-            t >= HW_TEMP_MIN_C && t <= HW_TEMP_MAX_C) {
-            cpu_temp = t;
+        /* All three direct sensor getters are dlsym'd Sony calls — fault-
+         * guarded (see hw_guard.h) so a getter that faults under some loader
+         * context degrades to "unavailable" instead of dropping the helper.
+         * `got` is volatile so it's well-defined on the longjmp path; the
+         * out-param is only read when got==1 (so it need not be volatile). */
+        if (g_hw.cpu_temp) {
+            int t = 0;
+            volatile int got = 0;
+            HW_GUARD("sceKernelGetCpuTemperature", got = (g_hw.cpu_temp(&t) == 0));
+            if (got && t >= HW_TEMP_MIN_C && t <= HW_TEMP_MAX_C) {
+                cpu_temp = t;
+            }
         }
         /* SoC thermal sensor. Sweep channels 0–7 rather than reading only
          * channel 0: the canonical SoC junction sensor is channel 0 on the
@@ -421,22 +514,28 @@ int hw_temps_get_text_ex(int flags, char *out, size_t out_cap,
          * Same direct API we already call cleanly for channel 0; only the
          * channel arg varies, and each value is bounds-checked. */
         if (g_hw.soc_temp) {
-            for (int ch = 0; ch < 8; ch++) {
-                int st = 0;
-                if (g_hw.soc_temp(ch, &st) == 0 &&
-                    st >= HW_TEMP_MIN_C && st <= HW_TEMP_MAX_C) {
-                    soc_temp = st;
-                    break;
+            HW_GUARD("sceKernelGetSocSensorTemperature", {
+                for (int ch = 0; ch < 8; ch++) {
+                    int st = 0;
+                    if (g_hw.soc_temp(ch, &st) == 0 &&
+                        st >= HW_TEMP_MIN_C && st <= HW_TEMP_MAX_C) {
+                        soc_temp = st;
+                        break;
+                    }
                 }
-            }
+            });
         }
         if (g_hw.cpu_freq) {
-            long hz = g_hw.cpu_freq();
-            long mhz = (hz > 0) ? hz / (1000L * 1000L) : 0;
-            /* Upper-bound the result: on FW where the direct call returns
-             * a garbage value (FW 5.10 phat returned ~5.2e13 MHz) an
-             * `hz > 0`-only guard would let it straight through. */
-            if (mhz > 0 && mhz <= HW_CPU_FREQ_MAX_MHZ) cpu_freq_mhz = mhz;
+            volatile long hz = 0;
+            volatile int  got = 0;
+            HW_GUARD("sceKernelGetCpuFrequency", { hz = g_hw.cpu_freq(); got = 1; });
+            if (got) {
+                long mhz = (hz > 0) ? hz / (1000L * 1000L) : 0;
+                /* Upper-bound the result: on FW where the direct call returns
+                 * a garbage value (FW 5.10 phat returned ~5.2e13 MHz) an
+                 * `hz > 0`-only guard would let it straight through. */
+                if (mhz > 0 && mhz <= HW_CPU_FREQ_MAX_MHZ) cpu_freq_mhz = mhz;
+            }
         }
         /* CPU frequency via kernel TSC — fallback when the direct call
          * gave nothing sane. Pure sysctl, bounded the same way. */

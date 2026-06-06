@@ -4,6 +4,19 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 2.28.1
+
+- **Fixes a crash that could drop the PS5 connection when opening the Hardware
+  screen.** On some console/loader combinations a single misbehaving hardware
+  reading could take the whole helper down (you'd see "connection refused" and
+  have to re-send the payload). Now a reading that misbehaves on a given
+  firmware just shows as "unavailable" for that one field instead of dropping
+  the connection — and the helper logs exactly which reading misbehaved so
+  the cause is easy to pin down.
+- Built against the latest PS5 payload SDK.
+
+---
+
 ## 2.28.0
 
 - **Fixes games that install but won't start on newer firmware.** Installing a
