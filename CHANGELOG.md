@@ -4,6 +4,20 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 2.29.1
+
+- **Connecting two (or more) PS5s at once is stable again.** A status-checking
+  bug introduced in 2.29.0 could flood the consoles with rapid back-to-back
+  reconnect checks, which knocked the second console offline a few seconds
+  after it connected. The app now checks each console at a steady pace, so
+  every PS5 stays connected.
+- **Recover a crash log after the helper drops.** In the bug report, when the
+  helper is disconnected you can now reconnect it in one tap to grab the PS5
+  kernel log — it survives the helper crash, so you can still capture what went
+  wrong (just don't reboot the console first, which clears it).
+
+---
+
 ## 2.29.0
 
 - **Run multiple PS5s at the same time.** When you have more than one console,

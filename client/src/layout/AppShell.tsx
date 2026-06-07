@@ -50,7 +50,20 @@ function useStatusPolling() {
   const setStatus = useConnectionStore((s) => s.setStatus);
   const setHostStatus = useConnectionStore((s) => s.setHostStatus);
   const activeHost = useConnectionStore((s) => s.host);
-  const profiles = useRosterStore((s) => s.profiles);
+  // Stable host-list key: ONLY the set of hosts (port-stripped, sorted), not
+  // the full profile objects. The poller calls roster.noteSeen() on every
+  // successful probe (updating last_seen_*), which replaces the profiles array;
+  // depending on `profiles` here made that re-fire the effect → immediate
+  // re-probe → noteSeen → … a payload_check STORM (dozens/sec) that exhausted
+  // connections and knocked helpers offline (fatal with 2+ consoles). Keying
+  // on just the host set means noteSeen no longer re-fires the poll.
+  const hostsKey = useRosterStore((s) =>
+    s.profiles
+      .map((p) => (p.host ?? "").trim())
+      .filter(Boolean)
+      .sort()
+      .join("|"),
+  );
   const visible = useDocumentVisible();
 
   // Proactive health warnings — keyed PER HOST (the poll fans out over every
@@ -96,7 +109,7 @@ function useStatusPolling() {
     // machinery is no longer needed (each host owns its own slot).
     const hosts = Array.from(
       new Set(
-        [...profiles.map((p) => p.host), ...(activeHost ? [activeHost] : [])]
+        [...hostsKey.split("|"), ...(activeHost ? [activeHost] : [])]
           .map((h) => (h ?? "").trim())
           .filter((h) => h.length > 0),
       ),
@@ -204,7 +217,7 @@ function useStatusPolling() {
       cancelled = true;
       clearInterval(h);
     };
-  }, [profiles, activeHost, setHostStatus, setStatus, visible]);
+  }, [hostsKey, activeHost, setHostStatus, setStatus, visible]);
 }
 
 /** Fire a TTL-gated update check on mount. The store debounces to

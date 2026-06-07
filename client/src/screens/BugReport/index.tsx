@@ -20,6 +20,8 @@ import { useDiagSettingsStore, LOG_LEVELS } from "../../state/diagSettings";
 import { useConnectionStore } from "../../state/connection";
 import { buildDiagnosticBundle } from "../../lib/diagnosticBundle";
 import { buildPs5Snapshot } from "../../lib/ps5Snapshot";
+import { ensurePayloadCurrent } from "../../lib/ensurePayloadCurrent";
+import { hostOf } from "../../lib/addr";
 import { flushDiskLogNow } from "../../state/logs";
 import { openReportChannel } from "../../lib/reportProblem";
 import type { SavedShot } from "../../lib/captureScreenshot";
@@ -92,6 +94,25 @@ export default function BugReportScreen() {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<BuildResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [reconnecting, setReconnecting] = useState(false);
+
+  // Re-deploy the helper so the PS5 snapshot + kernel log can be captured.
+  // Crucially, the PS5 kernel log lives in the kernel's circular buffer
+  // (kern.msgbuf), which SURVIVES a helper crash — so reconnecting here lets
+  // the report capture the log from BEFORE/DURING the crash, as long as the
+  // console hasn't been rebooted. (payloadStatus flips to "up" via the poller,
+  // which re-enables the PS5-snapshot checkbox.)
+  const reconnectHelper = useCallback(async () => {
+    if (!host?.trim() || reconnecting) return;
+    setReconnecting(true);
+    try {
+      await ensurePayloadCurrent(hostOf(host), undefined, true);
+    } catch {
+      /* best-effort; the poller surfaces the resulting status */
+    } finally {
+      setReconnecting(false);
+    }
+  }, [host, reconnecting]);
 
   // Live summary numbers.
   const [logStats, setLogStats] = useState<{ count: number; bytes: number } | null>(
@@ -515,6 +536,31 @@ export default function BugReportScreen() {
               onChange={() => toggle("images")}
             />
           </div>
+
+          {/* Helper-down recovery hint. The kernel log is the most useful thing
+              after a helper crash, yet it can't be fetched without a live
+              helper. But the PS5 kernel buffer (kern.msgbuf) SURVIVES the
+              crash, so reconnecting recovers the crash log — make that
+              discoverable instead of just greying the checkbox out. */}
+          {!connected && !!host?.trim() && (
+            <div className="mt-3 rounded-md border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3 text-xs text-[var(--color-muted)]">
+              <p className="mb-2">
+                {tr(
+                  "bug_report_klog_recover",
+                  undefined,
+                  "The PS5 kernel log lives in the console's kernel buffer, which survives a helper crash — so reconnecting the helper recovers the log from the crash. Grab it before rebooting the PS5 (a reboot clears it).",
+                )}
+              </p>
+              <Button
+                size="sm"
+                variant="secondary"
+                loading={reconnecting}
+                onClick={() => void reconnectHelper()}
+              >
+                {tr("bug_report_reconnect_helper", undefined, "Reconnect helper")}
+              </Button>
+            </div>
+          )}
 
           {/* Privacy */}
           <label className="mt-4 flex items-start gap-2 text-xs">
