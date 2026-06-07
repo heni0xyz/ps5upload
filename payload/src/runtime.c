@@ -2679,8 +2679,14 @@ static int runtime_write_shard_to_path(runtime_tx_entry_t *entry,
     if (fd >= 0) (void)fchmod(fd, 0777);
     if (fd < 0) {
         if (entry) entry->last_io_errno = errno;
-        free(bufs[0]);
-        free(bufs[1]);
+        /* Only free LOCALLY-owned buffers. Borrowed (entry) buffers persist on
+         * the tx entry and are freed in runtime_release_tx_resources — freeing
+         * them here left entry->shard_io_buf[] dangling → use-after-free on the
+         * next shard + double-free at teardown (the huge-upload crash). */
+        if (owns_bufs) {
+            free(bufs[0]);
+            free(bufs[1]);
+        }
         /* Same drain-then-FAIL contract: open() failing while we still
          * try to drain the wire keeps framing recoverable but the tx
          * must abort, not silently succeed. */
@@ -2701,8 +2707,10 @@ static int runtime_write_shard_to_path(runtime_tx_entry_t *entry,
         int saved = errno;
         if (entry) entry->last_io_errno = saved;
         close(fd);
-        free(bufs[0]);
-        free(bufs[1]);
+        if (owns_bufs) { /* borrowed buffers freed at tx release — see open-fail note */
+            free(bufs[0]);
+            free(bufs[1]);
+        }
         fprintf(stderr,
                 "[payload2] shard lseek %s to %llu failed errno=%d; draining + failing tx\n",
                 path, (unsigned long long)write_offset, saved);
@@ -2738,8 +2746,10 @@ static int runtime_write_shard_to_path(runtime_tx_entry_t *entry,
                     path, (long long)preallocate_bytes);
             if (entry) entry->last_io_errno = ENOSPC;
             close(fd);
-            free(bufs[0]);
-            free(bufs[1]);
+            if (owns_bufs) { /* borrowed buffers freed at tx release — see open-fail note */
+                free(bufs[0]);
+                free(bufs[1]);
+            }
             (void)drain_shard_data(client_fd, data_len);
             return -1;
         }
@@ -2782,8 +2792,14 @@ static int runtime_write_shard_to_path(runtime_tx_entry_t *entry,
             close(fd);
             t_close_us = now_us() - t_close_start;
         }
-        free(bufs[0]);
-        free(bufs[1]);
+        /* HOT PATH (sub-64KiB shard, the common case for folder uploads).
+         * Borrowed (entry) buffers MUST persist for the next shard — freeing
+         * them here is the root cause of the huge-upload crash (UAF next shard +
+         * double-free at tx release). Only free locally-owned buffers. */
+        if (owns_bufs) {
+            free(bufs[0]);
+            free(bufs[1]);
+        }
         if (hash_enabled) blake3_hasher_finalize(&hasher, out_digest, BLAKE3_OUT_LEN);
         if (entry && rc_ret == 0) {
             entry->recv_us       += t_recv;

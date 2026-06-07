@@ -34,10 +34,20 @@ function sleep(ms: number): Promise<void> {
  * can bail out of the ~30 s poll promptly instead of running it to completion
  * in the background. Returns "no-push" when cancelled mid-poll. The ELF may
  * already have been sent by then — that's fine, it's idempotent.
+ *
+ * `force` (optional) re-sends the ELF even when the mgmt port reports a
+ * matching version. This is REQUIRED for recovery from a mid-transfer drop:
+ * the version check probes the mgmt port (:9114), but the transfer listener
+ * (:9113) can die while mgmt survives — or the whole payload can be wedged —
+ * so trusting "version matches → current" leaves a dead transfer port in
+ * place and the resume retry just fails again on a refused :9113 (the
+ * "I had to re-send the ELF manually" symptom). On a connection-class
+ * failure the payload is already suspect, so force a clean redeploy.
  */
 export async function ensurePayloadCurrent(
   host: string,
   shouldCancel?: () => boolean,
+  force = false,
 ): Promise<EnsurePayloadResult> {
   if (shouldCancel?.()) return "no-push";
   let appVersion: string;
@@ -58,7 +68,7 @@ export async function ensurePayloadCurrent(
   } catch {
     // payloadCheck threw — fall through to push attempt.
   }
-  if (running && compareVersions(running, appVersion) === 0) {
+  if (!force && running && compareVersions(running, appVersion) === 0) {
     return "current";
   }
   // Need to push. Locate the bundled ELF + send it.

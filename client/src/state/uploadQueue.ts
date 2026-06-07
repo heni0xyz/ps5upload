@@ -700,13 +700,20 @@ export const useUploadQueueStore = create<QueueState>((set, get) => {
             await sleep(Math.min(250, backoffMs - waited));
             if (!isLive()) return;
           }
-          // Re-deploy the payload if it's down (no-op if it's healthy),
-          // then poll until it answers. Best-effort — if it throws we
-          // still retry the transfer, which surfaces the real error.
+          // Re-deploy the payload, then poll until it answers. force=true:
+          // we got here from a connection-class transfer failure, so the
+          // payload is suspect — its transfer port (:9113) may be dead even
+          // if the mgmt port (:9114) still answers the version check. A
+          // plain (non-force) call would see "version matches → current" and
+          // skip the redeploy, leaving the dead :9113 in place so the resume
+          // retry fails again — the "had to re-send the ELF manually" bug.
+          // Re-send is idempotent and the resume continues from committed
+          // shards, so a needless redeploy on a transient blip only costs the
+          // boot wait, never re-uploaded data.
           // `() => !isLive()` lets a Stop bail out of the ~30 s boot-wait
           // promptly instead of leaving a ghost push running.
           try {
-            await ensurePayloadCurrent(hostOf(next.addr), () => !isLive());
+            await ensurePayloadCurrent(hostOf(next.addr), () => !isLive(), true);
           } catch (healErr) {
             console.warn("auto-resume: ensurePayloadCurrent threw:", healErr);
           }
