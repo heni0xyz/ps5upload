@@ -4,6 +4,20 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 2.29.0
+
+- **Run multiple PS5s at the same time.** When you have more than one console,
+  a tab strip appears at the top — one tab per PS5, each with its own live
+  status. Switch between them freely; every console keeps its own uploads and
+  package installs running in parallel in the background. Installing on one
+  console no longer makes the others wait — start work on each independently.
+- **Big uploads are reliable again.** Fixed a crash that could drop the
+  connection partway through very large uploads (you'd have had to re-send the
+  helper). On top of that, if a transfer ever drops, the app now automatically
+  re-deploys the helper and resumes from where it left off instead of giving up.
+
+---
+
 ## 2.28.3
 
 - **The app fits your phone screen now.** Pages that used to run off the right

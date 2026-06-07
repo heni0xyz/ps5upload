@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { useConnectionStore } from "./connection";
 import { useRunningAppsStore } from "./runningApps";
+import { useFsClipboardStore } from "./fsClipboard";
 import { hostOf } from "../lib/addr";
 
 /**
@@ -140,6 +141,10 @@ export const useRosterStore = create<RosterState>((set, get) => ({
     // the wrong PS5. RunningAppsPanel will repopulate after the
     // first poll on the new host.
     useRunningAppsStore.getState().clearForHostChange(profile.host);
+    // The FS cut/copy clipboard holds paths from the PREVIOUS console — a
+    // paste after switching would target the new console with the old one's
+    // paths. Clear it on switch so cut/paste stays within one console.
+    useFsClipboardStore.getState().clear();
     // Sync connection store. AppShell's host-watcher kicks off
     // probes against the new host, populating
     // payloadStatus/payloadVersion/ps5Kernel naturally.
@@ -271,8 +276,24 @@ export function useActiveProfile(): PS5Profile | null {
  *  AppShell's mount effect. Idempotent — safe to call on every
  *  startup. */
 export function ensureRosterMigrated() {
-  const { profiles, add, setActive } = useRosterStore.getState();
-  if (profiles.length > 0) return;
+  const { profiles, active_id, add, setActive } = useRosterStore.getState();
+  if (profiles.length > 0) {
+    // The roster's active profile is the single source of truth for which
+    // console is selected. connection.host persists separately (its own
+    // localStorage key) and can DRIFT from active_id across sessions — e.g. a
+    // stale `ps5upload.host` from before the roster existed, leaving the tab
+    // strip showing console A while the screens read console B's data. On
+    // load, reconcile connection.host to the active profile.
+    const active = profiles.find((p) => p.id === active_id) ?? profiles[0];
+    if (!active) return;
+    if (active.id !== active_id) {
+      setActive(active.id); // also syncs connection.host + clears per-host view state
+    } else if (useConnectionStore.getState().host !== active.host) {
+      useConnectionStore.getState().setHost(active.host);
+    }
+    return;
+  }
+  // No roster yet: seed one from whatever single host was persisted.
   const host = useConnectionStore.getState().host?.trim();
   if (!host) return;
   const id = add({ name: `PS5 (${host})`, host });

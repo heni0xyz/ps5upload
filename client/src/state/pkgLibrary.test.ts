@@ -14,7 +14,7 @@ vi.mock("../api/ps5", () => ({
 import { fsDelete, fsListDir } from "../api/ps5";
 import {
   titleIdFromContentId,
-  usePkgLibrary,
+  pkgLibraryStore,
   isFinishedPkg,
   pkgInstallMayNotLaunch,
   installedLastResult,
@@ -113,7 +113,7 @@ function entry(p: Partial<PkgEntry> & { name: string }): PkgEntry {
 }
 
 function seed(entries: PkgEntry[]) {
-  usePkgLibrary.setState({ entries, error: null });
+  pkgLibraryStore(HOST).setState({ entries, error: null });
 }
 
 describe("isFinishedPkg", () => {
@@ -142,7 +142,7 @@ describe("clearFinished", () => {
     mockedDelete.mockReset().mockResolvedValue(undefined);
   });
   afterEach(() => {
-    usePkgLibrary.setState({ entries: [], error: null });
+    pkgLibraryStore(HOST).setState({ entries: [], error: null });
   });
 
   it("deletes only the successfully-installed rows from the PS5", async () => {
@@ -154,9 +154,9 @@ describe("clearFinished", () => {
       entry({ name: "done2.pkg", lastResult: { ok: true, message: "Installed." } }),
     ]);
 
-    await usePkgLibrary.getState().clearFinished(HOST);
+    await pkgLibraryStore(HOST).getState().clearFinished(HOST);
 
-    const names = usePkgLibrary
+    const names = pkgLibraryStore(HOST)
       .getState()
       .entries.map((e) => e.name)
       .sort();
@@ -167,9 +167,9 @@ describe("clearFinished", () => {
 
   it("is a no-op (no deletes) when nothing is finished", async () => {
     seed([entry({ name: "pending.pkg" })]);
-    await usePkgLibrary.getState().clearFinished(HOST);
+    await pkgLibraryStore(HOST).getState().clearFinished(HOST);
     expect(mockedDelete).not.toHaveBeenCalled();
-    expect(usePkgLibrary.getState().entries).toHaveLength(1);
+    expect(pkgLibraryStore(HOST).getState().entries).toHaveLength(1);
   });
 
   it("restores rows whose PS5 delete failed and surfaces an error", async () => {
@@ -181,18 +181,18 @@ describe("clearFinished", () => {
       entry({ name: "done2.pkg", lastResult: { ok: true, message: "Installed." } }),
     ]);
 
-    await usePkgLibrary.getState().clearFinished(HOST);
+    await pkgLibraryStore(HOST).getState().clearFinished(HOST);
 
-    const names = usePkgLibrary.getState().entries.map((e) => e.name);
+    const names = pkgLibraryStore(HOST).getState().entries.map((e) => e.name);
     expect(names).toEqual(["done2.pkg"]);
-    expect(usePkgLibrary.getState().error).toContain("Failed to delete 1");
+    expect(pkgLibraryStore(HOST).getState().error).toContain("Failed to delete 1");
   });
 
   it("does nothing without a host", async () => {
     seed([entry({ name: "done1.pkg", lastResult: { ok: true, message: "" } })]);
-    await usePkgLibrary.getState().clearFinished("  ");
+    await pkgLibraryStore(HOST).getState().clearFinished("  ");
     expect(mockedDelete).not.toHaveBeenCalled();
-    expect(usePkgLibrary.getState().entries).toHaveLength(1);
+    expect(pkgLibraryStore(HOST).getState().entries).toHaveLength(1);
   });
 });
 
@@ -201,7 +201,7 @@ describe("clearAll", () => {
     mockedDelete.mockReset().mockResolvedValue(undefined);
   });
   afterEach(() => {
-    usePkgLibrary.setState({ entries: [], error: null });
+    pkgLibraryStore(HOST).setState({ entries: [], error: null });
   });
 
   it("deletes every idle row but never an in-flight one", async () => {
@@ -213,9 +213,9 @@ describe("clearAll", () => {
       entry({ name: "queued.pkg", status: "queued" }),
     ]);
 
-    await usePkgLibrary.getState().clearAll(HOST);
+    await pkgLibraryStore(HOST).getState().clearAll(HOST);
 
-    const names = usePkgLibrary
+    const names = pkgLibraryStore(HOST)
       .getState()
       .entries.map((e) => e.name)
       .sort();
@@ -240,10 +240,10 @@ describe("refresh — base + update coexistence and badging", () => {
 
   beforeEach(() => {
     mockedList.mockReset();
-    usePkgLibrary.setState({ entries: [], error: null, loading: false });
+    pkgLibraryStore(HOST).setState({ entries: [], error: null, loading: false });
   });
   afterEach(() => {
-    usePkgLibrary.setState({ entries: [], error: null });
+    pkgLibraryStore(HOST).setState({ entries: [], error: null });
   });
 
   it("lists a base and its same-ContentID update as two distinct, badged rows", async () => {
@@ -255,9 +255,9 @@ describe("refresh — base + update coexistence and badging", () => {
       return [file(`${CID}.pkg`, 100), dir("updates"), dir("dlc")];
     });
 
-    await usePkgLibrary.getState().refresh("192.168.1.50");
+    await pkgLibraryStore(HOST).getState().refresh("192.168.1.50");
 
-    const entries = usePkgLibrary.getState().entries;
+    const entries = pkgLibraryStore(HOST).getState().entries;
     expect(entries).toHaveLength(2);
     const base = entries.find((e) => e.category === undefined);
     const update = entries.find((e) => e.category === "gp");
@@ -268,7 +268,7 @@ describe("refresh — base + update coexistence and badging", () => {
     expect(base?.path).not.toBe(update?.path);
     expect(base?.path.endsWith(`/${CID}.pkg`)).toBe(true);
     expect(update?.path).toContain("/updates/");
-    expect(usePkgLibrary.getState().error).toBeNull();
+    expect(pkgLibraryStore(HOST).getState().error).toBeNull();
   });
 
   it("tolerates missing updates/ + dlc/ sub-dirs (ENOENT), still lists the base", async () => {
@@ -279,16 +279,16 @@ describe("refresh — base + update coexistence and badging", () => {
       return [file(`${CID}.pkg`, 100)];
     });
 
-    await usePkgLibrary.getState().refresh("192.168.1.50");
+    await pkgLibraryStore(HOST).getState().refresh("192.168.1.50");
 
-    const entries = usePkgLibrary.getState().entries;
+    const entries = pkgLibraryStore(HOST).getState().entries;
     expect(entries).toHaveLength(1);
     expect(entries[0].category).toBeUndefined();
-    expect(usePkgLibrary.getState().error).toBeNull();
+    expect(pkgLibraryStore(HOST).getState().error).toBeNull();
   });
 
   it("surfaces a real (non-ENOENT) error on the ROOT list without wiping the list", async () => {
-    usePkgLibrary.setState({
+    pkgLibraryStore(HOST).setState({
       entries: [
         {
           name: "x.pkg",
@@ -303,10 +303,10 @@ describe("refresh — base + update coexistence and badging", () => {
       throw new Error("connection refused");
     });
 
-    await usePkgLibrary.getState().refresh("192.168.1.50");
+    await pkgLibraryStore(HOST).getState().refresh("192.168.1.50");
 
     // existing list preserved, error surfaced
-    expect(usePkgLibrary.getState().entries).toHaveLength(1);
-    expect(usePkgLibrary.getState().error).toBeTruthy();
+    expect(pkgLibraryStore(HOST).getState().entries).toHaveLength(1);
+    expect(pkgLibraryStore(HOST).getState().error).toBeTruthy();
   });
 });

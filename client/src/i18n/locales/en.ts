@@ -4,6 +4,11 @@ import type { Translations } from "../types";
 
 const en: Translations = {
 
+// Console tabs (multi-console)
+console_tab_ip: "PS5 IP",
+console_tab_name: "Name (optional)",
+console_tab_add: "Add a console",
+
 // Navigation
 faq: "FAQ",
 logs: "Logs",

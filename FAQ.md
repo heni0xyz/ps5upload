@@ -604,6 +604,16 @@ bug report pinpoints it. If you're on an older build, update; if a console
 ever still drops, re-send the payload from the Connection tab (reboot the
 PS5 only if it won't reconnect).
 
+**Q: Can I manage several PS5s at the same time?**
+Yes (2.29.0+). Add each console — the Connection screen, or the **+** on the
+console tab strip — and a tab appears at the top for every PS5, each with its
+own live status dot. Click a tab to view and operate that console. Each
+console runs its own upload queue and its own package installs **independently
+and in parallel**: start an upload or install on one, switch tabs, start
+another — they don't wait for each other. (Switching tabs only changes what
+you're looking at; every console's work keeps running in the background.) The
+single-console layout is unchanged until you add a second PS5.
+
 ---
 
 ## Transferring

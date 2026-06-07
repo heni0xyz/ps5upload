@@ -3,9 +3,10 @@ import { useEffect, useRef, useState } from "react";
 import { Lock, Menu, RefreshCw, X } from "lucide-react";
 import Sidebar from "./Sidebar";
 import StatusBar from "./StatusBar";
+import ConsoleTabs from "./ConsoleTabs";
 import ActivityBar from "./ActivityBar";
 import { Button } from "../components/Button";
-import { useConnectionStore } from "../state/connection";
+import { useConnectionStore, EMPTY_HOST_RUNTIME } from "../state/connection";
 import { log } from "../state/logs";
 import { useUpdateStore } from "../state/update";
 import { engineApi } from "../api/engine";
@@ -46,16 +47,18 @@ import { getVersion } from "@tauri-apps/api/app";
  *    when a host is configured (no point spamming DOWN probes against
  *    the default IP if the user hasn't entered theirs). */
 function useStatusPolling() {
-  const host = useConnectionStore((s) => s.host);
   const setStatus = useConnectionStore((s) => s.setStatus);
+  const setHostStatus = useConnectionStore((s) => s.setHostStatus);
+  const activeHost = useConnectionStore((s) => s.host);
+  const profiles = useRosterStore((s) => s.profiles);
   const visible = useDocumentVisible();
 
-  // Proactive health warnings — logged once per distinct condition so the bug
-  // bundle flags a likely root cause (stale helper / no kernel R/W) before the
-  // user even files a report, instead of leaving them to notice a subtle pill.
+  // Proactive health warnings — keyed PER HOST (the poll fans out over every
+  // console), logged once per distinct condition so the bug bundle flags a
+  // likely root cause (stale helper / no kernel R/W) before the user files.
   const appVersionRef = useRef<string | null>(null);
-  const warnedMismatchRef = useRef<string | null>(null);
-  const warnedNoUcredRef = useRef<string | null>(null);
+  const warnedMismatchRef = useRef<Record<string, string>>({});
+  const warnedNoUcredRef = useRef<Record<string, boolean>>({});
   useEffect(() => {
     void getVersion()
       .then((v) => {
@@ -86,12 +89,19 @@ function useStatusPolling() {
 
   useEffect(() => {
     if (!visible) return;
-    if (!host || !host.trim()) {
-      // Host cleared — wipe every payload-derived field so a new
-      // host doesn't inherit stale assertions from the previous one.
-      // Pre-2.2.52 we forgot `ucredElevated` here, leaving e.g. a
-      // green "Kernel R/W: available" pill next to a now-cleared
-      // version/kernel pair.
+    // FAN OUT: poll every known console (all roster profiles + the active
+    // host), so each tab shows live status — not just the active one.
+    // setHostStatus keys results by host and mirrors the active console to the
+    // flat fields the screens read, so the old per-host carryover/stale-host
+    // machinery is no longer needed (each host owns its own slot).
+    const hosts = Array.from(
+      new Set(
+        [...profiles.map((p) => p.host), ...(activeHost ? [activeHost] : [])]
+          .map((h) => (h ?? "").trim())
+          .filter((h) => h.length > 0),
+      ),
+    );
+    if (hosts.length === 0) {
       setStatus({
         payloadStatus: "unknown",
         payloadStatusHost: null,
@@ -102,122 +112,91 @@ function useStatusPolling() {
       });
       return;
     }
-    // Capture the host this probe is running against — write it
-    // alongside payloadStatus so consumers (e.g. Connection screen's
-    // auto-heal effect) can check that the result hasn't been
-    // superseded by a host change between probe-fire and store-write.
-    const probedHost = host;
     let cancelled = false;
-    const tick = async () => {
+    const isActive = (key: string) =>
+      key === (hostOf(useConnectionStore.getState().host) || "_");
+    const probeOne = async (probedHost: string) => {
+      const key = hostOf(probedHost) || "_";
       try {
         const s = await payloadCheck(probedHost);
-        if (!cancelled) {
-          // On a transient miss (reachable=false) payloadCheck has no
-          // STATUS body to parse, so it returns version/kernel/ucred as
-          // null. Writing those nulls straight through would blank the
-          // UI on every single failed poll — the comment here used to
-          // promise "keep the last-known version" but the code didn't
-          // actually do it. Carry the prior values over instead, but
-          // ONLY when they belong to THIS host: a freshly-switched host
-          // must not inherit the previous PS5's firmware string.
-          const prev = useConnectionStore.getState();
-          const carryOver =
-            !s.reachable && prev.payloadStatusHost === probedHost;
-          // Log only on an up<->down TRANSITION (not every 10s poll) — a
-          // helper that drops mid-upload is the #1 thing a bug report needs
-          // to show, and it was previously invisible in the logs.
-          const newStatus = s.reachable ? "up" : "down";
-          if (
-            prev.payloadStatusHost === probedHost &&
-            prev.payloadStatus !== "unknown" &&
-            prev.payloadStatus !== newStatus
-          ) {
-            if (newStatus === "down") {
-              log.warn("connection", `helper went DOWN on ${probedHost}`);
-            } else {
-              log.info("connection", `helper came UP on ${probedHost}`);
+        if (cancelled) return;
+        const prev =
+          useConnectionStore.getState().runtimeByHost[key] ??
+          EMPTY_HOST_RUNTIME;
+        // Transient miss: keep this host's last-known version/kernel/ucred
+        // rather than blanking the UI on a single dropped poll.
+        const carryOver = !s.reachable;
+        const newStatus = s.reachable ? "up" : "down";
+        // Log only on an up<->down TRANSITION (not every poll).
+        if (prev.payloadStatus !== "unknown" && prev.payloadStatus !== newStatus) {
+          if (newStatus === "down")
+            log.warn("connection", `helper went DOWN on ${probedHost}`);
+          else log.info("connection", `helper came UP on ${probedHost}`);
+        }
+        setHostStatus(probedHost, {
+          payloadStatus: newStatus,
+          payloadVersion: carryOver ? prev.payloadVersion : s.payloadVersion,
+          ps5Kernel: carryOver ? prev.ps5Kernel : s.ps5Kernel,
+          ucredElevated: carryOver ? prev.ucredElevated : s.ucredElevated,
+          maxTransferStreams: carryOver
+            ? prev.maxTransferStreams
+            : s.maxTransferStreams,
+        });
+        // Clear the active console's "rechecking…" flag once its probe lands.
+        if (isActive(key)) setStatus({ payloadProbing: false });
+        if (s.reachable) {
+          // Update the matching roster row's cached firmware/payload.
+          const roster = useRosterStore.getState();
+          const prof = roster.profiles.find(
+            (p) => (hostOf(p.host) || "_") === key,
+          );
+          if (prof)
+            roster.noteSeen(prof.id, {
+              kernel: s.ps5Kernel,
+              payload: s.payloadVersion,
+            });
+          // Health: stale helper (per host).
+          const av = appVersionRef.current;
+          if (av && s.payloadVersion && s.payloadVersion !== av) {
+            const k = `${key}:${s.payloadVersion}`;
+            if (warnedMismatchRef.current[key] !== k) {
+              warnedMismatchRef.current[key] = k;
+              log.warn(
+                "health",
+                `helper version ${s.payloadVersion} != app ${av} on ${probedHost} — reload the payload (Connection → Replace)`,
+              );
             }
           }
-          setStatus({
-            payloadStatus: s.reachable ? "up" : "down",
-            payloadStatusHost: probedHost,
-            payloadVersion: carryOver ? prev.payloadVersion : s.payloadVersion,
-            ps5Kernel: carryOver ? prev.ps5Kernel : s.ps5Kernel,
-            ucredElevated: carryOver ? prev.ucredElevated : s.ucredElevated,
-            maxTransferStreams: carryOver
-              ? prev.maxTransferStreams
-              : s.maxTransferStreams,
-            // Clear the "rechecking…" indicator any time a tick lands
-            // a real result. Connection's handleSend sets probing=true
-            // on Replace payload click; this is the safety-net path
-            // that clears it if handleSend's own probe never got a
-            // chance to (e.g. user navigated away from Connection
-            // mid-flight, leaving the flag latched).
-            payloadProbing: false,
-          });
-          // Update the roster row for the active profile so the
-          // sidebar reflects the freshest firmware/payload info
-          // without making the user open a settings dialog.
-          if (s.reachable) {
-            const active = useRosterStore.getState();
-            if (active.active_id) {
-              active.noteSeen(active.active_id, {
-                kernel: s.ps5Kernel,
-                payload: s.payloadVersion,
-              });
+          // Health: no kernel R/W (per host); reset when it returns.
+          if (s.ucredElevated === false) {
+            if (!warnedNoUcredRef.current[key]) {
+              warnedNoUcredRef.current[key] = true;
+              log.warn(
+                "health",
+                `kernel R/W unavailable on ${probedHost} (kstuff not loaded) — some install/launch features degraded`,
+              );
             }
-
-            // Health: stale helper. A payload older than the app is a frequent
-            // root cause of "feature X doesn't work" — flag it once.
-            const av = appVersionRef.current;
-            if (av && s.payloadVersion && s.payloadVersion !== av) {
-              const key = `${probedHost}:${s.payloadVersion}`;
-              if (warnedMismatchRef.current !== key) {
-                warnedMismatchRef.current = key;
-                log.warn(
-                  "health",
-                  `helper version ${s.payloadVersion} != app ${av} on ${probedHost} — reload the payload (Connection → Replace)`,
-                );
-              }
-            }
-
-            // Health: no kernel R/W (kstuff not loaded) — install/elevation
-            // features are degraded. Warn once per host; reset when it returns.
-            if (s.ucredElevated === false) {
-              if (warnedNoUcredRef.current !== probedHost) {
-                warnedNoUcredRef.current = probedHost;
-                log.warn(
-                  "health",
-                  `kernel R/W unavailable on ${probedHost} (kstuff not loaded) — some install/launch features degraded`,
-                );
-              }
-            } else if (s.ucredElevated === true) {
-              warnedNoUcredRef.current = null;
-            }
+          } else if (s.ucredElevated === true) {
+            warnedNoUcredRef.current[key] = false;
           }
         }
       } catch (e) {
-        if (!cancelled) {
-          const prev = useConnectionStore.getState();
-          if (
-            prev.payloadStatusHost === probedHost &&
-            prev.payloadStatus === "up"
-          ) {
-            log.warn(
-              "connection",
-              `helper went DOWN on ${probedHost} (probe error: ${e instanceof Error ? e.message : String(e)})`,
-            );
-          }
-          setStatus({
-            payloadStatus: "down",
-            payloadStatusHost: probedHost,
-            // Probe failed — also clear the probing flag so we don't
-            // dangle a "rechecking…" badge forever on a host that's
-            // gone offline mid-replace.
-            payloadProbing: false,
-          });
+        if (cancelled) return;
+        const prev =
+          useConnectionStore.getState().runtimeByHost[key] ??
+          EMPTY_HOST_RUNTIME;
+        if (prev.payloadStatus === "up") {
+          log.warn(
+            "connection",
+            `helper went DOWN on ${probedHost} (probe error: ${e instanceof Error ? e.message : String(e)})`,
+          );
         }
+        setHostStatus(probedHost, { payloadStatus: "down" });
+        if (isActive(key)) setStatus({ payloadProbing: false });
       }
+    };
+    const tick = () => {
+      for (const h of hosts) void probeOne(h);
     };
     tick();
     const h = setInterval(tick, 10000);
@@ -225,7 +204,7 @@ function useStatusPolling() {
       cancelled = true;
       clearInterval(h);
     };
-  }, [host, setStatus, visible]);
+  }, [profiles, activeHost, setHostStatus, setStatus, visible]);
 }
 
 /** Fire a TTL-gated update check on mount. The store debounces to
@@ -606,6 +585,10 @@ export default function AppShell() {
         )}
 
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          {/* Console tab strip — one tab per PS5; switches the viewed console
+              while every console's uploads/installs keep running in their own
+              background loops. Hidden for single-console users. */}
+          <ConsoleTabs />
           {/* Vertical scroll only. overflow-x-hidden is a backstop: the
               index.css width safety net makes content fit, but this guarantees
               the page can never scroll sideways. Nested blocks that are meant

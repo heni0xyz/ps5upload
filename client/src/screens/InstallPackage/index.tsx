@@ -228,18 +228,20 @@ function PkgRow({
 export default function InstallPackageScreen() {
   const tr = useTr();
   const host = useConnectionStore((s) => s.host);
-  const entries = usePkgLibrary((s) => s.entries);
-  const loading = usePkgLibrary((s) => s.loading);
-  const error = usePkgLibrary((s) => s.error);
-  const installing = usePkgLibrary((s) => s.installing);
-  const busyNotice = usePkgLibrary((s) => s.busyNotice);
-  const refresh = usePkgLibrary((s) => s.refresh);
-  const addAndUpload = usePkgLibrary((s) => s.addAndUpload);
-  const install = usePkgLibrary((s) => s.install);
-  const cancelPendingInstall = usePkgLibrary((s) => s.cancelPendingInstall);
-  const remove = usePkgLibrary((s) => s.remove);
-  const clearFinished = usePkgLibrary((s) => s.clearFinished);
-  const clearAll = usePkgLibrary((s) => s.clearAll);
+  // Per-console store: every selector is scoped to THIS console's host, so the
+  // Install Package view is fully isolated per PS5 (parallel installs).
+  const entries = usePkgLibrary(host, (s) => s.entries);
+  const loading = usePkgLibrary(host, (s) => s.loading);
+  const error = usePkgLibrary(host, (s) => s.error);
+  const installing = usePkgLibrary(host, (s) => s.installing);
+  const busyNotice = usePkgLibrary(host, (s) => s.busyNotice);
+  const refresh = usePkgLibrary(host, (s) => s.refresh);
+  const addAndUpload = usePkgLibrary(host, (s) => s.addAndUpload);
+  const install = usePkgLibrary(host, (s) => s.install);
+  const cancelPendingInstall = usePkgLibrary(host, (s) => s.cancelPendingInstall);
+  const remove = usePkgLibrary(host, (s) => s.remove);
+  const clearFinished = usePkgLibrary(host, (s) => s.clearFinished);
+  const clearAll = usePkgLibrary(host, (s) => s.clearAll);
   const autoRemove = useInstallSettingsStore((s) => s.autoRemoveAfterInstall);
   const setAutoRemove = useInstallSettingsStore(
     (s) => s.setAutoRemoveAfterInstall,

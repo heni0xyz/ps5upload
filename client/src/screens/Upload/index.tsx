@@ -598,8 +598,10 @@ function Step2Options(props: {
   // replaces the payload that owns the transfer port — so starting an upload
   // mid-install would just fail (or race the payload swap). Disable while an
   // install is running, symmetric to InstallPackage disabling install during
-  // an upload.
-  const installing = usePkgLibrary((s) => s.installing);
+  // an upload. Per-console store: disable upload only when THIS PS5 is
+  // mid-install, not when some other console is.
+  const stepHost = useConnectionStore((s) => s.host);
+  const installing = usePkgLibrary(stepHost, (s) => s.installing);
   const uploadDisabled =
     detecting ||
     inFlight ||

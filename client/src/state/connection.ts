@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { hostOf } from "../lib/addr";
 
 /** TCP port of the PS5 ELF loader. Constant — every common PS5
  *  homebrew loader binds this port, so it's not a user-configurable
@@ -71,8 +72,35 @@ export type PayloadCapability =
  *  they're tied to in-flight probes, not to "has the user connected?". */
 export type ConnStep = "idle" | "ok";
 
+/**
+ * Per-console live runtime, keyed by bare host. The status poller fans out
+ * over every roster console and writes each one's slot here, so the tab strip
+ * can show a live status dot + version for EVERY console at once — not just the
+ * active one. The flat top-level fields below remain a mirror of the *active*
+ * console's runtime so the ~21 screens that read `s.payloadStatus` etc. keep
+ * working unchanged (they always view the active tab). Phase 3 re-pins screens
+ * to read `runtimeByHost[theirHost]` directly; until then the mirror bridges.
+ */
+export interface HostRuntime {
+  payloadStatus: ProbeStatus;
+  payloadVersion: string | null;
+  ps5Kernel: string | null;
+  ucredElevated: boolean | null;
+  maxTransferStreams: number | null;
+}
+
+export const EMPTY_HOST_RUNTIME: HostRuntime = {
+  payloadStatus: "unknown",
+  payloadVersion: null,
+  ps5Kernel: null,
+  ucredElevated: null,
+  maxTransferStreams: null,
+};
+
 export interface ConnectionState {
   host: string;
+  /** Per-console runtime, keyed by bare host (port-stripped). */
+  runtimeByHost: Record<string, HostRuntime>;
   /** Our host-side engine sidecar (localhost:19113). */
   engineStatus: ProbeStatus;
   /** Last startup/probe diagnostic for the host-side engine. */
@@ -144,10 +172,27 @@ export interface ConnectionState {
   ) => void;
   setStep1: (step: ConnStep, msg: string) => void;
   setStep2: (step: ConnStep, msg: string) => void;
+  /** Write one console's live runtime (keyed by host). When `host` is the
+   *  active console, the flat top-level fields are mirrored so the screens
+   *  (which read the active tab) update too. Used by the fan-out poller. */
+  setHostStatus: (host: string, patch: Partial<HostRuntime>) => void;
+}
+
+/** Map a runtime record onto the flat top-level fields the screens read. */
+function mirrorRuntime(host: string, rt: HostRuntime) {
+  return {
+    payloadStatus: rt.payloadStatus,
+    payloadStatusHost: rt.payloadStatus === "unknown" ? null : host,
+    payloadVersion: rt.payloadVersion,
+    ps5Kernel: rt.ps5Kernel,
+    ucredElevated: rt.ucredElevated,
+    maxTransferStreams: rt.maxTransferStreams,
+  };
 }
 
 export const useConnectionStore = create<ConnectionState>((set) => ({
   host: loadStoredHost(),
+  runtimeByHost: {},
   engineStatus: "unknown",
   engineError: null,
   payloadStatus: "unknown",
@@ -161,11 +206,35 @@ export const useConnectionStore = create<ConnectionState>((set) => ({
   step1Msg: "Enter your PS5's address and check",
   step2: "idle",
   step2Msg: "Payload not loaded yet",
-  setHost: (host) => {
-    persistHost(host);
-    set({ host });
-  },
+  setHost: (host) =>
+    set((s) => {
+      persistHost(host);
+      // Switching tabs: immediately reflect the new console's last-known
+      // runtime (or unknowns) instead of leaving the previous console's
+      // values on screen until the next poll — kills the stale-host window.
+      const rt = s.runtimeByHost[hostOf(host) || "_"] ?? EMPTY_HOST_RUNTIME;
+      return { host, ...mirrorRuntime(host, rt) };
+    }),
   setStatus: (patch) => set(patch),
   setStep1: (step1, step1Msg) => set({ step1, step1Msg }),
   setStep2: (step2, step2Msg) => set({ step2, step2Msg }),
+  setHostStatus: (host, patch) =>
+    set((s) => {
+      const key = hostOf(host) || "_";
+      const next = { ...(s.runtimeByHost[key] ?? EMPTY_HOST_RUNTIME), ...patch };
+      const activeKey = hostOf(s.host) || "_";
+      return {
+        runtimeByHost: { ...s.runtimeByHost, [key]: next },
+        // Mirror to the flat fields only when this is the active console.
+        ...(key === activeKey ? mirrorRuntime(host, next) : {}),
+      };
+    }),
 }));
+
+/** Hook: one console's live runtime (keyed by host). For the tab strip + any
+ *  per-console status display. Returns the empty runtime if not yet probed. */
+export function useHostRuntime(host: string): HostRuntime {
+  return useConnectionStore(
+    (s) => s.runtimeByHost[hostOf(host) || "_"] ?? EMPTY_HOST_RUNTIME,
+  );
+}

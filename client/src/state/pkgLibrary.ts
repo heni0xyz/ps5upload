@@ -1,4 +1,5 @@
-import { create } from "zustand";
+import { useStore } from "zustand";
+import { createStore } from "zustand/vanilla";
 import { invoke } from "@tauri-apps/api/core";
 
 import { fsListDir, fsDelete, fsMkdir } from "../api/ps5";
@@ -228,7 +229,15 @@ function mergeListing(prev: PkgEntry[], listed: PkgEntry[]): PkgEntry[] {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-export const usePkgLibrary = create<PkgLibraryState>((set, get) => ({
+/**
+ * One isolated PkgLibrary store per PS5 console (see the registry below). The
+ * store body is unchanged from the old single-instance design — making it a
+ * factory is what gives each console its own `entries` + `installing` state, so
+ * installing on console A never blocks console B. Every method still takes
+ * `host` (it matches this instance's console) and uses it for addresses.
+ */
+const makePkgLibraryStore = () =>
+  createStore<PkgLibraryState>((set, get) => ({
   entries: [],
   loading: false,
   error: null,
@@ -663,7 +672,40 @@ export const usePkgLibrary = create<PkgLibraryState>((set, get) => ({
     // upload/install (status uploading/installing/queued).
     await bulkDelete(get, set, host, (e) => e.status === "idle");
   },
-}));
+  }));
+
+/**
+ * Per-console store registry. One isolated PkgLibrary store instance per PS5
+ * host (port-stripped) — each console's library + install state is fully
+ * independent and runs in parallel, so an install on one console never blocks
+ * another. This is the literal "a separate ps5upload per console" model.
+ */
+export type PkgLibraryStore = ReturnType<typeof makePkgLibraryStore>;
+const pkgLibraryStores = new Map<string, PkgLibraryStore>();
+
+/** Get (creating on first use) the isolated store for one console. */
+export function pkgLibraryStore(host: string): PkgLibraryStore {
+  const key = hostOf(host) || "_unset_";
+  let s = pkgLibraryStores.get(key);
+  if (!s) {
+    s = makePkgLibraryStore();
+    pkgLibraryStores.set(key, s);
+  }
+  return s;
+}
+
+/**
+ * Hook: subscribe to ONE console's PkgLibrary store. Pass the host so each
+ * Install Package view binds to that console's isolated state. (Replaces the
+ * old global `usePkgLibrary(selector)` — the host argument is what makes the
+ * per-console isolation work.)
+ */
+export function usePkgLibrary<T>(
+  host: string,
+  selector: (s: PkgLibraryState) => T,
+): T {
+  return useStore(pkgLibraryStore(host), selector);
+}
 
 /** Shared optimistic bulk-delete for clearFinished/clearAll. Drops the
  *  matching rows immediately, deletes each on the PS5 concurrently, and
