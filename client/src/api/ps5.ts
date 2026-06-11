@@ -3114,6 +3114,13 @@ export async function jobStatus(jobId: string): Promise<JobSnapshot> {
   return raw as unknown as JobSnapshot;
 }
 
+/** Truly stop a running transfer job. The engine flips its cancel flag and the
+ *  transfer aborts at its next shard boundary (partial tx left resumable).
+ *  Idempotent + best-effort: a finished/unknown job just returns cancelled:false. */
+export async function jobCancel(jobId: string): Promise<void> {
+  await invoke("job_cancel", { jobId });
+}
+
 export async function waitForJob(
   jobId: string,
   intervalMs = 500,

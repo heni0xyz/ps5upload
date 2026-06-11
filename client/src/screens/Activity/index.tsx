@@ -235,13 +235,11 @@ function ActivityRow({ entry }: { entry: ActivityEntry }) {
           : "border-[var(--color-warn)]";
 
   // Stop dispatch — pick the appropriate cancel mechanism based on
-  // entry.kind. For ops with an op_id stored on the entry (Library
-  // moves, FS pastes), call the payload's FS_OP_CANCEL directly via
-  // the addr we stashed at start time; that's the only path that
-  // actually interrupts the in-flight RPC. For job-based ops
-  // (uploads, downloads, FS bulk delete), dispatch to the relevant
-  // store's cancel/reset action — those stop *watching* the engine
-  // job (engine-side cancel API for transfer jobs is future work).
+  // entry.kind. For ops with an op_id (Library moves, FS pastes), call the
+  // payload's FS_OP_CANCEL. For uploads (single-shot + queue) we now TRULY
+  // cancel the engine transfer job (POST /api/jobs/{id}/cancel → the core
+  // aborts at its next shard boundary, partial tx left resumable), not just
+  // stop watching. FS bulk delete / download use their per-host stop signals.
   const handleStop = async () => {
     if (entry.opId !== undefined && entry.addr) {
       try {
@@ -267,11 +265,11 @@ function ActivityRow({ entry }: { entry: ActivityEntry }) {
       entry.kind === "upload-reconcile"
     ) {
       // Scope to THIS entry's console. transfer state is per-host
-      // (phasesByHost); a bare reset() would tear down whichever console
-      // happens to be transferring, not the one this row belongs to.
+      // (phasesByHost). cancel() asks the engine to truly abort the running
+      // job (not just stop watching), then resets the phase.
       useTransferStore
         .getState()
-        .reset(entry.addr ? hostOf(entry.addr) : undefined);
+        .cancel(entry.addr ? hostOf(entry.addr) : undefined);
     } else if (entry.kind === "upload-queue") {
       // Queue-driven uploads: halt only THIS console's queue worker (resets
       // its running item to pending). stop() would halt every console's

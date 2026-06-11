@@ -10,6 +10,7 @@ import {
   fsMount,
   fsUnmount,
   jobStatus,
+  jobCancel,
   appRegister,
   smpManualInstall,
   smpStatus,
@@ -173,8 +174,14 @@ interface TransferState {
   start: (args: StartArgs) => Promise<void>;
   /** Reset one console's one-shot phase to idle (pass its host), or — with no
    *  argument — every console's (the Activity tab's global Stop, which has no
-   *  per-entry host today). */
+   *  per-entry host today). Stops WATCHING only; the engine job keeps running.
+   *  Use `cancel` to truly stop the transfer. */
   reset: (host?: string) => void;
+  /** TRULY stop the one-shot transfer: tell the engine to cancel the running
+   *  job (it aborts at the next shard boundary, partial tx left resumable),
+   *  then reset the phase. Pass a host to cancel that console's transfer, or
+   *  omit to cancel every console's. */
+  cancel: (host?: string) => void;
 }
 
 const POLL_INTERVAL_MS = 500;
@@ -739,6 +746,25 @@ export const useTransferStore = create<TransferState>((set) => {
       for (const t of pollTimers.values()) clearTimeout(t);
       pollTimers.clear();
       set({ phasesByHost: {} });
+    },
+
+    cancel(host) {
+      // Collect the running job id(s) and ask the engine to truly abort them,
+      // then fall through to reset (stop watching + idle). Best-effort: a job
+      // that already finished is a harmless no-op server-side.
+      const byHost = useTransferStore.getState().phasesByHost;
+      const phases =
+        host !== undefined
+          ? [byHost[hostFromAddr(host)]]
+          : Object.values(byHost);
+      for (const p of phases) {
+        if (p && p.kind === "running" && p.jobId) {
+          void jobCancel(p.jobId).catch(() => {
+            /* engine unreachable / already gone — reset still stops watching */
+          });
+        }
+      }
+      useTransferStore.getState().reset(host);
     },
   };
 });

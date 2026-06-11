@@ -140,7 +140,7 @@ use std::{
     convert::Infallible,
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
-        Arc, Mutex,
+        Arc, Mutex, OnceLock,
     },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -773,6 +773,47 @@ struct AppState {
     jobs: Arc<Mutex<HashMap<Uuid, JobState>>>,
     default_ps5_addr: String,
     events_tx: broadcast::Sender<String>,
+}
+
+/// Process-global cancel registry: maps a transfer `job_id` to the
+/// `Arc<AtomicBool>` its `TransferConfig::cancel` watches. A transfer registers
+/// its flag here (inside the spawn_blocking closure, which has the `job_id`),
+/// and `POST /api/jobs/{id}/cancel` flips it — the core then aborts at its next
+/// shard boundary with `transfer_cancelled`, leaving the partial tx resumable
+/// (same as a dropped connection). A static avoids threading `AppState` into
+/// the blocking transfer closures (which only capture `job_id`).
+///
+/// Self-pruning: while a transfer runs, the core holds clone(s) of the flag, so
+/// `Arc::strong_count > 1`; once it finishes those drop and only the registry's
+/// clone remains (count 1). `register` drops every count-1 entry before
+/// inserting, so the map stays ≈ the live-transfer count with no terminal
+/// bookkeeping.
+fn cancel_registry() -> &'static Mutex<HashMap<Uuid, Arc<AtomicBool>>> {
+    static REG: OnceLock<Mutex<HashMap<Uuid, Arc<AtomicBool>>>> = OnceLock::new();
+    REG.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Register a fresh cancel flag for `job_id` and return it to thread into
+/// `TransferConfig::cancel`. Prunes flags whose transfer has finished.
+fn register_transfer_cancel(job_id: Uuid) -> Arc<AtomicBool> {
+    let flag = Arc::new(AtomicBool::new(false));
+    let mut g = cancel_registry().lock().unwrap_or_else(|e| e.into_inner());
+    g.retain(|_, v| Arc::strong_count(v) > 1);
+    g.insert(job_id, Arc::clone(&flag));
+    flag
+}
+
+/// Flip a job's cancel flag if it's registered (i.e. still running). Returns
+/// true if a flag was found. Idempotent.
+fn signal_transfer_cancel(job_id: Uuid) -> bool {
+    let g = cancel_registry().lock().unwrap_or_else(|e| e.into_inner());
+    match g.get(&job_id) {
+        Some(flag) => {
+            flag.store(true, Ordering::Relaxed);
+            true
+        }
+        None => false,
+    }
 }
 
 /// Cap on the jobs map. Without a bound the engine would accumulate
@@ -2599,6 +2640,9 @@ async fn transfer_file_handler(
         let mut fail_guard =
             JobFailOnDropGuard::new(Arc::clone(&jobs), events_tx.clone(), job_id, started_at_ms);
         let mut cfg = make_transfer_config(&addr);
+        // Make this transfer cancellable: register a flag the core checks at
+        // every shard boundary, flipped by POST /api/jobs/{id}/cancel.
+        cfg.cancel = Some(register_transfer_cancel(job_id));
         cfg.progress_bytes = Some(Arc::clone(&progress));
         cfg.progress_files = Some(Arc::clone(&progress_files));
         cfg.progress_files_finalized = Some(Arc::clone(&progress_files_finalized));
@@ -2864,6 +2908,9 @@ async fn transfer_dir_handler(
         let mut fail_guard =
             JobFailOnDropGuard::new(Arc::clone(&jobs), events_tx.clone(), job_id, started_at_ms);
         let mut cfg = make_transfer_config(&addr);
+        // Make this transfer cancellable: register a flag the core checks at
+        // every shard boundary, flipped by POST /api/jobs/{id}/cancel.
+        cfg.cancel = Some(register_transfer_cancel(job_id));
         cfg.excludes = req.excludes;
         cfg.progress_bytes = Some(Arc::clone(&progress));
         cfg.progress_files = Some(Arc::clone(&progress_files));
@@ -3236,6 +3283,9 @@ async fn transfer_zip_handler(
         let mut fail_guard =
             JobFailOnDropGuard::new(Arc::clone(&jobs), events_tx.clone(), job_id, started_at_ms);
         let mut cfg = make_transfer_config(&addr);
+        // Make this transfer cancellable: register a flag the core checks at
+        // every shard boundary, flipped by POST /api/jobs/{id}/cancel.
+        cfg.cancel = Some(register_transfer_cancel(job_id));
         cfg.excludes = req.excludes;
         cfg.progress_bytes = Some(Arc::clone(&progress));
         cfg.progress_files = Some(Arc::clone(&progress_files));
@@ -3721,6 +3771,9 @@ async fn transfer_7z_handler(
         let mut fail_guard =
             JobFailOnDropGuard::new(Arc::clone(&jobs), events_tx.clone(), job_id, started_at_ms);
         let mut cfg = make_transfer_config(&addr);
+        // Make this transfer cancellable: register a flag the core checks at
+        // every shard boundary, flipped by POST /api/jobs/{id}/cancel.
+        cfg.cancel = Some(register_transfer_cancel(job_id));
         cfg.excludes = req.excludes;
         cfg.progress_bytes = Some(Arc::clone(&progress));
         cfg.progress_files = Some(Arc::clone(&progress_files));
@@ -3921,6 +3974,9 @@ async fn transfer_rar_handler(
         let mut fail_guard =
             JobFailOnDropGuard::new(Arc::clone(&jobs), events_tx.clone(), job_id, started_at_ms);
         let mut cfg = make_transfer_config(&addr);
+        // Make this transfer cancellable: register a flag the core checks at
+        // every shard boundary, flipped by POST /api/jobs/{id}/cancel.
+        cfg.cancel = Some(register_transfer_cancel(job_id));
         cfg.excludes = req.excludes;
         cfg.progress_bytes = Some(Arc::clone(&progress));
         cfg.progress_files = Some(Arc::clone(&progress_files));
@@ -4141,6 +4197,9 @@ async fn transfer_file_list_handler(
         let mut fail_guard =
             JobFailOnDropGuard::new(Arc::clone(&jobs), events_tx.clone(), job_id, started_at_ms);
         let mut cfg = make_transfer_config(&addr);
+        // Make this transfer cancellable: register a flag the core checks at
+        // every shard boundary, flipped by POST /api/jobs/{id}/cancel.
+        cfg.cancel = Some(register_transfer_cancel(job_id));
         cfg.progress_bytes = Some(Arc::clone(&progress));
         cfg.progress_files = Some(Arc::clone(&progress_files));
         cfg.progress_files_finalized = Some(Arc::clone(&progress_files_finalized));
@@ -4849,6 +4908,9 @@ async fn transfer_dir_reconcile_handler(
 
         let streams = req.streams.unwrap_or(1);
         let mut cfg = make_transfer_config(&addr);
+        // Make this transfer cancellable: register a flag the core checks at
+        // every shard boundary, flipped by POST /api/jobs/{id}/cancel.
+        cfg.cancel = Some(register_transfer_cancel(job_id));
         cfg.excludes = req.excludes;
         cfg.progress_bytes = Some(Arc::clone(&progress));
         cfg.progress_files = Some(Arc::clone(&progress_files));
@@ -4934,6 +4996,25 @@ async fn get_job(State(state): State<AppState>, Path(id): Path<String>) -> impl 
         Some(job) => (StatusCode::OK, Json(job)).into_response(),
         None => json_err(StatusCode::NOT_FOUND, "job not found").into_response(),
     }
+}
+
+/// POST /api/jobs/{id}/cancel — truly stop a running transfer. Flips the job's
+/// registered cancel flag; the core aborts at its next shard boundary with
+/// `transfer_cancelled` and the partial tx is left interrupted/resumable (same
+/// as a dropped connection). Idempotent — cancelling an unknown/finished job is
+/// a no-op 200 (`cancelled:false`); the client may race the job ending.
+async fn cancel_job(Path(id): Path<String>) -> impl IntoResponse {
+    let uuid = match id.parse::<Uuid>() {
+        Ok(u) => u,
+        Err(_) => return json_err(StatusCode::BAD_REQUEST, "invalid job id").into_response(),
+    };
+    let cancelled = signal_transfer_cancel(uuid);
+    crate::log_info!("cancel_job: job={uuid} cancelled={cancelled}");
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({ "cancelled": cancelled })),
+    )
+        .into_response()
 }
 
 #[derive(Deserialize)]
@@ -5286,6 +5367,7 @@ async fn run(cfg: EngineConfig) -> anyhow::Result<()> {
         .route("/api/version", get(engine_version))
         .route("/api/jobs", get(list_jobs))
         .route("/api/jobs/{id}", get(get_job))
+        .route("/api/jobs/{id}/cancel", post(cancel_job))
         .route("/api/events", get(events_stream))
         .route("/api/engine-logs", get(engine_logs_tail))
         .route("/api/debug/crash", get(debug_crash))
@@ -5487,6 +5569,40 @@ pub async fn serve_in_process(bind: &str, ps5_addr: String) -> anyhow::Result<()
         exit_on_error: false,
     })
     .await
+}
+
+#[cfg(test)]
+mod cancel_registry_tests {
+    use super::*;
+
+    #[test]
+    fn register_returns_flag_and_signal_flips_it() {
+        let id = Uuid::new_v4();
+        let flag = register_transfer_cancel(id);
+        assert!(!flag.load(Ordering::Relaxed), "starts unset");
+        assert!(signal_transfer_cancel(id), "found the registered flag");
+        assert!(flag.load(Ordering::Relaxed), "signal flipped the flag");
+    }
+
+    #[test]
+    fn signal_unknown_job_is_false() {
+        assert!(!signal_transfer_cancel(Uuid::new_v4()));
+    }
+
+    #[test]
+    fn register_prunes_finished_entries() {
+        // A "finished" transfer is one whose only remaining ref is the
+        // registry's (strong_count == 1, i.e. the cfg clone was dropped).
+        let finished = Uuid::new_v4();
+        drop(register_transfer_cancel(finished)); // we drop our returned Arc → count 1
+                                                  // Registering any new job prunes the finished one.
+        let live = register_transfer_cancel(Uuid::new_v4());
+        let _hold = Arc::clone(&live); // keep the live one's count > 1
+        assert!(
+            !signal_transfer_cancel(finished),
+            "finished entry was pruned on the next register",
+        );
+    }
 }
 
 #[cfg(test)]

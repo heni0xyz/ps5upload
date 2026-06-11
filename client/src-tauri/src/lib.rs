@@ -208,6 +208,7 @@ pub fn run() {
             commands::ps5_app_register,
             commands::ps5_app_unregister,
             commands::job_status,
+            commands::job_cancel,
             commands::engine_logs_tail,
             // ── PKG install (parse + host + install via BGFT) ─────────
             // Engine proxies for the new Install Package tab. Single

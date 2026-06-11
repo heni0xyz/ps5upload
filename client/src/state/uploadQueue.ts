@@ -7,6 +7,7 @@ import {
   appRegister,
   generateTxIdHex,
   jobStatus,
+  jobCancel,
   smpManualInstall,
   smpStatus,
   startTransferDir,
@@ -50,6 +51,13 @@ import {
   isAutoRecoverable,
   MAX_AUTO_RECOVER_ATTEMPTS,
 } from "../lib/uploadRecovery";
+
+/** The engine job id currently uploading on each console (bare host key).
+ *  runOne records it so stopHost/stop can ask the engine to TRULY cancel the
+ *  in-flight transfer (not just halt the queue worker). Module-level — it's
+ *  transient run state, not persisted queue data. A stale id (job already
+ *  finished) is a harmless no-op server-side. */
+const runningJobByHost = new Map<string, string>();
 
 /**
  * Pause between queued jobs so the PS5 payload can drain the detached
@@ -460,6 +468,11 @@ export const useUploadQueueStore = create<QueueState>((set, get) => {
         item.txIdHex,
       );
     }
+
+    // Record the live job id for this console so stopHost/stop can ask the
+    // engine to truly cancel the transfer (overwritten by the next item;
+    // staleness is harmless — cancelling a finished job is a server no-op).
+    runningJobByHost.set(hostOf(item.addr), jobId);
 
     // Trailing-window samples for the live bytes/sec readout. Closure-
     // scoped so a Stop + restart of the same item resets cleanly: the
@@ -1079,6 +1092,12 @@ export const useUploadQueueStore = create<QueueState>((set, get) => {
       // exits at the next await, then wipe the list + run state.
       for (const h of Object.keys(get().runningHosts)) {
         hostGen.set(h, ++genCounter);
+        // Truly cancel each console's in-flight engine job too.
+        const jid = runningJobByHost.get(h);
+        if (jid) {
+          runningJobByHost.delete(h);
+          void jobCancel(jid).catch(() => {});
+        }
       }
       set({ items: [], runningHosts: {}, running: false });
       scheduleSave();
@@ -1124,6 +1143,16 @@ export const useUploadQueueStore = create<QueueState>((set, get) => {
 
     stopHost(host) {
       const h = hostOf(host);
+      // Truly stop the in-flight transfer: ask the engine to cancel this
+      // console's running job (it aborts at the next shard boundary; the
+      // partial tx stays resumable, matching the row reset to "pending").
+      const jid = runningJobByHost.get(h);
+      if (jid) {
+        runningJobByHost.delete(h);
+        void jobCancel(jid).catch(() => {
+          /* engine gone / already finished — worker stop below still applies */
+        });
+      }
       // Re-stamp this host's generation so its live loop bails at the next
       // await, and reset ONLY this console's running rows to pending —
       // sibling consoles keep draining untouched.

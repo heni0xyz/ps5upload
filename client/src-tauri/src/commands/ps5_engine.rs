@@ -1336,6 +1336,16 @@ pub async fn job_status(job_id: String) -> Result<JsonValue, String> {
     get_json(&url).await
 }
 
+/// Truly stop a running transfer job: POST /api/jobs/{id}/cancel flips the
+/// engine's cancel flag so the transfer aborts at its next shard boundary
+/// (partial tx left resumable). Idempotent — a finished/unknown job is a no-op.
+#[tauri::command]
+pub async fn job_cancel(job_id: String) -> Result<JsonValue, String> {
+    let base = engine::url();
+    let url = format!("{base}/api/jobs/{job_id}/cancel");
+    post_json(&url, &serde_json::json!({})).await
+}
+
 /// Pull recent engine log lines from the sidecar's in-memory ring so the
 /// renderer can mirror them into its Log tab. `since` is the highest
 /// `seq` the caller has already seen; pass `0` on first call. Response
