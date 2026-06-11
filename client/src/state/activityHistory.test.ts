@@ -118,3 +118,49 @@ describe("activityHistory phase field", () => {
     expect(reloaded[0]?.phase).toBe("finalizing");
   });
 });
+
+describe("activityHistory clear() / remove()", () => {
+  beforeEach(() => {
+    resetStore();
+    if (typeof window !== "undefined") window.localStorage.clear();
+  });
+  afterEach(() => resetStore());
+
+  const st = () => useActivityHistoryStore.getState();
+
+  it("clear() keeps running entries, drops terminal ones", () => {
+    const running = st().start("upload", "Uploading 181 files");
+    const doneId = st().start("upload", "done one");
+    st().finish(doneId, "done");
+    const failId = st().start("upload", "fail one");
+    st().finish(failId, "failed");
+
+    st().clear();
+
+    const ids = st().entries.map((e) => e.id);
+    expect(ids).toContain(running); // in-flight preserved
+    expect(ids).not.toContain(doneId);
+    expect(ids).not.toContain(failId);
+    expect(st().entries).toHaveLength(1);
+  });
+
+  it("remove() deletes a terminal entry but refuses a running one", () => {
+    const running = st().start("upload", "still going");
+    const doneId = st().start("upload", "finished");
+    st().finish(doneId, "done");
+
+    st().remove(doneId);
+    expect(st().entries.map((e) => e.id)).not.toContain(doneId);
+
+    // A running entry can't be deleted (Stop/Cancel it first).
+    st().remove(running);
+    expect(st().entries.map((e) => e.id)).toContain(running);
+  });
+
+  it("remove() is a no-op for an unknown id", () => {
+    const id = st().start("upload", "x");
+    st().finish(id, "done");
+    st().remove("does-not-exist");
+    expect(st().entries).toHaveLength(1);
+  });
+});

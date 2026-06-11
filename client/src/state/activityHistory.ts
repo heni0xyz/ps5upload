@@ -130,8 +130,13 @@ interface ActivityHistoryState {
     outcome: Exclude<ActivityOutcome, "running">,
     extras?: Partial<Pick<ActivityEntry, "error" | "bytes" | "totalBytes" | "detail">>,
   ) => void;
-  /** Drop everything. The Activity tab's "Clear" button calls this. */
+  /** Clear the history — terminal (done/failed/stopped) entries only.
+   *  Still-`running` entries are preserved so a clear can't make an
+   *  in-flight transfer/op disappear. */
   clear: () => void;
+  /** Delete a single history row by id. No-op for a still-`running`
+   *  entry (Stop/Cancel it first). */
+  remove: (id: string) => void;
   /** Force every still-`running` entry into a terminal `stopped`
    *  state with a synthetic note. Use case: rows that got orphaned
    *  because their underlying op died without firing `finish()` —
@@ -316,8 +321,28 @@ export const useActivityHistoryStore = create<ActivityHistoryState>(
     },
 
     clear() {
-      persist([]);
-      set({ entries: [] });
+      // Clear the HISTORY only — keep any still-running entries (a clear
+      // shouldn't make an in-flight transfer/op vanish from the UI). There is
+      // no separate "queued" activity state today; queue-pending items aren't
+      // activity records, so nothing queued is lost here either.
+      set((s) => {
+        const kept = s.entries.filter((e) => e.outcome === "running");
+        persist(kept);
+        return { entries: kept };
+      });
+    },
+
+    remove(id) {
+      // Delete one history row. Refuses to remove a still-running entry —
+      // use Stop/Cancel first (otherwise the row would vanish while its op
+      // keeps going, with no way to see or stop it).
+      set((s) => {
+        const target = s.entries.find((e) => e.id === id);
+        if (!target || target.outcome === "running") return s;
+        const next = s.entries.filter((e) => e.id !== id);
+        persist(next);
+        return { entries: next };
+      });
     },
 
     clearRunning() {

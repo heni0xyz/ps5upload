@@ -48,9 +48,9 @@ import {
 import { useConnectionStore, PS5_PAYLOAD_PORT } from "../../state/connection";
 import { hostOf } from "../../lib/addr";
 import { pushNotification } from "../../state/notifications";
-import { useRosterStore, profileNameForHost } from "../../state/roster";
+import { useRosterStore } from "../../state/roster";
 import { useNavigate } from "react-router-dom";
-import { PageHeader, WarningCard, Button } from "../../components";
+import { PageHeader, WarningCard, Button, ConsoleChip } from "../../components";
 import FfpkgInspectorPanel from "./FfpkgInspectorPanel";
 import FolderDiffPanel from "./FolderDiffPanel";
 import { useUploadSettingsStore } from "../../state/uploadSettings";
@@ -737,15 +737,12 @@ function Step2Options(props: {
   const queueRunning = useUploadQueueStore(
     (s) => !!s.runningHosts[hostOf(stepHost)],
   );
-  // With two consoles mid-anything, "Upload now" is ambiguous about WHERE
-  // it sends. Name the target console on the primary button whenever more
-  // than one console is in the roster — the form is shared across tabs,
-  // so this is the one place the user confirms the destination console.
+  // With two consoles in the roster, surface WHICH one this upload targets via
+  // a chip next to the actions (not in the button label — a long profile name
+  // would bloat the button). The form is shared across tabs, so this is where
+  // the user confirms the destination console.
   const rosterProfiles = useRosterStore((s) => s.profiles);
   const multiConsole = rosterProfiles.length > 1;
-  const targetName = multiConsole
-    ? profileNameForHost(stepHost, rosterProfiles)
-    : null;
   // An install streams the DPI loader to the single-payload loader, which
   // replaces the payload that owns the transfer port — so starting an upload
   // mid-install would just fail (or race the payload swap). Disable while an
@@ -988,6 +985,15 @@ function Step2Options(props: {
       <TransferStatus phase={transferPhase} />
 
       <div className="flex flex-wrap items-center justify-end gap-2">
+        {/* Which PS5 this upload targets — a chip instead of baking a
+            (possibly long) console name into the button label. Auto-hides for
+            single-console users. Pushed to the left; actions stay right. */}
+        {multiConsole && (
+          <span className="mr-auto inline-flex items-center gap-1.5 text-xs text-[var(--color-muted)]">
+            {tr("upload_target_label", "Uploading to")}
+            <ConsoleChip addr={stepHost} />
+          </span>
+        )}
         <button
           type="button"
           onClick={onClear}
@@ -1017,13 +1023,7 @@ function Step2Options(props: {
                 )
           }
         >
-          {multiConsole && targetName
-            ? tr(
-                "upload_add_to_queue_for",
-                { name: targetName },
-                `Queue for ${targetName}`,
-              )
-            : tr("upload_add_to_queue", "Add to queue")}
+          {tr("upload_add_to_queue", "Add to queue")}
         </button>
         <button
           type="button"
@@ -1047,18 +1047,12 @@ function Step2Options(props: {
           className="rounded-md bg-[var(--color-accent)] px-6 py-2 text-sm font-medium text-[var(--color-accent-contrast)] disabled:opacity-50"
         >
           {preflightBusy
-            ? "Checking…"
+            ? tr("upload_checking", "Checking…")
             : inFlight
               ? transferPhase.kind === "starting"
-                ? "Starting…"
-                : "Uploading…"
-              : multiConsole && targetName
-                ? tr(
-                    "upload_now_to",
-                    { name: targetName },
-                    `Upload to ${targetName}`,
-                  )
-                : "Upload now"}
+                ? tr("upload_starting", "Starting…")
+                : tr("upload_uploading", "Uploading…")
+              : tr("upload_now", "Upload")}
         </button>
       </div>
       {preflightError && (

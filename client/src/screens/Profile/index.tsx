@@ -7,6 +7,7 @@ import {
   Maximize2,
   UserPen,
   Check,
+  Info,
 } from "lucide-react";
 
 import {
@@ -336,6 +337,15 @@ function AvatarSection({
           </div>
 
           {applyOk && <SuccessCard title={applyOk} />}
+          {applyOk && (
+            <p className="mt-2 flex items-start gap-1.5 text-xs text-[var(--color-muted)]">
+              <Info size={12} className="mt-0.5 shrink-0" />
+              {tr(
+                "profile.reboot_notice",
+                "Restart the PS5 to see this change — avatar and username updates only show on the console after a reboot.",
+              )}
+            </p>
+          )}
           {applyError && <ErrorCard title={applyError} />}
         </div>
       </div>
@@ -466,6 +476,7 @@ function UserRow({
   const [saved, setSaved] = useState(name);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [savedOk, setSavedOk] = useState(false);
 
   useEffect(() => {
     setDraft(name);
@@ -478,9 +489,11 @@ function UserRow({
     if (!dirty) return;
     setSaving(true);
     setError(null);
+    setSavedOk(false);
     try {
       await profileRenameUser(uid, draft.trim(), addr);
       setSaved(draft.trim());
+      setSavedOk(true);
       onChanged();
     } catch (e) {
       setError(`${e}`);
@@ -503,7 +516,10 @@ function UserRow({
           value={draft}
           maxLength={16}
           placeholder={tr("profile.username.placeholder", "User name")}
-          onChange={(e) => setDraft(e.target.value)}
+          onChange={(e) => {
+            setDraft(e.target.value);
+            setSavedOk(false);
+          }}
           onKeyDown={(e) => {
             if (e.key === "Enter") void save();
           }}
@@ -519,6 +535,14 @@ function UserRow({
         </Button>
       </div>
       {error && <p className="mt-1 text-xs text-[var(--color-warn)]">{error}</p>}
+      {savedOk && (
+        <p className="mt-1 text-xs text-[var(--color-good)]">
+          {tr(
+            "profile.reboot_notice",
+            "Restart the PS5 to see this change — avatar and username updates only show on the console after a reboot.",
+          )}
+        </p>
+      )}
     </div>
   );
 }
@@ -541,6 +565,7 @@ function SlotRow({
   const [saved, setSaved] = useState(name);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [savedOk, setSavedOk] = useState(false);
 
   // Re-sync when the server-confirmed name changes (after a refetch).
   useEffect(() => {
@@ -554,9 +579,11 @@ function SlotRow({
     if (!dirty) return;
     setSaving(true);
     setError(null);
+    setSavedOk(false);
     try {
       await profileSetUsername(slot, draft.trim(), addr);
       setSaved(draft.trim());
+      setSavedOk(true);
       onChanged();
     } catch (e) {
       setError(`${e}`);
@@ -575,7 +602,10 @@ function SlotRow({
           className="min-w-0 flex-1 rounded-md border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2 py-1 text-sm"
           value={draft}
           maxLength={31}
-          onChange={(e) => setDraft(e.target.value)}
+          onChange={(e) => {
+            setDraft(e.target.value);
+            setSavedOk(false);
+          }}
           onKeyDown={(e) => {
             if (e.key === "Enter") void save();
           }}
@@ -597,6 +627,14 @@ function SlotRow({
         </Button>
       </div>
       {error && <p className="mt-1 text-xs text-[var(--color-warn)]">{error}</p>}
+      {savedOk && (
+        <p className="mt-1 text-xs text-[var(--color-good)]">
+          {tr(
+            "profile.reboot_notice",
+            "Restart the PS5 to see this change — avatar and username updates only show on the console after a reboot.",
+          )}
+        </p>
+      )}
     </div>
   );
 }

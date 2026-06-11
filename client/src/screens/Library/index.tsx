@@ -2093,7 +2093,11 @@ function LibraryRow({
 
   return (
     <article className="flex flex-col gap-2 rounded-md border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3">
-      <div className="flex items-center gap-3">
+      {/* flex-wrap so the action cluster drops to its own line instead of
+          overflowing off the (clipped) right edge on narrow phone widths —
+          previously the Play/Details/⋯ buttons were pushed off-screen and
+          untappable on Android. On desktop everything still fits on one line. */}
+      <div className="flex flex-wrap items-center gap-3">
         <LibraryThumb
           entry={entry}
           meta={meta}
@@ -2174,7 +2178,7 @@ function LibraryRow({
             </div>
           )}
         </div>
-        <div className="ml-2 flex shrink-0 items-center gap-1">
+        <div className="ml-auto flex shrink-0 flex-wrap items-center gap-1">
           {entry.kind === "image" ? (
             isMounted ? (
               <Button

@@ -6,6 +6,8 @@ import {
   XCircle,
   StopCircle,
   Trash2,
+  Eye,
+  X,
 } from "lucide-react";
 
 import { PageHeader, Button, EmptyState } from "../../components";
@@ -58,7 +60,7 @@ export default function ActivityScreen() {
       message: tr(
         "activity_clear_confirm_body",
         undefined,
-        'Removes every entry — past AND running. The underlying ops aren\'t cancelled (use per-row Stop for that), but their UI rows disappear. To dismiss only stuck running rows, use "Clear running" instead.',
+        "Removes finished entries (done, failed, stopped). Still-running activities are kept so nothing in flight disappears. To delete one row, use its trash button.",
       ),
       confirmLabel: tr("activity_clear", undefined, "Clear history"),
       destructive: true,
@@ -193,7 +195,14 @@ export default function ActivityScreen() {
 
 function ActivityRow({ entry }: { entry: ActivityEntry }) {
   const tr = useTr();
+  const remove = useActivityHistoryStore((s) => s.remove);
+  const [detailOpen, setDetailOpen] = useState(false);
   const isRunning = entry.outcome === "running";
+  // "Running but nothing on the wire yet" — for archive uploads (esp. .rar,
+  // which the engine extracts to a host temp dir BEFORE any transfer) this is
+  // the long silent prep phase that used to read as a misleading "Uploading N
+  // files" with no speed. Surface it honestly. Gate on running + zero bytes.
+  const preparing = isRunning && entry.phase !== "finalizing" && !entry.bytes;
   // For finished rows we have a fixed end timestamp (pure subtract).
   // For running rows we tick `now` every second so the elapsed
   // counter advances; this also drives the speed/percent re-renders.
@@ -338,7 +347,15 @@ function ActivityRow({ entry }: { entry: ActivityEntry }) {
           {formatRelative(entry.startedAtMs, tr)} ·{" "}
           {formatDuration(elapsedMs / 1000)}
         </span>
-        {isRunning && (
+        <button
+          type="button"
+          onClick={() => setDetailOpen(true)}
+          className="rounded-md border border-[var(--color-border)] p-1 text-[var(--color-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text)]"
+          title={tr("activity_view_tooltip", undefined, "View details")}
+        >
+          <Eye size={13} />
+        </button>
+        {isRunning ? (
           <button
             type="button"
             onClick={() => void handleStop()}
@@ -351,10 +368,30 @@ function ActivityRow({ entry }: { entry: ActivityEntry }) {
                 : "Stop watching this operation (engine job may continue server-side)",
             )}
           >
-            {tr("fs_download_stop", undefined, "Stop")}
+            {entry.opId !== undefined
+              ? tr("activity_cancel", undefined, "Cancel")
+              : tr("fs_download_stop", undefined, "Stop")}
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => remove(entry.id)}
+            className="rounded-md border border-[var(--color-border)] p-1 text-[var(--color-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-bad)]"
+            title={tr("activity_delete_tooltip", undefined, "Delete this entry")}
+          >
+            <Trash2 size={13} />
           </button>
         )}
       </div>
+      {preparing && (
+        <div className="mb-1 text-xs text-[var(--color-muted)]">
+          {tr(
+            "activity_preparing_hint",
+            undefined,
+            "Preparing… no data transferred yet. Compressed archives (.rar/.7z) are extracted on your computer first — this can take a while for large files before the upload speed appears.",
+          )}
+        </div>
+      )}
 
       {entry.outcome === "running" && entry.phase === "finalizing" && (
         // Always-visible "don't close the app" hint. Previously this
@@ -470,7 +507,130 @@ function ActivityRow({ entry }: { entry: ActivityEntry }) {
           {entry.error}
         </div>
       )}
+      {detailOpen && (
+        <ActivityDetailModal
+          entry={entry}
+          speed={speed}
+          pct={pct}
+          elapsedMs={elapsedMs}
+          onClose={() => setDetailOpen(false)}
+        />
+      )}
     </li>
+  );
+}
+
+/** Full-detail modal for one activity — everything the entry carries, for
+ *  users who want the complete picture (paths, sizes, phase, timings, error
+ *  reason/detail). Opened by the row's eye button. */
+function ActivityDetailModal({
+  entry,
+  speed,
+  pct,
+  elapsedMs,
+  onClose,
+}: {
+  entry: ActivityEntry;
+  speed: number;
+  pct: number | null;
+  elapsedMs: number;
+  onClose: () => void;
+}) {
+  const tr = useTr();
+  const profiles = useRosterStore((s) => s.profiles);
+  const consoleName = entry.addr ? profileNameForAddr(entry.addr, profiles) : null;
+  const phaseLabel =
+    entry.outcome === "running" && entry.phase !== "finalizing" && !entry.bytes
+      ? tr("activity_phase_preparing", undefined, "Preparing (no transfer yet)")
+      : entry.phase === "finalizing"
+        ? tr("activity_phase_finalizing", undefined, "Finalizing on PS5")
+        : entry.phase === "uploading"
+          ? tr("activity_phase_uploading", undefined, "Uploading")
+          : null;
+  const fmtTime = (ms: number) => new Date(ms).toLocaleString();
+  const rows: Array<[string, string | null]> = [
+    [tr("activity_detail_kind", undefined, "Type"), entry.kind],
+    [tr("activity_detail_console", undefined, "Console"), consoleName],
+    [tr("activity_detail_phase", undefined, "Phase"), phaseLabel],
+    [tr("activity_detail_from", undefined, "From"), entry.fromPath ?? null],
+    [
+      tr("activity_detail_to", undefined, "To"),
+      entry.toPath ?? entry.detail ?? null,
+    ],
+    [
+      tr("activity_detail_progress", undefined, "Progress"),
+      entry.bytes !== undefined
+        ? `${formatBytes(entry.bytes)}${
+            entry.totalBytes ? ` / ${formatBytes(entry.totalBytes)}` : ""
+          }${pct !== null ? ` (${pct.toFixed(0)}%)` : ""}`
+        : null,
+    ],
+    [
+      tr("activity_detail_speed", undefined, "Speed"),
+      speed > 0 ? `${formatBytes(speed)}/s` : null,
+    ],
+    [
+      tr("activity_detail_files", undefined, "Files"),
+      entry.files !== undefined ? String(entry.files) : null,
+    ],
+    [
+      tr("activity_detail_started", undefined, "Started"),
+      fmtTime(entry.startedAtMs),
+    ],
+    [
+      tr("activity_detail_ended", undefined, "Ended"),
+      entry.endedAtMs ? fmtTime(entry.endedAtMs) : null,
+    ],
+    [
+      tr("activity_detail_duration", undefined, "Duration"),
+      formatDuration(elapsedMs / 1000),
+    ],
+  ];
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="max-h-[80vh] w-full max-w-md overflow-y-auto rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-3 flex items-start gap-2">
+          <OutcomeIcon outcome={entry.outcome} />
+          <span className="min-w-0 flex-1 break-words text-sm font-medium">
+            {entry.label}
+          </span>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md p-1 text-[var(--color-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text)]"
+            title={tr("close", undefined, "Close")}
+          >
+            <X size={16} />
+          </button>
+        </div>
+        <dl className="space-y-1.5 text-xs">
+          {rows
+            .filter(([, v]) => v != null && v !== "")
+            .map(([k, v]) => (
+              <div key={k} className="flex gap-2">
+                <dt className="w-24 shrink-0 text-[var(--color-muted)]">{k}</dt>
+                <dd className="min-w-0 flex-1 break-words font-mono">{v}</dd>
+              </div>
+            ))}
+        </dl>
+        {entry.error && (
+          <div className="mt-3 rounded-md border border-[var(--color-border)] bg-[var(--color-surface-2)] p-2 text-xs">
+            <div className="mb-1 font-medium text-[var(--color-bad)]">
+              {tr("activity_detail_error", undefined, "Error")}
+            </div>
+            <div className="break-words font-mono text-[var(--color-muted)]">
+              {entry.error}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 

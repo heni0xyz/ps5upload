@@ -369,13 +369,13 @@ const CATALOGUE: &[CatalogueEntry] = &[
         // smaller payload. Sonic Loader bundles this as
         // /payloads/lapyjb.elf and starts it at boot; here we
         // just reference the upstream release. NB: hosted on
-        // git.earthonion.com (Forgejo), not github — uses our
+        // git.etawen.dev (Forgejo), not github — uses our
         // 2.13.0 catalog Forgejo support.
         id: "lapyjb",
         display_name: "Lapy JB Daemon (voidwhisper)",
         role: "Per-PID jailbreak daemon — drops etaHEN dependency",
         description: "Standalone PID-jailbreak daemon that handles app escalation directly. Apps that previously needed etaHEN's HijackerCommand IPC (Itemzflow, xplorer, anything using universalps5 PRX) just work with lapyjb running. Smaller, simpler than etaHEN — recommended over etaHEN if you only need the app-jb side.",
-        repo_host: "git.earthonion.com",
+        repo_host: "git.etawen.dev",
         repo_owner: "voidwhisper",
         repo_name: "lapy-jb-daemon",
         asset_name_hint: "lapyjb",
@@ -384,7 +384,7 @@ const CATALOGUE: &[CatalogueEntry] = &[
         ports: &[],
         autoload_priority: 3,
         autoload_delay_ms: 500,
-        homepage: "https://git.earthonion.com/voidwhisper/lapy-jb-daemon",
+        homepage: "https://git.etawen.dev/voidwhisper/lapy-jb-daemon",
     },
     CatalogueEntry {
         // Offline account activation — registers user slots in
@@ -397,16 +397,19 @@ const CATALOGUE: &[CatalogueEntry] = &[
         display_name: "NP Fake Sign-in",
         role: "Offline account activation (no PSN required)",
         description: "Headless payload that registers PS5 user slots directly via the system registry. Replaces having to sign into a real PSN account just to set up local users — handy for fresh jailbreaks, secondary accounts, or test profiles. One-shot ELF: send, runs, exits.",
-        repo_host: "git.earthonion.com",
+        repo_host: "git.etawen.dev",
         repo_owner: "earthonion",
         repo_name: "np-fake-signin",
-        asset_name_hint: "np-fake-signin",
+        // Releases ship BOTH np-fake-signin-ps5.elf and -ps4.elf; the
+        // "-ps5" suffix is a substring of only the PS5 asset, so pick_asset
+        // selects the right build (same trick as nanoDNS below).
+        asset_name_hint: "np-fake-signin-ps5",
         on_console_marker_path: None,
         process_name_hint: None,
         ports: &[],
         autoload_priority: 5,
         autoload_delay_ms: 200,
-        homepage: "https://git.earthonion.com/earthonion/np-fake-signin",
+        homepage: "https://git.etawen.dev/earthonion/np-fake-signin",
     },
     CatalogueEntry {
         // Garlic Worker — community save-decryption queue
@@ -421,7 +424,7 @@ const CATALOGUE: &[CatalogueEntry] = &[
         display_name: "Garlic Worker (community save processor)",
         role: "Process community save decryption jobs (opt-in)",
         description: "Background worker that drains the community save-decryption queue from garlicsaves.com. Handles both PS4 and PS5 saves natively. **Privacy notice**: connects to garlicsaves.com and processes other users' encrypted save files. Off by default — install + run manually if you want to contribute back to the community queue.",
-        repo_host: "git.earthonion.com",
+        repo_host: "git.etawen.dev",
         repo_owner: "earthonion",
         repo_name: "garlic-worker",
         asset_name_hint: "garlic-worker-ps5",
@@ -430,7 +433,7 @@ const CATALOGUE: &[CatalogueEntry] = &[
         ports: &[],
         autoload_priority: 6,
         autoload_delay_ms: 200,
-        homepage: "https://git.earthonion.com/earthonion/garlic-worker",
+        homepage: "https://git.etawen.dev/earthonion/garlic-worker",
     },
     CatalogueEntry {
         // Garlic SaveMgr — decrypts and re-encrypts YOUR OWN
@@ -443,7 +446,7 @@ const CATALOGUE: &[CatalogueEntry] = &[
         display_name: "Garlic SaveMgr (decrypt your own saves)",
         role: "Decrypt + re-encrypt your own PS5/PS4 saves",
         description: "On-console save decrypt/encrypt daemon. Lets you back up saves in plaintext, edit them on PC, and re-encrypt for the same console. No network — operates purely on saves you already own. Companion to ps5upload's Saves tab; install this for round-trip plaintext editing workflows.",
-        repo_host: "git.earthonion.com",
+        repo_host: "git.etawen.dev",
         repo_owner: "earthonion",
         repo_name: "garlic-savemgr",
         asset_name_hint: "garlic-savemgr",
@@ -452,7 +455,7 @@ const CATALOGUE: &[CatalogueEntry] = &[
         ports: &[],
         autoload_priority: 5,
         autoload_delay_ms: 200,
-        homepage: "https://git.earthonion.com/earthonion/garlic-savemgr",
+        homepage: "https://git.etawen.dev/earthonion/garlic-savemgr",
     },
     CatalogueEntry {
         // Companion to /logs?tab=kernel for users who want
@@ -507,6 +510,27 @@ const CATALOGUE: &[CatalogueEntry] = &[
         autoload_priority: 4,
         autoload_delay_ms: 300,
         homepage: "https://github.com/drakmor/nanoDNS",
+    },
+    CatalogueEntry {
+        // StonedModder/Ghostpad — creates a virtual PS5 controller and
+        // redirects input to it. GitHub-hosted; releases ship `ghostpad.elf`
+        // (the on-console payload) alongside a Windows companion `.exe`. The
+        // `ghostpad.elf` hint is a substring of only the ELF, so pick_asset
+        // never selects the .exe (which isn't a payload extension anyway).
+        id: "ghostpad",
+        display_name: "Ghostpad",
+        role: "Virtual controller + input redirection",
+        description: "Creates a virtual PS5 controller on the console and redirects input to it — useful for input automation, remote control, and accessibility setups. Send the payload to start it; pair it with the upstream's companion app for driving the virtual pad.",
+        repo_host: "github.com",
+        repo_owner: "StonedModder",
+        repo_name: "Ghostpad",
+        asset_name_hint: "ghostpad.elf",
+        on_console_marker_path: None,
+        process_name_hint: Some("ghostpad.elf"),
+        ports: &[],
+        autoload_priority: 4,
+        autoload_delay_ms: 200,
+        homepage: "https://github.com/StonedModder/Ghostpad",
     },
 ];
 
@@ -848,7 +872,7 @@ pub async fn payloads_release(
     // makes that PR fail fast in dev + CI and removes the foot-gun
     // of `repo_host` being silently treated as authoritative. New
     // hosts go through both a code-review PR AND an allowlist edit.
-    const ALLOWED_HOSTS: &[&str] = &["github.com", "git.earthonion.com"];
+    const ALLOWED_HOSTS: &[&str] = &["github.com", "git.etawen.dev"];
     if !ALLOWED_HOSTS.contains(&entry.repo_host) {
         return Err(format!(
             "catalog entry {} declares repo_host={:?} which is not in the allowlist",
@@ -859,7 +883,7 @@ pub async fn payloads_release(
     // GitHub uses a separate `api.github.com` host; Gitea/Forgejo
     // serve the API under the same host as the web UI at /api/v1/.
     // JSON shape is otherwise identical (verified against
-    // git.earthonion.com running Forgejo 15 / gitea-1.22).
+    // git.etawen.dev running Forgejo 15 / gitea-1.22).
     let url = if entry.repo_host == "github.com" {
         format!(
             "https://api.github.com/repos/{}/{}/releases/latest",
@@ -1000,7 +1024,7 @@ pub async fn payloads_releases(
         }
     }
 
-    const ALLOWED_HOSTS: &[&str] = &["github.com", "git.earthonion.com"];
+    const ALLOWED_HOSTS: &[&str] = &["github.com", "git.etawen.dev"];
     if !ALLOWED_HOSTS.contains(&entry.repo_host) {
         return Err(format!(
             "catalog entry {} declares repo_host={:?} which is not in the allowlist",
