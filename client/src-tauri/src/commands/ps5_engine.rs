@@ -390,6 +390,60 @@ pub async fn sevenz_inspect(req: SevenzInspectReq) -> Result<JsonValue, String> 
     post_json_long(&url, &body).await
 }
 
+// ── .rar proxies ── desktop-only (engine returns 501 on the Android build,
+//    which is feature-detected via /api/version `caps.rar`). `password` is
+//    optional and only forwarded; it is never logged or persisted here.
+
+#[derive(Debug, Deserialize)]
+pub struct TransferRarReq {
+    pub archive_path: String,
+    pub dest_root: String,
+    pub addr: Option<String>,
+    pub tx_id: Option<String>,
+    #[serde(default)]
+    pub excludes: Vec<String>,
+    #[serde(default)]
+    pub bandwidth_cap_mbps: Option<f64>,
+    #[serde(default)]
+    pub password: Option<String>,
+}
+
+/// Upload a `.rar`'s contents (any volume set, optional password), extracting
+/// on the host so files land already-extracted on the PS5. Proxies
+/// `/api/transfer/rar`.
+#[tauri::command]
+pub async fn transfer_rar(req: TransferRarReq) -> Result<JsonValue, String> {
+    let base = engine::url();
+    let url = format!("{base}/api/transfer/rar");
+    let body = serde_json::json!({
+        "archive_path": req.archive_path,
+        "dest_root": req.dest_root,
+        "addr": req.addr,
+        "tx_id": req.tx_id,
+        "excludes": req.excludes,
+        "bandwidth_cap_mbps": req.bandwidth_cap_mbps,
+        "password": req.password,
+    });
+    post_json_long(&url, &body).await
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RarInspectReq {
+    pub archive_path: String,
+    #[serde(default)]
+    pub password: Option<String>,
+}
+
+/// Preview a `.rar` (file count + uncompressed size) without extracting.
+/// Proxies `/api/rar/inspect`.
+#[tauri::command]
+pub async fn rar_inspect(req: RarInspectReq) -> Result<JsonValue, String> {
+    let base = engine::url();
+    let url = format!("{base}/api/rar/inspect");
+    let body = serde_json::json!({ "archive_path": req.archive_path, "password": req.password });
+    post_json_long(&url, &body).await
+}
+
 /// Streaming variant of `sevenz_inspect`: subscribes to the engine's
 /// `/api/7z/inspect/stream` SSE endpoint with the same watchdog + progress
 /// channel as `zip_inspect_stream` (reuses `ZipInspectProgress`).

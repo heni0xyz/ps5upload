@@ -394,6 +394,46 @@ export async function startTransfer7z(
   return res.job_id;
 }
 
+/** Preview a `.rar` (file count + uncompressed size). `password` for encrypted
+ *  archives. Throws an Error whose message contains `rar_password_required`
+ *  (encrypted headers) or `rar_password_wrong` so the UI can prompt/re-prompt.
+ *  Desktop only — see `engineCaps().rar`. */
+export async function rarInspect(
+  archivePath: string,
+  password?: string | null,
+): Promise<ZipInspect> {
+  return invoke<ZipInspect>("rar_inspect", {
+    req: { archive_path: archivePath, password: password ?? null },
+  });
+}
+
+/** Upload a `.rar`'s contents (any volume set), host-extracted so files land
+ *  already-extracted on the PS5. `password` for encrypted archives. Desktop
+ *  only. */
+export async function startTransferRar(
+  archivePath: string,
+  destRoot: string,
+  addr: string,
+  password?: string | null,
+  txId?: string | null,
+  excludes?: string[],
+  bandwidthCapMbps?: number,
+): Promise<string> {
+  const res = await invoke<{ job_id: string }>("transfer_rar", {
+    req: {
+      archive_path: archivePath,
+      dest_root: destRoot,
+      addr,
+      tx_id: txId ?? null,
+      excludes: excludes ?? [],
+      bandwidth_cap_mbps:
+        bandwidthCapMbps && bandwidthCapMbps > 0 ? bandwidthCapMbps : null,
+      password: password ?? null,
+    },
+  });
+  return res.job_id;
+}
+
 export type ReconcileMode = "fast" | "safe";
 
 /** Resume-friendly folder upload. The engine walks the PS5 destination,

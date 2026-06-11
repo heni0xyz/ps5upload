@@ -171,6 +171,8 @@ pub fn run() {
             commands::transfer_7z,
             commands::sevenz_inspect,
             commands::sevenz_inspect_stream,
+            commands::transfer_rar,
+            commands::rar_inspect,
             commands::profile_info,
             commands::profile_set_username,
             commands::profile_rename_user,

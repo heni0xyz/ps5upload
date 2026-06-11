@@ -899,6 +899,30 @@ struct SevenzInspectReq {
     archive_path: String,
 }
 
+/// `/api/transfer/rar` request. Like 7z plus an optional `password` for
+/// encrypted archives. (RAR is desktop-only — see the handler.)
+#[derive(Deserialize)]
+struct TransferRarReq {
+    addr: Option<String>,
+    tx_id: Option<String>,
+    dest_root: String,
+    archive_path: String,
+    #[serde(default)]
+    excludes: Vec<String>,
+    #[serde(default)]
+    bandwidth_cap_mbps: Option<f64>,
+    #[serde(default)]
+    password: Option<String>,
+}
+
+/// `/api/rar/inspect` request.
+#[derive(Deserialize)]
+struct RarInspectReq {
+    archive_path: String,
+    #[serde(default)]
+    password: Option<String>,
+}
+
 #[derive(Deserialize)]
 struct FileListEntryReq {
     src: String,
@@ -3755,6 +3779,205 @@ async fn transfer_7z_handler(
         .into_response()
 }
 
+/// POST /api/rar/inspect — desktop only. Counts + uncompressed size of a
+/// `.rar` (multi-volume opens from the first part; `password` for encrypted).
+#[cfg(not(target_os = "android"))]
+async fn rar_inspect_handler(Json(req): Json<RarInspectReq>) -> impl IntoResponse {
+    let p = req.archive_path.clone();
+    let pw = req.password.clone();
+    let r = tokio::task::spawn_blocking(move || {
+        ps5upload_core::transfer::inspect_rar(std::path::Path::new(&p), pw.as_deref())
+    })
+    .await;
+    match r {
+        Ok(Ok(v)) => (StatusCode::OK, Json(v)).into_response(),
+        Ok(Err(e)) => json_err(StatusCode::BAD_REQUEST, format!("{e:#}")).into_response(),
+        Err(e) => json_err(StatusCode::INTERNAL_SERVER_ERROR, format!("rar inspect task: {e}"))
+            .into_response(),
+    }
+}
+
+#[cfg(target_os = "android")]
+async fn rar_inspect_handler(Json(_req): Json<RarInspectReq>) -> impl IntoResponse {
+    json_err(StatusCode::NOT_IMPLEMENTED, "RAR is not supported on this build").into_response()
+}
+
+/// POST /api/transfer/rar — desktop only. Host-extract the `.rar` (any volume
+/// set, optional password) to a temp dir, then stream the tree to the PS5 via
+/// the directory transfer. Mirrors `transfer_7z_handler`'s job model.
+#[cfg(not(target_os = "android"))]
+async fn transfer_rar_handler(
+    State(state): State<AppState>,
+    Json(req): Json<TransferRarReq>,
+) -> impl IntoResponse {
+    let addr = req.addr.unwrap_or_else(|| state.default_ps5_addr.clone());
+    let caller_supplied_tx_id = req.tx_id.is_some();
+    let tx_id = match parse_or_random_tx_id(req.tx_id.as_deref()) {
+        Ok(id) => id,
+        Err(e) => return json_err(StatusCode::BAD_REQUEST, e.to_string()).into_response(),
+    };
+    let initial_flags = if caller_supplied_tx_id {
+        TX_FLAG_RESUME
+    } else {
+        0
+    };
+
+    // Plan: list entries (names + sizes) without extracting.
+    let (total_bytes, preview) = {
+        let archive_path = req.archive_path.clone();
+        let excludes = req.excludes.clone();
+        let pw = req.password.clone();
+        let planned = tokio::task::spawn_blocking(move || {
+            ps5upload_core::transfer::rar_plan_preview(
+                std::path::Path::new(&archive_path),
+                pw.as_deref(),
+                &excludes,
+            )
+        })
+        .await;
+        match planned {
+            Ok(Ok(v)) => v,
+            Ok(Err(e)) => {
+                crate::log_warn!("transfer_rar plan failed: archive={} err={e:#}", req.archive_path);
+                return json_err(StatusCode::BAD_REQUEST, e.to_string()).into_response();
+            }
+            Err(e) => {
+                return json_err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("rar planning task panicked/cancelled: {e}"),
+                )
+                .into_response()
+            }
+        }
+    };
+    let files: Vec<PlannedFile> = preview
+        .into_iter()
+        .map(|(rel_path, size)| PlannedFile { rel_path, size })
+        .collect();
+    let files_sent_count = files.len() as u64;
+
+    let job_id = Uuid::new_v4();
+    let started_at_ms = now_ms();
+    crate::log_info!(
+        "transfer_rar: job={job_id} addr={addr} archive={} dest_root={} resume={} files={} bytes={total_bytes}",
+        req.archive_path,
+        req.dest_root,
+        caller_supplied_tx_id,
+        files_sent_count
+    );
+    let progress = Arc::new(AtomicU64::new(0));
+    let progress_files = Arc::new(AtomicU64::new(0));
+    let progress_files_finalized = Arc::new(AtomicU64::new(0));
+    let progress_bytes_finalized = Arc::new(AtomicU64::new(0));
+    let ctx = TickerContext {
+        started_at_ms,
+        total_bytes,
+        skipped_files: 0,
+        skipped_bytes: 0,
+    };
+    set_job(
+        &state.jobs,
+        &state.events_tx,
+        job_id,
+        JobState::Running {
+            started_at_ms,
+            bytes_sent: 0,
+            total_bytes,
+            files,
+            skipped_files: 0,
+            skipped_bytes: 0,
+            files_processing: 0,
+            files_finalized: 0,
+            files_finalizing_total: 0,
+            bytes_finalized: 0,
+        },
+    );
+
+    let jobs = Arc::clone(&state.jobs);
+    let events_tx = state.events_tx.clone();
+    let stop_ticker = spawn_progress_ticker(
+        Arc::clone(&jobs),
+        events_tx.clone(),
+        job_id,
+        ctx,
+        Arc::clone(&progress),
+        Arc::clone(&progress_files),
+        Arc::clone(&progress_files_finalized),
+        Arc::clone(&progress_bytes_finalized),
+    );
+
+    tokio::task::spawn_blocking(move || {
+        let _stop_guard = TickerStopGuard::new(stop_ticker);
+        let mut fail_guard =
+            JobFailOnDropGuard::new(Arc::clone(&jobs), events_tx.clone(), job_id, started_at_ms);
+        let mut cfg = make_transfer_config(&addr);
+        cfg.excludes = req.excludes;
+        cfg.progress_bytes = Some(Arc::clone(&progress));
+        cfg.progress_files = Some(Arc::clone(&progress_files));
+        cfg.progress_files_finalized = Some(Arc::clone(&progress_files_finalized));
+        cfg.progress_bytes_finalized = Some(Arc::clone(&progress_bytes_finalized));
+        apply_per_request_bandwidth(&mut cfg, req.bandwidth_cap_mbps);
+        let result = ps5upload_core::transfer::transfer_rar_resumable(
+            &cfg,
+            tx_id,
+            &req.dest_root,
+            std::path::Path::new(&req.archive_path),
+            req.password.as_deref(),
+            2,
+            initial_flags,
+        );
+        match result {
+            Ok(r) => {
+                let completed_at_ms = now_ms();
+                set_job(
+                    &jobs,
+                    &events_tx,
+                    job_id,
+                    JobState::Done {
+                        started_at_ms,
+                        completed_at_ms,
+                        elapsed_ms: completed_at_ms.saturating_sub(started_at_ms),
+                        tx_id_hex: r.tx_id_hex,
+                        shards_sent: r.shards_sent,
+                        bytes_sent: r.bytes_sent,
+                        dest: r.dest,
+                        files_sent: files_sent_count,
+                        skipped_files: 0,
+                        skipped_bytes: 0,
+                        commit_ack: serde_json::from_str(&r.commit_ack_body).ok(),
+                    },
+                )
+            }
+            Err(e) => {
+                let completed_at_ms = now_ms();
+                set_job(
+                    &jobs,
+                    &events_tx,
+                    job_id,
+                    job_failed_from_err(started_at_ms, completed_at_ms, &e),
+                )
+            }
+        }
+        fail_guard.mark_succeeded();
+    });
+
+    (
+        StatusCode::ACCEPTED,
+        Json(JobCreated {
+            job_id: job_id.to_string(),
+        }),
+    )
+        .into_response()
+}
+
+#[cfg(target_os = "android")]
+async fn transfer_rar_handler(
+    State(_state): State<AppState>,
+    Json(_req): Json<TransferRarReq>,
+) -> impl IntoResponse {
+    json_err(StatusCode::NOT_IMPLEMENTED, "RAR is not supported on this build").into_response()
+}
+
 /// POST /api/transfer/file-list
 async fn transfer_file_list_handler(
     State(state): State<AppState>,
@@ -4765,6 +4988,10 @@ async fn engine_version() -> impl IntoResponse {
         StatusCode::OK,
         Json(serde_json::json!({
             "version": env!("CARGO_PKG_VERSION"),
+            // Capability flags the UI feature-detects. `rar` is desktop-only
+            // (the UnRAR C dep is excluded from the Android build), so the
+            // client hides the .rar option when this is false.
+            "caps": { "rar": cfg!(not(target_os = "android")) },
         })),
     )
 }
@@ -5013,6 +5240,8 @@ async fn run(cfg: EngineConfig) -> anyhow::Result<()> {
         .route("/api/transfer/7z", post(transfer_7z_handler))
         .route("/api/7z/inspect", post(sevenz_inspect_handler))
         .route("/api/7z/inspect/stream", post(sevenz_inspect_stream_handler))
+        .route("/api/transfer/rar", post(transfer_rar_handler))
+        .route("/api/rar/inspect", post(rar_inspect_handler))
         .route("/api/transfer/file-list", post(transfer_file_list_handler))
         .route("/api/transfer/download", post(transfer_download_handler))
         .route("/api/profile/info", get(profile_info_handler))
