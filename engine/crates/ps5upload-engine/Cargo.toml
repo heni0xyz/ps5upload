@@ -15,6 +15,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow.workspace = true
 axum.workspace = true
+base64 = "0.22"
 ftx2-proto = { path = "../ftx2-proto" }
 ps5upload-core = { path = "../ps5upload-core" }
 ps5upload-pkg = { path = "../ps5upload-pkg" }

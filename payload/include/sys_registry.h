@@ -81,6 +81,26 @@ int sys_registry_get_str(uint32_t key,
                           char *buf, size_t buf_size,
                           uint32_t *out_err_code);
 
+/* Write a string registry value. `len` is the field width Sony
+ * expects for the key (e.g. 32 for an account-name slot), NOT
+ * strlen(buf) — Sony copies a fixed-width field. Same return
+ * convention as the other writers. Added for the profile (offline
+ * account) feature, which renames account-name slots. */
+int sys_registry_set_str(uint32_t key,
+                         const char *buf, size_t len,
+                         uint32_t *out_err_code);
+
+/* Read a binary (fixed-width) registry value into `buf`. Used for
+ * the 8-byte account-id slots. Same return convention. */
+int sys_registry_get_bin(uint32_t key,
+                         void *buf, size_t buf_size,
+                         uint32_t *out_err_code);
+
+/* Write a binary (fixed-width) registry value. Same return convention. */
+int sys_registry_set_bin(uint32_t key,
+                         const void *buf, size_t buf_size,
+                         uint32_t *out_err_code);
+
 /* Read NTP-derived tick (libSceRtc) — used by the time/state get
  * frame to surface "what time NTP would say it is right now"
  * alongside the wall clock. Returns 0 on success with *out_unix_seconds

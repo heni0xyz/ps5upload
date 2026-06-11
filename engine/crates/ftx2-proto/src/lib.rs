@@ -464,6 +464,36 @@ pub enum FrameType {
     /// drain stalls), the next one carries the latest counters, so
     /// the UI stays "eventually correct".
     ApplyProgress = 146,
+    /// Profile — avatar image + offline-account (username) operations.
+    ///   PROFILE_INFO         req: empty. Ack: `{"ok":bool,"uid":N,
+    ///     "uid_hex":"0x..","username":"..","slots":[{"slot":N,"name":"..",
+    ///     "type":"..","flags":N,"id":"0x..","activated":bool}]}` — the
+    ///     foreground user + the offline-account name slots.
+    ///   PROFILE_SET_USERNAME req: `{"slot":N,"name":".."}` → renames an
+    ///     account-name slot via sceRegMgrSetStr. Ack:
+    ///     `{"ok":bool,"slot":N,"name":"..","err_code":N}`.
+    ///   PROFILE_ACTIVATE     req: `{"slot":N,"id"?:"0x.."}` → sets the
+    ///     slot id (derived from the name if absent) + type "np" +
+    ///     DEFAULT_FLAGS. Ack: `{"ok":bool,"slot":N,"id":"0x.."}`.
+    ///   PROFILE_APPLY_AVATAR req: `{"uid":N}` → copies the host-staged
+    ///     DDS + online.json files from `/data/ps5upload/profile/0x<UID>/`
+    ///     into the live profile cache dir (privileged). The desktop does
+    ///     the decode/resize/DXT5 encode and stages the files via
+    ///     FS_WRITE_BYTES first. Ack: `{"ok":bool,"uid":N,"copied":N}`.
+    ///   PROFILE_CLEAR_SLOT   req: `{"slot":N}` → zero id + flags. Ack:
+    ///     `{"ok":bool,"slot":N}`.
+    /// Registry + /system_data writes need ucred elevation (same envelope
+    /// as the time/registry frames).
+    ProfileInfo = 150,
+    ProfileInfoAck = 151,
+    ProfileSetUsername = 152,
+    ProfileSetUsernameAck = 153,
+    ProfileActivate = 154,
+    ProfileActivateAck = 155,
+    ProfileApplyAvatar = 156,
+    ProfileApplyAvatarAck = 157,
+    ProfileClearSlot = 158,
+    ProfileClearSlotAck = 159,
 }
 
 impl FrameType {
@@ -603,6 +633,16 @@ impl FrameType {
             144 => Ok(Self::SyslogTail),
             145 => Ok(Self::SyslogTailAck),
             146 => Ok(Self::ApplyProgress),
+            150 => Ok(Self::ProfileInfo),
+            151 => Ok(Self::ProfileInfoAck),
+            152 => Ok(Self::ProfileSetUsername),
+            153 => Ok(Self::ProfileSetUsernameAck),
+            154 => Ok(Self::ProfileActivate),
+            155 => Ok(Self::ProfileActivateAck),
+            156 => Ok(Self::ProfileApplyAvatar),
+            157 => Ok(Self::ProfileApplyAvatarAck),
+            158 => Ok(Self::ProfileClearSlot),
+            159 => Ok(Self::ProfileClearSlotAck),
             _ => Err(DecodeError::UnknownFrameType(v)),
         }
     }

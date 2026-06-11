@@ -3373,6 +3373,193 @@ async fn sevenz_inspect_stream_handler(Json(req): Json<SevenzInspectReq>) -> imp
 /// POST /api/transfer/7z — start a 7z-archive upload job. Same job/progress/SSE
 /// plumbing and resume semantics as the zip path; the progress denominator is
 /// the total uncompressed size.
+// ─── Profile (avatar + offline-account username) ────────────────────────────
+
+#[derive(Deserialize)]
+struct ProfileUsernameReq {
+    addr: Option<String>,
+    slot: i32,
+    name: String,
+}
+
+#[derive(Deserialize)]
+struct ProfileActivateReq {
+    addr: Option<String>,
+    slot: i32,
+    #[serde(default)]
+    id: Option<u64>,
+}
+
+#[derive(Deserialize)]
+struct ProfileSlotReq {
+    addr: Option<String>,
+    slot: i32,
+}
+
+#[derive(Deserialize)]
+struct ProfileAvatarReq {
+    addr: Option<String>,
+    /// Host-side path to the source image the user picked (same model as
+    /// the zip/7z handlers, which take a host `archive_path`).
+    image_path: String,
+    #[serde(default)]
+    mode: Option<String>,
+    #[serde(default)]
+    uid: Option<u32>,
+    #[serde(default)]
+    username: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ProfilePreviewReq {
+    image_path: String,
+    #[serde(default)]
+    mode: Option<String>,
+}
+
+async fn profile_info_handler(
+    State(state): State<AppState>,
+    Query(q): Query<AddrQuery>,
+) -> impl IntoResponse {
+    let addr = mgmt_addr_or_default(q.addr, &state.default_ps5_addr);
+    let r = tokio::task::spawn_blocking(move || ps5upload_core::profile::profile_info(&addr))
+        .await
+        .map_err(anyhow::Error::from)
+        .and_then(|r| r);
+    match r {
+        Ok(v) => (StatusCode::OK, Json(v)).into_response(),
+        Err(e) => json_err(StatusCode::BAD_GATEWAY, format!("{e:#}")).into_response(),
+    }
+}
+
+async fn profile_username_handler(
+    State(state): State<AppState>,
+    Json(req): Json<ProfileUsernameReq>,
+) -> impl IntoResponse {
+    let addr = mgmt_addr_or_default(req.addr, &state.default_ps5_addr);
+    let slot = req.slot;
+    let name = req.name;
+    crate::log_info!("profile_set_username: addr={addr} slot={slot}");
+    let r = tokio::task::spawn_blocking(move || {
+        ps5upload_core::profile::profile_set_username(&addr, slot, &name)
+    })
+    .await
+    .map_err(anyhow::Error::from)
+    .and_then(|r| r);
+    match r {
+        Ok(()) => (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response(),
+        Err(e) => json_err(StatusCode::BAD_GATEWAY, format!("{e:#}")).into_response(),
+    }
+}
+
+async fn profile_activate_handler(
+    State(state): State<AppState>,
+    Json(req): Json<ProfileActivateReq>,
+) -> impl IntoResponse {
+    let addr = mgmt_addr_or_default(req.addr, &state.default_ps5_addr);
+    let slot = req.slot;
+    let id = req.id;
+    let r = tokio::task::spawn_blocking(move || {
+        ps5upload_core::profile::profile_activate(&addr, slot, id)
+    })
+    .await
+    .map_err(anyhow::Error::from)
+    .and_then(|r| r);
+    match r {
+        Ok(id) => {
+            (StatusCode::OK, Json(serde_json::json!({ "ok": true, "id": id }))).into_response()
+        }
+        Err(e) => json_err(StatusCode::BAD_GATEWAY, format!("{e:#}")).into_response(),
+    }
+}
+
+async fn profile_clear_slot_handler(
+    State(state): State<AppState>,
+    Json(req): Json<ProfileSlotReq>,
+) -> impl IntoResponse {
+    let addr = mgmt_addr_or_default(req.addr, &state.default_ps5_addr);
+    let slot = req.slot;
+    let r = tokio::task::spawn_blocking(move || {
+        ps5upload_core::profile::profile_clear_slot(&addr, slot)
+    })
+    .await
+    .map_err(anyhow::Error::from)
+    .and_then(|r| r);
+    match r {
+        Ok(()) => (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response(),
+        Err(e) => json_err(StatusCode::BAD_GATEWAY, format!("{e:#}")).into_response(),
+    }
+}
+
+async fn profile_avatar_preview_handler(
+    Json(req): Json<ProfilePreviewReq>,
+) -> impl IntoResponse {
+    let mode = ps5upload_core::profile::SquareMode::parse(req.mode.as_deref().unwrap_or("crop"));
+    let path = req.image_path;
+    let r: Result<Vec<u8>, anyhow::Error> = tokio::task::spawn_blocking(move || {
+        let bytes = std::fs::read(&path)
+            .map_err(|e| anyhow::anyhow!("read image {path}: {e}"))?;
+        ps5upload_core::profile::avatar_preview_png(&bytes, mode)
+    })
+    .await
+    .map_err(anyhow::Error::from)
+    .and_then(|r| r);
+    match r {
+        Ok(png) => {
+            use base64::Engine as _;
+            let b64 = base64::engine::general_purpose::STANDARD.encode(&png);
+            let data_url = format!("data:image/png;base64,{b64}");
+            (StatusCode::OK, Json(serde_json::json!({ "data_url": data_url }))).into_response()
+        }
+        Err(e) => json_err(StatusCode::BAD_REQUEST, format!("{e:#}")).into_response(),
+    }
+}
+
+async fn profile_avatar_handler(
+    State(state): State<AppState>,
+    Json(req): Json<ProfileAvatarReq>,
+) -> impl IntoResponse {
+    let addr = mgmt_addr_or_default(req.addr, &state.default_ps5_addr);
+    let mode = ps5upload_core::profile::SquareMode::parse(req.mode.as_deref().unwrap_or("crop"));
+    let uid = req.uid.unwrap_or(0);
+    let username = req.username;
+    let image_path = req.image_path;
+    let started = std::time::Instant::now();
+    crate::log_info!("profile_avatar: addr={addr} image={image_path} mode={mode:?} uid={uid}");
+    let r = tokio::task::spawn_blocking(move || {
+        let bytes = std::fs::read(&image_path)
+            .map_err(|e| anyhow::anyhow!("read image {image_path}: {e}"))?;
+        ps5upload_core::profile::profile_apply_avatar(
+            &addr,
+            uid,
+            username.as_deref(),
+            &bytes,
+            mode,
+        )
+    })
+    .await
+    .map_err(anyhow::Error::from)
+    .and_then(|r| r);
+    match r {
+        Ok(applied) => {
+            crate::log_info!(
+                "profile_avatar ok: uid={} files={} in {} ms",
+                applied.uid,
+                applied.files_copied,
+                started.elapsed().as_millis()
+            );
+            (StatusCode::OK, Json(applied)).into_response()
+        }
+        Err(e) => {
+            crate::log_warn!(
+                "profile_avatar failed in {} ms: {e:#}",
+                started.elapsed().as_millis()
+            );
+            json_err(StatusCode::BAD_GATEWAY, format!("{e:#}")).into_response()
+        }
+    }
+}
+
 async fn transfer_7z_handler(
     State(state): State<AppState>,
     Json(req): Json<Transfer7zReq>,
@@ -4801,6 +4988,12 @@ async fn run(cfg: EngineConfig) -> anyhow::Result<()> {
         .route("/api/7z/inspect/stream", post(sevenz_inspect_stream_handler))
         .route("/api/transfer/file-list", post(transfer_file_list_handler))
         .route("/api/transfer/download", post(transfer_download_handler))
+        .route("/api/profile/info", get(profile_info_handler))
+        .route("/api/profile/username", post(profile_username_handler))
+        .route("/api/profile/activate", post(profile_activate_handler))
+        .route("/api/profile/clear-slot", post(profile_clear_slot_handler))
+        .route("/api/profile/avatar", post(profile_avatar_handler))
+        .route("/api/profile/avatar/preview", post(profile_avatar_preview_handler))
         .route(
             "/api/transfer/dir-reconcile",
             post(transfer_dir_reconcile_handler),

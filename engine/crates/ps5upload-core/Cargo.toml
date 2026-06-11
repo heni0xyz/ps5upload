@@ -26,3 +26,9 @@ zip = { version = "8", default-features = false, features = ["deflate"] }
 # overwhelming majority of real-world 7z game dumps; an archive using an
 # unsupported codec fails with a clear "re-pack with LZMA2" message.
 sevenz-rust2 = { version = "0.21", default-features = false }
+# Decode user-supplied avatar images (profile.rs). Pure-Rust decoders only
+# (png/jpeg/webp/bmp/gif) — no C deps, so the Android cross-compile stays
+# clean, same care as the zip/sevenz pins above. We hand-roll the bilinear
+# resize + DXT5/DDS encode (ported to match the PS5 reference byte-for-byte),
+# so only the decode + PNG re-encode sides of `image` are exercised.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "bmp", "gif"] }

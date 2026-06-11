@@ -35,6 +35,7 @@
 #include "hw_info.h"
 #include "sys_time.h"
 #include "sys_registry.h"
+#include "profile.h"
 #include "proc_list.h"
 #include "smp_meta.h"
 #include "blake3.h"
@@ -310,6 +311,29 @@ extern int posix_fallocate(int fd, off_t offset, off_t len);
  * and forwards these to the engine's progress sink while it waits for
  * the eventual CommitTxAck. */
 #define FTX2_FRAME_APPLY_PROGRESS           146u
+/* Profile: avatar image + offline-account (username) operations.
+ *   PROFILE_INFO         req {} → ack {"ok":bool,"uid":N,"uid_hex":"0x..",
+ *                        "username":"..","slots":[{"slot":N,"name":"..",
+ *                        "type":"..","flags":N,"id":"0x..","activated":bool}]}
+ *   PROFILE_SET_USERNAME req {"slot":N,"name":".."} → ack {"ok":bool,...}
+ *   PROFILE_ACTIVATE     req {"slot":N,"id"?:".."}  → ack {"ok":bool,...}
+ *   PROFILE_APPLY_AVATAR req {"uid":N}              → ack {"ok":bool,
+ *                        "copied":N} — copies the host-staged DDS/json
+ *                        files from /data/ps5upload/profile/0x<UID>/ into
+ *                        the live profile cache dir (privileged).
+ *   PROFILE_CLEAR_SLOT   req {"slot":N}             → ack {"ok":bool,...}
+ * Registry + /system_data writes need ucred elevation (same envelope as
+ * the time/registry frames). */
+#define FTX2_FRAME_PROFILE_INFO             150u
+#define FTX2_FRAME_PROFILE_INFO_ACK         151u
+#define FTX2_FRAME_PROFILE_SET_USERNAME     152u
+#define FTX2_FRAME_PROFILE_SET_USERNAME_ACK 153u
+#define FTX2_FRAME_PROFILE_ACTIVATE         154u
+#define FTX2_FRAME_PROFILE_ACTIVATE_ACK     155u
+#define FTX2_FRAME_PROFILE_APPLY_AVATAR     156u
+#define FTX2_FRAME_PROFILE_APPLY_AVATAR_ACK 157u
+#define FTX2_FRAME_PROFILE_CLEAR_SLOT       158u
+#define FTX2_FRAME_PROFILE_CLEAR_SLOT_ACK   159u
 /* Where we place mount points. Scoped under /mnt/ps5upload/ so it
  * never collides with mount paths owned by other utilities. */
 #define FS_MOUNT_BASE "/mnt/ps5upload"
@@ -14428,6 +14452,166 @@ static int handle_pkg_install_status(runtime_state_t *state, int client_fd,
  * responsive, and live on port 9114 in their own pthread. Keeping the
  * split strict (ERROR+close on a mismatch) prevents a badly-written
  * client from STREAM_SHARDing onto the mgmt port and DoS'ing it. */
+/* ── Profile (avatar + offline-account) frame handlers ──────────────────── */
+
+static int handle_profile_info(int client_fd, uint64_t trace_id) {
+    char username[64] = {0};
+    uint32_t uid = profile_foreground_user(username, sizeof(username));
+    char uesc[128];
+    json_escape_into(username, uesc, sizeof(uesc));
+
+    char body[4096];
+    int len = snprintf(body, sizeof(body),
+        "{\"ok\":true,\"uid\":%u,\"uid_hex\":\"0x%08X\","
+        "\"username\":\"%s\",\"slots\":[",
+        uid, uid, uesc);
+    if (len < 0 || len >= (int)sizeof(body)) {
+        const char *err = "{\"ok\":false,\"err\":\"format\"}";
+        return send_frame(client_fd, FTX2_FRAME_PROFILE_INFO_ACK, 0,
+                          trace_id, err, strlen(err));
+    }
+    int first = 1;
+    for (int s = 1; s <= PROFILE_SLOT_COUNT; s++) {
+        char name[PROFILE_NAME_MAX] = {0};
+        char type[PROFILE_TYPE_MAX] = {0};
+        uint64_t id = 0;
+        int flags = 0;
+        if (profile_slot_get_name(s, name, NULL) != 0 || !name[0]) continue;
+        profile_slot_get_id(s, &id, NULL);
+        profile_slot_get_type(s, type, NULL);
+        profile_slot_get_flags(s, &flags, NULL);
+        char nesc[PROFILE_NAME_MAX * 2 + 2];
+        char tesc[PROFILE_TYPE_MAX * 2 + 2];
+        json_escape_into(name, nesc, sizeof(nesc));
+        json_escape_into(type, tesc, sizeof(tesc));
+        int activated = (id != 0 && flags == PROFILE_DEFAULT_FLAGS);
+        int n = snprintf(body + len, sizeof(body) - len,
+            "%s{\"slot\":%d,\"name\":\"%s\",\"type\":\"%s\",\"flags\":%d,"
+            "\"id\":\"0x%016llx\",\"activated\":%s}",
+            first ? "" : ",", s, nesc, tesc, flags,
+            (unsigned long long)id, activated ? "true" : "false");
+        if (n <= 0 || n >= (int)(sizeof(body) - len)) break;
+        len += n;
+        first = 0;
+    }
+    /* Close the slots array, then enumerate the console's local users by
+     * scanning /user/home (each subdir is an 8-hex-digit user id — the same
+     * id the profile-cache path uses). The avatar feature targets one of
+     * these, so it works even when no user is in the foreground (the daemon
+     * has no session, so sceUserServiceGetForegroundUser often returns 0). */
+    int mid = snprintf(body + len, sizeof(body) - len, "],\"users\":[");
+    if (mid > 0 && mid < (int)(sizeof(body) - len)) len += mid;
+    DIR *ud = opendir("/user/home");
+    if (ud) {
+        int ufirst = 1;
+        struct dirent *ue;
+        while ((ue = readdir(ud)) != NULL) {
+            /* Accept exactly 8 hex chars (a user id dir). */
+            const char *nm = ue->d_name;
+            int hexlen = 0;
+            while (nm[hexlen]) {
+                char hc = nm[hexlen];
+                int is_hex = (hc >= '0' && hc <= '9') ||
+                             (hc >= 'a' && hc <= 'f') ||
+                             (hc >= 'A' && hc <= 'F');
+                if (!is_hex) break;
+                hexlen++;
+            }
+            if (hexlen != 8 || nm[8] != '\0') continue;
+            uint32_t uuid = (uint32_t)strtoul(nm, NULL, 16);
+            char uname[64] = {0};
+            char uesc2[128];
+            profile_user_name(uuid, uname, sizeof(uname));
+            json_escape_into(uname, uesc2, sizeof(uesc2));
+            int un = snprintf(body + len, sizeof(body) - len,
+                "%s{\"uid\":%u,\"uid_hex\":\"0x%08X\",\"username\":\"%s\"}",
+                ufirst ? "" : ",", uuid, uuid, uesc2);
+            if (un <= 0 || un >= (int)(sizeof(body) - len)) break;
+            len += un;
+            ufirst = 0;
+        }
+        closedir(ud);
+    }
+    int tail = snprintf(body + len, sizeof(body) - len, "]}");
+    if (tail > 0 && tail < (int)(sizeof(body) - len)) len += tail;
+    return send_frame(client_fd, FTX2_FRAME_PROFILE_INFO_ACK, 0,
+                      trace_id, body, (uint64_t)len);
+}
+
+static int handle_profile_set_username(int client_fd, uint64_t trace_id,
+                                       const char *body) {
+    int slot = (int)extract_json_uint64_field(body, "slot");
+    char name[PROFILE_NAME_MAX] = {0};
+    extract_json_string_field(body, "name", name, sizeof(name));
+    uint32_t err = 0;
+    int rc = -1;
+    if (slot >= 1 && slot <= PROFILE_SLOT_COUNT && name[0]) {
+        rc = profile_slot_set_name(slot, name, &err);
+    }
+    char nesc[PROFILE_NAME_MAX * 2 + 2];
+    json_escape_into(name, nesc, sizeof(nesc));
+    char resp[256];
+    int len = snprintf(resp, sizeof(resp),
+        "{\"ok\":%s,\"slot\":%d,\"name\":\"%s\",\"err_code\":%u}",
+        rc == 0 ? "true" : "false", slot, nesc, err);
+    return send_frame(client_fd, FTX2_FRAME_PROFILE_SET_USERNAME_ACK, 0,
+                      trace_id, resp, (uint64_t)len);
+}
+
+static int handle_profile_activate(int client_fd, uint64_t trace_id,
+                                   const char *body) {
+    int slot = (int)extract_json_uint64_field(body, "slot");
+    /* Optional explicit id (hex "0x.." or decimal); 0/absent → derive. */
+    char idstr[32] = {0};
+    extract_json_string_field(body, "id", idstr, sizeof(idstr));
+    uint64_t id = 0;
+    if (idstr[0]) {
+        if (idstr[0] == '0' && (idstr[1] == 'x' || idstr[1] == 'X')) {
+            id = strtoull(idstr + 2, NULL, 16);
+        } else {
+            id = strtoull(idstr, NULL, 0);
+        }
+    }
+    int rc = (slot >= 1 && slot <= PROFILE_SLOT_COUNT)
+                 ? profile_slot_activate(slot, id)
+                 : -1;
+    uint64_t actual = 0;
+    profile_slot_get_id(slot, &actual, NULL);
+    char resp[160];
+    int len = snprintf(resp, sizeof(resp),
+        "{\"ok\":%s,\"slot\":%d,\"id\":\"0x%016llx\"}",
+        rc == 0 ? "true" : "false", slot, (unsigned long long)actual);
+    return send_frame(client_fd, FTX2_FRAME_PROFILE_ACTIVATE_ACK, 0,
+                      trace_id, resp, (uint64_t)len);
+}
+
+static int handle_profile_clear_slot(int client_fd, uint64_t trace_id,
+                                     const char *body) {
+    int slot = (int)extract_json_uint64_field(body, "slot");
+    int rc = (slot >= 1 && slot <= PROFILE_SLOT_COUNT)
+                 ? profile_slot_clear(slot)
+                 : -1;
+    char resp[96];
+    int len = snprintf(resp, sizeof(resp), "{\"ok\":%s,\"slot\":%d}",
+                       rc == 0 ? "true" : "false", slot);
+    return send_frame(client_fd, FTX2_FRAME_PROFILE_CLEAR_SLOT_ACK, 0,
+                      trace_id, resp, (uint64_t)len);
+}
+
+static int handle_profile_apply_avatar(int client_fd, uint64_t trace_id,
+                                       const char *body) {
+    uint32_t uid = (uint32_t)extract_json_uint64_field(body, "uid");
+    if (uid == 0) uid = profile_foreground_user(NULL, 0);
+    int copied = 0;
+    int rc = (uid != 0) ? profile_apply_avatar(uid, &copied) : -1;
+    char resp[160];
+    int len = snprintf(resp, sizeof(resp),
+        "{\"ok\":%s,\"uid\":%u,\"uid_hex\":\"0x%08X\",\"copied\":%d}",
+        rc == 0 ? "true" : "false", uid, uid, copied);
+    return send_frame(client_fd, FTX2_FRAME_PROFILE_APPLY_AVATAR_ACK, 0,
+                      trace_id, resp, (uint64_t)len);
+}
+
 static int is_transfer_frame_type(uint16_t t) {
     return t == FTX2_FRAME_BEGIN_TX
         || t == FTX2_FRAME_STREAM_SHARD
@@ -15894,6 +16078,24 @@ abort_done:
     }
     if (hdr.frame_type == FTX2_FRAME_SYSLOG_TAIL) {
         return handle_syslog_tail(state, client_fd, hdr.trace_id);
+    }
+    if (hdr.frame_type == FTX2_FRAME_PROFILE_INFO) {
+        return handle_profile_info(client_fd, hdr.trace_id);
+    }
+    if (hdr.frame_type == FTX2_FRAME_PROFILE_SET_USERNAME) {
+        return handle_profile_set_username(client_fd, hdr.trace_id,
+                                           request_body);
+    }
+    if (hdr.frame_type == FTX2_FRAME_PROFILE_ACTIVATE) {
+        return handle_profile_activate(client_fd, hdr.trace_id, request_body);
+    }
+    if (hdr.frame_type == FTX2_FRAME_PROFILE_APPLY_AVATAR) {
+        return handle_profile_apply_avatar(client_fd, hdr.trace_id,
+                                           request_body);
+    }
+    if (hdr.frame_type == FTX2_FRAME_PROFILE_CLEAR_SLOT) {
+        return handle_profile_clear_slot(client_fd, hdr.trace_id,
+                                         request_body);
     }
     if (hdr.frame_type == FTX2_FRAME_PKG_INSTALL) {
         return handle_pkg_install(state, client_fd, hdr.trace_id,

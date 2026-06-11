@@ -328,6 +328,68 @@ fn do_transfer_7z(addr: &str, tx_id_hex: &str, dest_root: &str, archive_path: &s
     do_query_tx(&to_mgmt_addr(addr), tx_id_hex)
 }
 
+fn do_profile_info(addr: &str) -> Result<()> {
+    let info = ps5upload_core::profile::profile_info(&to_mgmt_addr(addr))?;
+    println!(
+        "foreground user: uid={} ({}) name={:?}",
+        info.uid, info.uid_hex, info.username
+    );
+    println!("local users ({}):", info.users.len());
+    for u in &info.users {
+        println!("  {} uid={} name={:?}", u.uid_hex, u.uid, u.username);
+    }
+    if info.slots.is_empty() {
+        println!("(no offline-account name slots populated)");
+    }
+    for s in &info.slots {
+        println!(
+            "  slot {:>2}: name={:?} type={:?} flags={} id={} activated={}",
+            s.slot, s.name, s.type_, s.flags, s.id, s.activated
+        );
+    }
+    Ok(())
+}
+
+fn do_profile_set_username(addr: &str, slot: i32, name: &str) -> Result<()> {
+    ps5upload_core::profile::profile_set_username(&to_mgmt_addr(addr), slot, name)?;
+    println!("renamed slot {slot} -> {name:?}");
+    Ok(())
+}
+
+fn do_profile_activate(addr: &str, slot: i32, id: Option<u64>) -> Result<()> {
+    let id = ps5upload_core::profile::profile_activate(&to_mgmt_addr(addr), slot, id)?;
+    println!("activated slot {slot}, id={id}");
+    Ok(())
+}
+
+fn do_profile_clear_slot(addr: &str, slot: i32) -> Result<()> {
+    ps5upload_core::profile::profile_clear_slot(&to_mgmt_addr(addr), slot)?;
+    println!("cleared slot {slot}");
+    Ok(())
+}
+
+fn do_profile_apply_avatar(
+    addr: &str,
+    image_path: &str,
+    mode: &str,
+    uid: Option<u32>,
+) -> Result<()> {
+    let bytes = std::fs::read(image_path)?;
+    let mode = ps5upload_core::profile::SquareMode::parse(mode);
+    let applied = ps5upload_core::profile::profile_apply_avatar(
+        &to_mgmt_addr(addr),
+        uid.unwrap_or(0),
+        None,
+        &bytes,
+        mode,
+    )?;
+    println!(
+        "avatar applied: uid={} username={:?} files_copied={}",
+        applied.uid, applied.username, applied.files_copied
+    );
+    Ok(())
+}
+
 fn do_send_shard(addr: &str, tx_id_hex: &str, shard_seq: u64) -> Result<()> {
     let tx_id = parse_tx_id(tx_id_hex)?;
 
@@ -395,6 +457,11 @@ fn usage() -> ! {
     eprintln!("  power        tick|standby|reboot|shutdown  (mgmt port; tick = keep-awake)");
     eprintln!("  apps                       list titles present in app.db");
     eprintln!("  saves                      list save-data folders + sizes (:9114)");
+    eprintln!("  profile-info                       foreground user + account name slots (:9114)");
+    eprintln!("  profile-set-username SLOT NAME     rename an account-name slot");
+    eprintln!("  profile-activate     SLOT [ID_HEX] activate a slot (derive id if omitted)");
+    eprintln!("  profile-clear-slot   SLOT          de-activate a slot (zero id+flags)");
+    eprintln!("  profile-apply-avatar IMAGE [crop|fit]  set the foreground user's avatar");
     eprintln!("  shell       SESSION CWD CMD...   run shell command via :9114");
     std::process::exit(1);
 }
@@ -569,6 +636,42 @@ fn main() -> Result<()> {
         "hw-temps" => do_hw_temps(addr, false),
         "hw-temps-x" => do_hw_temps(addr, true),
         "saves" => do_saves(addr),
+        "profile-info" => do_profile_info(addr),
+        "profile-set-username" => {
+            let slot: i32 = rest
+                .get(1)
+                .and_then(|s| s.parse().ok())
+                .unwrap_or_else(|| usage());
+            let name = rest.get(2).map(|s| s.as_str()).unwrap_or_else(|| usage());
+            do_profile_set_username(addr, slot, name)
+        }
+        "profile-activate" => {
+            let slot: i32 = rest
+                .get(1)
+                .and_then(|s| s.parse().ok())
+                .unwrap_or_else(|| usage());
+            let id = rest.get(2).and_then(|s| {
+                let s = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")).unwrap_or(s);
+                u64::from_str_radix(s, 16).ok()
+            });
+            do_profile_activate(addr, slot, id)
+        }
+        "profile-clear-slot" => {
+            let slot: i32 = rest
+                .get(1)
+                .and_then(|s| s.parse().ok())
+                .unwrap_or_else(|| usage());
+            do_profile_clear_slot(addr, slot)
+        }
+        "profile-apply-avatar" => {
+            let image = rest.get(1).map(|s| s.as_str()).unwrap_or_else(|| usage());
+            let mode = rest.get(2).map(|s| s.as_str()).unwrap_or("crop");
+            let uid = rest.get(3).and_then(|s| {
+                let s = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")).unwrap_or(s);
+                u32::from_str_radix(s, 16).ok()
+            });
+            do_profile_apply_avatar(addr, image, mode, uid)
+        }
         "shell" => {
             let session = rest.get(1).map(|s| s.as_str()).unwrap_or_else(|| usage());
             let cwd = rest.get(2).map(|s| s.as_str()).unwrap_or_else(|| usage());

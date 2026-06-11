@@ -158,6 +158,111 @@ export async function sevenzInspectStream(
   });
 }
 
+// ─── Profile (avatar + offline-account username) ──────────────────────────
+
+/** One offline-account name slot. */
+export interface ProfileSlot {
+  slot: number;
+  name: string;
+  type: string;
+  flags: number;
+  id: string;
+  activated: boolean;
+}
+
+/** A local console user (from /user/home enumeration). */
+export interface ProfileUser {
+  uid: number;
+  uid_hex: string;
+  username: string;
+}
+
+/** Foreground user + local users + account-name slots. */
+export interface ProfileInfo {
+  ok: boolean;
+  uid: number;
+  uid_hex: string;
+  username: string;
+  users: ProfileUser[];
+  slots: ProfileSlot[];
+}
+
+export type SquareMode = "crop" | "fit";
+
+/** Read the foreground user, the console's local users, and the
+ *  offline-account name slots. */
+export async function profileInfo(addr?: string): Promise<ProfileInfo> {
+  return invoke<ProfileInfo>("profile_info", { req: { addr: addr ?? null } });
+}
+
+/** Rename an offline-account name slot (1-based). */
+export async function profileSetUsername(
+  slot: number,
+  name: string,
+  addr?: string,
+): Promise<void> {
+  await invoke("profile_set_username", {
+    req: { addr: addr ?? null, slot, name },
+  });
+}
+
+/** Activate an offline-account slot (id derived from the name if omitted). */
+export async function profileActivate(
+  slot: number,
+  id?: number | null,
+  addr?: string,
+): Promise<{ ok: boolean; id: string }> {
+  return invoke("profile_activate", {
+    req: { addr: addr ?? null, slot, id: id ?? null },
+  });
+}
+
+/** De-activate (clear id+flags) an offline-account slot. */
+export async function profileClearSlot(
+  slot: number,
+  addr?: string,
+): Promise<void> {
+  await invoke("profile_clear_slot", { req: { addr: addr ?? null, slot } });
+}
+
+/** Render a 440² crop/fit preview of `imagePath`. Returns a PNG data URL. */
+export async function profileAvatarPreview(
+  imagePath: string,
+  mode: SquareMode,
+): Promise<string> {
+  const res = await invoke<{ data_url: string }>("profile_avatar_preview", {
+    req: { image_path: imagePath, mode },
+  });
+  return res.data_url;
+}
+
+/** Result of an avatar apply: which user it landed on + how many files. */
+export interface AvatarApplied {
+  uid: number;
+  username: string;
+  files_copied: number;
+}
+
+/** Build + stage + apply a profile avatar from a host image file. Targets
+ *  `uid` (0 → resolve the foreground user host-side). */
+export async function profileApplyAvatar(
+  imagePath: string,
+  mode: SquareMode,
+  uid?: number | null,
+  username?: string | null,
+  addr?: string,
+): Promise<AvatarApplied> {
+  return invoke<AvatarApplied>("profile_apply_avatar", {
+    req: {
+      addr: addr ?? null,
+      image_path: imagePath,
+      mode,
+      uid: uid ?? null,
+      username: username ?? null,
+    },
+  });
+}
+
 /**
  * Send the payload ELF to the PS5's ELF loader.
  *

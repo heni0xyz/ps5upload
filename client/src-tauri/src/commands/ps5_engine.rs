@@ -404,6 +404,124 @@ pub async fn sevenz_inspect_stream(
     post_sse_inspect_with_watchdog(&url, &body, on_progress).await
 }
 
+// ─── Profile (avatar + offline-account username) ────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct ProfileAddrReq {
+    #[serde(default)]
+    pub addr: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ProfileUsernameReq {
+    #[serde(default)]
+    pub addr: Option<String>,
+    pub slot: i32,
+    pub name: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ProfileActivateReq {
+    #[serde(default)]
+    pub addr: Option<String>,
+    pub slot: i32,
+    #[serde(default)]
+    pub id: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ProfileSlotReq {
+    #[serde(default)]
+    pub addr: Option<String>,
+    pub slot: i32,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ProfileAvatarReq {
+    #[serde(default)]
+    pub addr: Option<String>,
+    pub image_path: String,
+    #[serde(default)]
+    pub mode: Option<String>,
+    #[serde(default)]
+    pub uid: Option<u32>,
+    #[serde(default)]
+    pub username: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ProfilePreviewReq {
+    pub image_path: String,
+    #[serde(default)]
+    pub mode: Option<String>,
+}
+
+/// Foreground user + local users + offline-account name slots.
+/// Proxies `/api/profile/info`.
+#[tauri::command]
+pub async fn profile_info(req: ProfileAddrReq) -> Result<JsonValue, String> {
+    let base = engine::url();
+    let url = match req.addr {
+        Some(a) => format!("{base}/api/profile/info?addr={}", urlencoding(&a)),
+        None => format!("{base}/api/profile/info"),
+    };
+    get_json(&url).await
+}
+
+/// Rename an offline-account name slot. Proxies `/api/profile/username`.
+#[tauri::command]
+pub async fn profile_set_username(req: ProfileUsernameReq) -> Result<JsonValue, String> {
+    let base = engine::url();
+    let url = format!("{base}/api/profile/username");
+    let body = serde_json::json!({ "addr": req.addr, "slot": req.slot, "name": req.name });
+    post_json(&url, &body).await
+}
+
+/// Activate an offline-account slot. Proxies `/api/profile/activate`.
+#[tauri::command]
+pub async fn profile_activate(req: ProfileActivateReq) -> Result<JsonValue, String> {
+    let base = engine::url();
+    let url = format!("{base}/api/profile/activate");
+    let body = serde_json::json!({ "addr": req.addr, "slot": req.slot, "id": req.id });
+    post_json(&url, &body).await
+}
+
+/// De-activate (clear id+flags) an offline-account slot.
+/// Proxies `/api/profile/clear-slot`.
+#[tauri::command]
+pub async fn profile_clear_slot(req: ProfileSlotReq) -> Result<JsonValue, String> {
+    let base = engine::url();
+    let url = format!("{base}/api/profile/clear-slot");
+    let body = serde_json::json!({ "addr": req.addr, "slot": req.slot });
+    post_json(&url, &body).await
+}
+
+/// Render a 440² crop/fit preview (returns `{ "data_url": "data:image/png;..." }`).
+/// Proxies `/api/profile/avatar/preview`.
+#[tauri::command]
+pub async fn profile_avatar_preview(req: ProfilePreviewReq) -> Result<JsonValue, String> {
+    let base = engine::url();
+    let url = format!("{base}/api/profile/avatar/preview");
+    let body = serde_json::json!({ "image_path": req.image_path, "mode": req.mode });
+    post_json(&url, &body).await
+}
+
+/// Build + stage + apply a profile avatar (long-running: decode/resize/encode +
+/// stage 11 files + privileged copy). Proxies `/api/profile/avatar`.
+#[tauri::command]
+pub async fn profile_apply_avatar(req: ProfileAvatarReq) -> Result<JsonValue, String> {
+    let base = engine::url();
+    let url = format!("{base}/api/profile/avatar");
+    let body = serde_json::json!({
+        "addr": req.addr,
+        "image_path": req.image_path,
+        "mode": req.mode,
+        "uid": req.uid,
+        "username": req.username,
+    });
+    post_json_long(&url, &body).await
+}
+
 /// How long to wait for ANY SSE chunk (event or heartbeat) before
 /// declaring the engine wedged. The engine's `KeepAlive::interval(1s)`
 /// makes 30 s = 30× the expected heartbeat cadence, which leaves room

@@ -1754,6 +1754,40 @@ upload_register_after_title: "Add to PS5 home screen when done",
 upload_register_after_desc: "Registers the game with the PS5 right after the upload finishes, so it's ready to launch — no Library visit needed. If this step fails the upload itself is unaffected and you can still add it from the Library.",
 upload_done_next_hint: "Next: open the Library to register or mount it so it shows up on the PS5 home screen.",
 upload_done_open_library: "Open Library",
+
+// Profile (avatar + offline-account username)
+profile: "Profile",
+"profile.title": "Profile",
+"profile.description":
+  "Change the console's profile avatar and the offline-account username.",
+"profile.avatar.title": "Avatar",
+"profile.avatar.pick": "Choose image…",
+"profile.avatar.imageFilter": "Image",
+"profile.avatar.previewAlt": "Avatar preview",
+"profile.avatar.crop": "Crop",
+"profile.avatar.fit": "Fit",
+"profile.avatar.cropHint":
+  "Center-crop to a square (fills the frame, trims the long edges).",
+"profile.avatar.fitHint":
+  "Fit the whole image into a square (adds transparent bars).",
+"profile.avatar.targetUser": "Apply to user",
+"profile.avatar.foreground": "active",
+"profile.avatar.apply": "Apply avatar",
+"profile.avatar.applied":
+  "Avatar applied ({n} files written). It may take a moment to refresh on the console.",
+"profile.avatar.confirmTitle": "Change avatar?",
+"profile.avatar.confirmBody":
+  "Replace the profile avatar for {user}? The current avatar is overwritten.",
+"profile.avatar.noUser":
+  "No console user found. Sign in to a profile on the PS5, then refresh.",
+"profile.username.title": "Username (offline accounts)",
+"profile.username.description":
+  "Rename an activated offline-account slot. These slots are only present when offline accounts have been set up on the console.",
+"profile.username.empty": "No offline-account slots",
+"profile.username.emptyHint": "Nothing to rename here on this console.",
+"profile.username.slot": "Slot {n}",
+"profile.username.activated": "active",
+"profile.username.save": "Save",
 };
 
 export default en;

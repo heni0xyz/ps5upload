@@ -13,6 +13,9 @@
 typedef int (*regmgr_get_int_fn)(uint32_t key, int *out_val);
 typedef int (*regmgr_set_int_fn)(uint32_t key, int val);
 typedef int (*regmgr_get_str_fn)(uint32_t key, char *buf, int buf_size);
+typedef int (*regmgr_set_str_fn)(uint32_t key, const char *buf, size_t len);
+typedef int (*regmgr_get_bin_fn)(uint32_t key, void *buf, size_t buf_size);
+typedef int (*regmgr_set_bin_fn)(uint32_t key, const void *buf, size_t len);
 
 /* libSceRtc has its own NID space — separate dlsym site. The "tick"
  * Sony talks about is a uint64 of 1-microsecond ticks since
@@ -28,6 +31,9 @@ typedef int (*rtc_get_network_tick_fn)(uint64_t *out_tick);
 static regmgr_get_int_fn       g_get_int = NULL;
 static regmgr_set_int_fn       g_set_int = NULL;
 static regmgr_get_str_fn       g_get_str = NULL;
+static regmgr_set_str_fn       g_set_str = NULL;
+static regmgr_get_bin_fn       g_get_bin = NULL;
+static regmgr_set_bin_fn       g_set_bin = NULL;
 static rtc_get_network_tick_fn g_rtc_get_ntp_tick = NULL;
 static pthread_once_t          g_resolve_once = PTHREAD_ONCE_INIT;
 
@@ -45,6 +51,12 @@ static void resolve_impl(void) {
                                           "sceRegMgrSetInt");
     g_get_str = (regmgr_get_str_fn)dlsym(RTLD_DEFAULT,
                                           "sceRegMgrGetStr");
+    g_set_str = (regmgr_set_str_fn)dlsym(RTLD_DEFAULT,
+                                          "sceRegMgrSetStr");
+    g_get_bin = (regmgr_get_bin_fn)dlsym(RTLD_DEFAULT,
+                                          "sceRegMgrGetBin");
+    g_set_bin = (regmgr_set_bin_fn)dlsym(RTLD_DEFAULT,
+                                          "sceRegMgrSetBin");
     g_rtc_get_ntp_tick = (rtc_get_network_tick_fn)dlsym(
         RTLD_DEFAULT, "sceRtcGetCurrentNetworkTick");
 }
@@ -110,6 +122,57 @@ int sys_registry_get_str(uint32_t key,
      * inside buf_size, but a max-length string in a too-small buffer
      * is a real ambiguity in their documentation — pin it. */
     buf[buf_size - 1] = '\0';
+    if (out_err_code) *out_err_code = (uint32_t)rc;
+    return rc == 0 ? 0 : -1;
+}
+
+int sys_registry_set_str(uint32_t key,
+                          const char *buf, size_t len,
+                          uint32_t *out_err_code) {
+    if (!buf) {
+        if (out_err_code) *out_err_code = SYS_REGISTRY_ERR_NULL_ARG;
+        return -1;
+    }
+    resolve_once();
+    if (!g_set_str) {
+        if (out_err_code) *out_err_code = SYS_REGISTRY_ERR_NO_SYMBOL;
+        return -1;
+    }
+    int rc = g_set_str(key, buf, len);
+    if (out_err_code) *out_err_code = (uint32_t)rc;
+    return rc == 0 ? 0 : -1;
+}
+
+int sys_registry_get_bin(uint32_t key,
+                          void *buf, size_t buf_size,
+                          uint32_t *out_err_code) {
+    if (!buf || buf_size == 0) {
+        if (out_err_code) *out_err_code = SYS_REGISTRY_ERR_NULL_ARG;
+        return -1;
+    }
+    resolve_once();
+    if (!g_get_bin) {
+        if (out_err_code) *out_err_code = SYS_REGISTRY_ERR_NO_SYMBOL;
+        return -1;
+    }
+    int rc = g_get_bin(key, buf, buf_size);
+    if (out_err_code) *out_err_code = (uint32_t)rc;
+    return rc == 0 ? 0 : -1;
+}
+
+int sys_registry_set_bin(uint32_t key,
+                          const void *buf, size_t buf_size,
+                          uint32_t *out_err_code) {
+    if (!buf || buf_size == 0) {
+        if (out_err_code) *out_err_code = SYS_REGISTRY_ERR_NULL_ARG;
+        return -1;
+    }
+    resolve_once();
+    if (!g_set_bin) {
+        if (out_err_code) *out_err_code = SYS_REGISTRY_ERR_NO_SYMBOL;
+        return -1;
+    }
+    int rc = g_set_bin(key, buf, buf_size);
     if (out_err_code) *out_err_code = (uint32_t)rc;
     return rc == 0 ? 0 : -1;
 }
