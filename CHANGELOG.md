@@ -4,6 +4,20 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 3.1.3
+
+- **Each PS5 keeps its own upload, even when you switch.** Pick a file and set
+  up an upload for one console, hop to another console in the top tabs, then
+  hop back — your picked file, password, and options are right where you left
+  them. The cut/copy clipboard and your place in the File System are remembered
+  per console too, so switching never loses what you were doing.
+- **No more accidental reloads.** Right-clicking no longer pops the WebView's
+  Back / Reload / Inspect menu (which could restart the app mid-upload and make
+  it look like everything stopped), and the reload shortcuts are blocked in the
+  packaged app. Right-click still works inside text fields for copy/paste.
+
+---
+
 ## 3.1.2
 
 - **Windows packaging fixed.** The new `.rar` support pulled in a library that
