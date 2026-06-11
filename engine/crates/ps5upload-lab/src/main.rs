@@ -688,7 +688,10 @@ fn main() -> Result<()> {
         }
         "profile-rename-user" => {
             let uid = rest.get(1).and_then(|s| {
-                let s = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")).unwrap_or(s);
+                let s = s
+                    .strip_prefix("0x")
+                    .or_else(|| s.strip_prefix("0X"))
+                    .unwrap_or(s);
                 u32::from_str_radix(s, 16).ok()
             });
             let name = rest.get(2).map(|s| s.as_str()).unwrap_or_else(|| usage());
@@ -703,7 +706,10 @@ fn main() -> Result<()> {
                 .and_then(|s| s.parse().ok())
                 .unwrap_or_else(|| usage());
             let id = rest.get(2).and_then(|s| {
-                let s = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")).unwrap_or(s);
+                let s = s
+                    .strip_prefix("0x")
+                    .or_else(|| s.strip_prefix("0X"))
+                    .unwrap_or(s);
                 u64::from_str_radix(s, 16).ok()
             });
             do_profile_activate(addr, slot, id)
@@ -719,7 +725,10 @@ fn main() -> Result<()> {
             let image = rest.get(1).map(|s| s.as_str()).unwrap_or_else(|| usage());
             let mode = rest.get(2).map(|s| s.as_str()).unwrap_or("crop");
             let uid = rest.get(3).and_then(|s| {
-                let s = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")).unwrap_or(s);
+                let s = s
+                    .strip_prefix("0x")
+                    .or_else(|| s.strip_prefix("0X"))
+                    .unwrap_or(s);
                 u32::from_str_radix(s, 16).ok()
             });
             do_profile_apply_avatar(addr, image, mode, uid)

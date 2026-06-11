@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   LibraryBig,
   RefreshCw,
@@ -2771,7 +2772,13 @@ function GameDetailsModal({
 
   const displayTitle = info?.title ?? meta?.title ?? entry.name;
 
-  return (
+  // Render into document.body so the full-screen overlay is positioned to the
+  // VIEWPORT, not whichever transformed/overflow-clipped ancestor it happens to
+  // sit inside (the route's .anim-screen container, scroll regions, etc.). On
+  // small Android viewports the in-tree modal landed off-screen, so opening it
+  // looked like nothing happened. Belt-and-suspenders with the .anim-screen
+  // fill-mode fix in index.css.
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
       onClick={onCancel}
@@ -2896,7 +2903,8 @@ function GameDetailsModal({
           </Button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

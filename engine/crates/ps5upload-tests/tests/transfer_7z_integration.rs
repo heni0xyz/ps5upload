@@ -120,7 +120,9 @@ fn transfer_7z_solid_multi_file_byte_correct() {
     let st = srv.state.lock().unwrap();
     assert_eq!(st.txs.get(&result.tx_id_hex).unwrap().state, "committed");
     assert_eq!(
-        st.applied.get("/data/g/game/eboot.bin").map(|v| v.as_slice()),
+        st.applied
+            .get("/data/g/game/eboot.bin")
+            .map(|v| v.as_slice()),
         Some(big_a.as_slice())
     );
     assert_eq!(
@@ -130,7 +132,9 @@ fn transfer_7z_solid_multi_file_byte_correct() {
         Some(b"{\"titleId\":\"PPSA17905\"}".as_ref())
     );
     assert_eq!(
-        st.applied.get("/data/g/game/data/big.pak").map(|v| v.as_slice()),
+        st.applied
+            .get("/data/g/game/data/big.pak")
+            .map(|v| v.as_slice()),
         Some(big_b.as_slice())
     );
 }
@@ -148,11 +152,17 @@ fn transfer_7z_large_entry_spans_many_shards() {
     cfg.shard_size = 8 * 1024; // 8 KiB → ~62 shards for one entry
 
     let result = transfer_7z_with_opts(&cfg, random_tx_id(), "/data/img", &arc.0, 0).unwrap();
-    assert!(result.shards_sent >= 60, "expected many shards, got {}", result.shards_sent);
+    assert!(
+        result.shards_sent >= 60,
+        "expected many shards, got {}",
+        result.shards_sent
+    );
 
     let st = srv.state.lock().unwrap();
     assert_eq!(
-        st.applied.get("/data/img/PPSA17905.exfat").map(|v| v.as_slice()),
+        st.applied
+            .get("/data/img/PPSA17905.exfat")
+            .map(|v| v.as_slice()),
         Some(payload.as_slice())
     );
 }

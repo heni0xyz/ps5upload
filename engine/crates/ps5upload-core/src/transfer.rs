@@ -3522,11 +3522,12 @@ pub fn sevenz_plan_preview_with_progress(
             continue;
         }
         let Some(rel) = sanitize_7z_entry(e.name()) else {
-            bail!("7z contains an unsafe or invalid entry path: {:?}", e.name());
+            bail!(
+                "7z contains an unsafe or invalid entry path: {:?}",
+                e.name()
+            );
         };
-        if !excludes.is_empty()
-            && crate::excludes::is_excluded_strings(Path::new(&rel), excludes)
-        {
+        if !excludes.is_empty() && crate::excludes::is_excluded_strings(Path::new(&rel), excludes) {
             continue;
         }
         total += e.size();
@@ -3579,7 +3580,10 @@ pub fn transfer_7z_with_opts(
             continue;
         }
         let Some(rel) = sanitize_7z_entry(e.name()) else {
-            bail!("7z contains an unsafe or invalid entry path: {:?}", e.name());
+            bail!(
+                "7z contains an unsafe or invalid entry path: {:?}",
+                e.name()
+            );
         };
         if !cfg.excludes.is_empty()
             && crate::excludes::is_excluded_strings(Path::new(&rel), &cfg.excludes)
@@ -3884,7 +3888,10 @@ mod rar_support {
                 continue;
             }
             let Some(rel) = sanitize_rar_entry(&e.filename) else {
-                bail!("rar contains an unsafe or invalid entry path: {:?}", e.filename);
+                bail!(
+                    "rar contains an unsafe or invalid entry path: {:?}",
+                    e.filename
+                );
             };
             if !excludes.is_empty()
                 && crate::excludes::is_excluded_strings(Path::new(&rel), excludes)
@@ -3924,16 +3931,23 @@ mod rar_support {
             };
             let entry_name = header.entry().filename.clone();
             if header.entry().is_directory() {
-                open = header.skip().map_err(|e| map_rar_err("skip rar entry", e))?;
+                open = header
+                    .skip()
+                    .map_err(|e| map_rar_err("skip rar entry", e))?;
                 continue;
             }
             let Some(rel) = sanitize_rar_entry(&entry_name) else {
-                bail!("rar contains an unsafe or invalid entry path: {:?}", entry_name);
+                bail!(
+                    "rar contains an unsafe or invalid entry path: {:?}",
+                    entry_name
+                );
             };
             if !excludes.is_empty()
                 && crate::excludes::is_excluded_strings(Path::new(&rel), excludes)
             {
-                open = header.skip().map_err(|e| map_rar_err("skip rar entry", e))?;
+                open = header
+                    .skip()
+                    .map_err(|e| map_rar_err("skip rar entry", e))?;
                 continue;
             }
             let dest = dest_dir.join(&rel);
@@ -4004,8 +4018,7 @@ mod rar_support {
         // password "unrar", first entry ".gitignore" = "target\nCargo.lock\n".
         #[test]
         fn content_encrypted_lists_names_without_password() {
-            let (_total, files) =
-                rar_plan_preview(&fixture("crypted.rar"), None, &[]).unwrap();
+            let (_total, files) = rar_plan_preview(&fixture("crypted.rar"), None, &[]).unwrap();
             assert!(
                 files.iter().any(|(p, _)| p == ".gitignore"),
                 "names should be listable without a password: {files:?}"
@@ -4017,8 +4030,7 @@ mod rar_support {
             let tmp = std::env::temp_dir().join("ps5u-rar-test-nopw");
             let _ = std::fs::remove_dir_all(&tmp);
             std::fs::create_dir_all(&tmp).unwrap();
-            let err = extract_rar_to_dir(&fixture("crypted.rar"), None, &tmp, &[])
-                .unwrap_err();
+            let err = extract_rar_to_dir(&fixture("crypted.rar"), None, &tmp, &[]).unwrap_err();
             assert!(
                 err.to_string().contains("rar_password_required"),
                 "got: {err}"
@@ -4031,10 +4043,8 @@ mod rar_support {
             let tmp = std::env::temp_dir().join("ps5u-rar-test-pw");
             let _ = std::fs::remove_dir_all(&tmp);
             std::fs::create_dir_all(&tmp).unwrap();
-            extract_rar_to_dir(&fixture("crypted.rar"), Some("unrar"), &tmp, &[])
-                .unwrap();
-            let content =
-                std::fs::read_to_string(tmp.join(".gitignore")).unwrap();
+            extract_rar_to_dir(&fixture("crypted.rar"), Some("unrar"), &tmp, &[]).unwrap();
+            let content = std::fs::read_to_string(tmp.join(".gitignore")).unwrap();
             assert_eq!(content, "target\nCargo.lock\n");
             let _ = std::fs::remove_dir_all(&tmp);
         }
@@ -4043,8 +4053,7 @@ mod rar_support {
         // password "password".
         #[test]
         fn header_encrypted_list_needs_password() {
-            let err = inspect_rar(&fixture("comment-hpw-password.rar"), None)
-                .unwrap_err();
+            let err = inspect_rar(&fixture("comment-hpw-password.rar"), None).unwrap_err();
             assert!(
                 err.to_string().contains("rar_password_required"),
                 "got: {err}"
@@ -4053,11 +4062,7 @@ mod rar_support {
 
         #[test]
         fn header_encrypted_inspect_with_password() {
-            let ins = inspect_rar(
-                &fixture("comment-hpw-password.rar"),
-                Some("password"),
-            )
-            .unwrap();
+            let ins = inspect_rar(&fixture("comment-hpw-password.rar"), Some("password")).unwrap();
             assert!(ins.file_count >= 1);
             assert!(ins.total_uncompressed > 0);
         }
@@ -4074,24 +4079,17 @@ mod rar_support {
                 &[],
             )
             .unwrap_err();
-            assert!(
-                err.to_string().contains("rar_password_wrong"),
-                "got: {err}"
-            );
+            assert!(err.to_string().contains("rar_password_wrong"), "got: {err}");
             let _ = std::fs::remove_dir_all(&tmp);
         }
 
         // Excludes drop matching entries from the plan.
         #[test]
         fn excludes_apply_to_plan() {
-            let (_t, all) =
-                rar_plan_preview(&fixture("crypted.rar"), None, &[]).unwrap();
-            let (_t2, filtered) = rar_plan_preview(
-                &fixture("crypted.rar"),
-                None,
-                &[".gitignore".to_string()],
-            )
-            .unwrap();
+            let (_t, all) = rar_plan_preview(&fixture("crypted.rar"), None, &[]).unwrap();
+            let (_t2, filtered) =
+                rar_plan_preview(&fixture("crypted.rar"), None, &[".gitignore".to_string()])
+                    .unwrap();
             assert!(all.iter().any(|(p, _)| p == ".gitignore"));
             assert!(filtered.iter().all(|(p, _)| p != ".gitignore"));
         }

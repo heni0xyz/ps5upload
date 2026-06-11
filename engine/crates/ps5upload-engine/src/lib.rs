@@ -3520,9 +3520,11 @@ async fn profile_activate_handler(
     .map_err(anyhow::Error::from)
     .and_then(|r| r);
     match r {
-        Ok(id) => {
-            (StatusCode::OK, Json(serde_json::json!({ "ok": true, "id": id }))).into_response()
-        }
+        Ok(id) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "ok": true, "id": id })),
+        )
+            .into_response(),
         Err(e) => json_err(StatusCode::BAD_GATEWAY, format!("{e:#}")).into_response(),
     }
 }
@@ -3545,14 +3547,11 @@ async fn profile_clear_slot_handler(
     }
 }
 
-async fn profile_avatar_preview_handler(
-    Json(req): Json<ProfilePreviewReq>,
-) -> impl IntoResponse {
+async fn profile_avatar_preview_handler(Json(req): Json<ProfilePreviewReq>) -> impl IntoResponse {
     let mode = ps5upload_core::profile::SquareMode::parse(req.mode.as_deref().unwrap_or("crop"));
     let path = req.image_path;
     let r: Result<Vec<u8>, anyhow::Error> = tokio::task::spawn_blocking(move || {
-        let bytes = std::fs::read(&path)
-            .map_err(|e| anyhow::anyhow!("read image {path}: {e}"))?;
+        let bytes = std::fs::read(&path).map_err(|e| anyhow::anyhow!("read image {path}: {e}"))?;
         ps5upload_core::profile::avatar_preview_png(&bytes, mode)
     })
     .await
@@ -3563,7 +3562,11 @@ async fn profile_avatar_preview_handler(
             use base64::Engine as _;
             let b64 = base64::engine::general_purpose::STANDARD.encode(&png);
             let data_url = format!("data:image/png;base64,{b64}");
-            (StatusCode::OK, Json(serde_json::json!({ "data_url": data_url }))).into_response()
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({ "data_url": data_url })),
+            )
+                .into_response()
         }
         Err(e) => json_err(StatusCode::BAD_REQUEST, format!("{e:#}")).into_response(),
     }
@@ -3583,13 +3586,7 @@ async fn profile_avatar_handler(
     let r = tokio::task::spawn_blocking(move || {
         let bytes = std::fs::read(&image_path)
             .map_err(|e| anyhow::anyhow!("read image {image_path}: {e}"))?;
-        ps5upload_core::profile::profile_apply_avatar(
-            &addr,
-            uid,
-            username.as_deref(),
-            &bytes,
-            mode,
-        )
+        ps5upload_core::profile::profile_apply_avatar(&addr, uid, username.as_deref(), &bytes, mode)
     })
     .await
     .map_err(anyhow::Error::from)
@@ -3795,14 +3792,21 @@ async fn rar_inspect_handler(Json(req): Json<RarInspectReq>) -> impl IntoRespons
     match r {
         Ok(Ok(v)) => (StatusCode::OK, Json(v)).into_response(),
         Ok(Err(e)) => json_err(StatusCode::BAD_REQUEST, format!("{e:#}")).into_response(),
-        Err(e) => json_err(StatusCode::INTERNAL_SERVER_ERROR, format!("rar inspect task: {e}"))
-            .into_response(),
+        Err(e) => json_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("rar inspect task: {e}"),
+        )
+        .into_response(),
     }
 }
 
 #[cfg(target_os = "android")]
 async fn rar_inspect_handler() -> impl IntoResponse {
-    json_err(StatusCode::NOT_IMPLEMENTED, "RAR is not supported on this build").into_response()
+    json_err(
+        StatusCode::NOT_IMPLEMENTED,
+        "RAR is not supported on this build",
+    )
+    .into_response()
 }
 
 /// POST /api/transfer/rar — desktop only. Host-extract the `.rar` (any volume
@@ -3841,7 +3845,10 @@ async fn transfer_rar_handler(
         match planned {
             Ok(Ok(v)) => v,
             Ok(Err(e)) => {
-                crate::log_warn!("transfer_rar plan failed: archive={} err={e:#}", req.archive_path);
+                crate::log_warn!(
+                    "transfer_rar plan failed: archive={} err={e:#}",
+                    req.archive_path
+                );
                 return json_err(StatusCode::BAD_REQUEST, e.to_string()).into_response();
             }
             Err(e) => {
@@ -3975,7 +3982,11 @@ async fn transfer_rar_handler(
 
 #[cfg(target_os = "android")]
 async fn transfer_rar_handler() -> impl IntoResponse {
-    json_err(StatusCode::NOT_IMPLEMENTED, "RAR is not supported on this build").into_response()
+    json_err(
+        StatusCode::NOT_IMPLEMENTED,
+        "RAR is not supported on this build",
+    )
+    .into_response()
 }
 
 /// POST /api/transfer/file-list
@@ -5239,18 +5250,27 @@ async fn run(cfg: EngineConfig) -> anyhow::Result<()> {
         .route("/api/zip/inspect/stream", post(zip_inspect_stream_handler))
         .route("/api/transfer/7z", post(transfer_7z_handler))
         .route("/api/7z/inspect", post(sevenz_inspect_handler))
-        .route("/api/7z/inspect/stream", post(sevenz_inspect_stream_handler))
+        .route(
+            "/api/7z/inspect/stream",
+            post(sevenz_inspect_stream_handler),
+        )
         .route("/api/transfer/rar", post(transfer_rar_handler))
         .route("/api/rar/inspect", post(rar_inspect_handler))
         .route("/api/transfer/file-list", post(transfer_file_list_handler))
         .route("/api/transfer/download", post(transfer_download_handler))
         .route("/api/profile/info", get(profile_info_handler))
         .route("/api/profile/username", post(profile_username_handler))
-        .route("/api/profile/local-username", post(profile_local_username_handler))
+        .route(
+            "/api/profile/local-username",
+            post(profile_local_username_handler),
+        )
         .route("/api/profile/activate", post(profile_activate_handler))
         .route("/api/profile/clear-slot", post(profile_clear_slot_handler))
         .route("/api/profile/avatar", post(profile_avatar_handler))
-        .route("/api/profile/avatar/preview", post(profile_avatar_preview_handler))
+        .route(
+            "/api/profile/avatar/preview",
+            post(profile_avatar_preview_handler),
+        )
         .route(
             "/api/transfer/dir-reconcile",
             post(transfer_dir_reconcile_handler),

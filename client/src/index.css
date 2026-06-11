@@ -356,9 +356,17 @@ button {
   animation: ps-rise-in 140ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 
-/* Route content entrance — applied to the screen container on navigation. */
+/* Route content entrance — applied to the screen container on navigation.
+ * fill-mode is `backwards` (NOT `both`): with `both`, the element keeps the
+ * final keyframe's `transform: translateY(0)` forever, and a non-none transform
+ * makes the element a containing block for `position: fixed` descendants — so a
+ * `fixed inset-0` modal rendered inside a screen would size/position to this
+ * scrolled container instead of the viewport (it rendered off-screen on small
+ * Android viewports, so opening it looked like nothing happened). `backwards`
+ * still applies the start keyframe before the first frame (no entrance flash)
+ * but leaves no transform once the 200ms animation ends. */
 .anim-screen {
-  animation: ps-rise-in 200ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation: ps-rise-in 200ms cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
 }
 
 /* Mobile sidebar drawer. */

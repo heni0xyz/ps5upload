@@ -164,15 +164,13 @@ fn compress_dxt5_block(pixels: &[u8; 64]) -> [u8; 16] {
     apal[1] = alpha1;
     if alpha0 > alpha1 {
         for i in 0..6 {
-            apal[2 + i] = (((6 - i as i32) * alpha0 as i32
-                + (1 + i as i32) * alpha1 as i32)
-                / 7) as u8;
+            apal[2 + i] =
+                (((6 - i as i32) * alpha0 as i32 + (1 + i as i32) * alpha1 as i32) / 7) as u8;
         }
     } else {
         for i in 0..4 {
-            apal[2 + i] = (((4 - i as i32) * alpha0 as i32
-                + (1 + i as i32) * alpha1 as i32)
-                / 5) as u8;
+            apal[2 + i] =
+                (((4 - i as i32) * alpha0 as i32 + (1 + i as i32) * alpha1 as i32) / 5) as u8;
         }
         apal[6] = 0;
         apal[7] = 255;
@@ -440,7 +438,10 @@ fn round_trip_body(
     let (hdr, resp) = c.recv_frame()?;
     let ft = hdr.frame_type().unwrap_or(FrameType::Error);
     if ft == FrameType::Error {
-        bail!("payload rejected {label}: {}", String::from_utf8_lossy(&resp));
+        bail!(
+            "payload rejected {label}: {}",
+            String::from_utf8_lossy(&resp)
+        );
     }
     if ft != ack {
         bail!("expected {ack:?}, got {ft:?}");
@@ -503,8 +504,7 @@ pub fn profile_info(addr: &str) -> Result<ProfileInfo> {
         FrameType::ProfileInfoAck,
         "PROFILE_INFO",
     )?;
-    let info: ProfileInfo =
-        serde_json::from_slice(&resp).context("parse PROFILE_INFO ack")?;
+    let info: ProfileInfo = serde_json::from_slice(&resp).context("parse PROFILE_INFO ack")?;
     Ok(info)
 }
 
