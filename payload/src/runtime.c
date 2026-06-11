@@ -36,6 +36,7 @@
 #include "sys_time.h"
 #include "sys_registry.h"
 #include "profile.h"
+#include "sony_api_lock.h"
 #include "proc_list.h"
 #include "smp_meta.h"
 #include "blake3.h"
@@ -14460,6 +14461,13 @@ static int handle_pkg_install_status(runtime_state_t *state, int client_fd,
 /* ── Profile (avatar + offline-account) frame handlers ──────────────────── */
 
 static int handle_profile_info(int client_fd, uint64_t trace_id) {
+    /* Serialize the sceRegMgr/sceUserService calls below: these Sony APIs
+     * are not safe to call concurrently from multiple connection threads
+     * (the desktop's Profile screen calls this while background status
+     * polling also hits the payload), and doing so crashes the process.
+     * Same lock register.c/bgft.c use for their Sony calls. The network
+     * send_frame() happens AFTER unlock so we don't hold the lock across I/O. */
+    pthread_mutex_lock(&sony_api_lock);
     sceUserServiceInitialize(NULL); /* idempotent; name lookups need it */
     char username[64] = {0};
     uint32_t uid = profile_foreground_user(username, sizeof(username));
@@ -14472,6 +14480,7 @@ static int handle_profile_info(int client_fd, uint64_t trace_id) {
         "\"username\":\"%s\",\"slots\":[",
         uid, uid, uesc);
     if (len < 0 || len >= (int)sizeof(body)) {
+        pthread_mutex_unlock(&sony_api_lock);
         const char *err = "{\"ok\":false,\"err\":\"format\"}";
         return send_frame(client_fd, FTX2_FRAME_PROFILE_INFO_ACK, 0,
                           trace_id, err, strlen(err));
@@ -14572,6 +14581,8 @@ static int handle_profile_info(int client_fd, uint64_t trace_id) {
     }
     int tail = snprintf(body + len, sizeof(body) - len, "]}");
     if (tail > 0 && tail < (int)(sizeof(body) - len)) len += tail;
+    usleep(SONY_API_POST_SLEEP_US);
+    pthread_mutex_unlock(&sony_api_lock);
     return send_frame(client_fd, FTX2_FRAME_PROFILE_INFO_ACK, 0,
                       trace_id, body, (uint64_t)len);
 }
@@ -14584,7 +14595,10 @@ static int handle_profile_set_username(int client_fd, uint64_t trace_id,
     uint32_t err = 0;
     int rc = -1;
     if (slot >= 1 && slot <= PROFILE_SLOT_COUNT && name[0]) {
+        pthread_mutex_lock(&sony_api_lock);
         rc = profile_slot_set_name(slot, name, &err);
+        usleep(SONY_API_POST_SLEEP_US);
+        pthread_mutex_unlock(&sony_api_lock);
     }
     char nesc[PROFILE_NAME_MAX * 2 + 2];
     json_escape_into(name, nesc, sizeof(nesc));
@@ -14610,11 +14624,15 @@ static int handle_profile_activate(int client_fd, uint64_t trace_id,
             id = strtoull(idstr, NULL, 0);
         }
     }
-    int rc = (slot >= 1 && slot <= PROFILE_SLOT_COUNT)
-                 ? profile_slot_activate(slot, id)
-                 : -1;
+    int rc = -1;
     uint64_t actual = 0;
-    profile_slot_get_id(slot, &actual, NULL);
+    if (slot >= 1 && slot <= PROFILE_SLOT_COUNT) {
+        pthread_mutex_lock(&sony_api_lock);
+        rc = profile_slot_activate(slot, id);
+        profile_slot_get_id(slot, &actual, NULL);
+        usleep(SONY_API_POST_SLEEP_US);
+        pthread_mutex_unlock(&sony_api_lock);
+    }
     char resp[160];
     int len = snprintf(resp, sizeof(resp),
         "{\"ok\":%s,\"slot\":%d,\"id\":\"0x%016llx\"}",
@@ -14626,9 +14644,13 @@ static int handle_profile_activate(int client_fd, uint64_t trace_id,
 static int handle_profile_clear_slot(int client_fd, uint64_t trace_id,
                                      const char *body) {
     int slot = (int)extract_json_uint64_field(body, "slot");
-    int rc = (slot >= 1 && slot <= PROFILE_SLOT_COUNT)
-                 ? profile_slot_clear(slot)
-                 : -1;
+    int rc = -1;
+    if (slot >= 1 && slot <= PROFILE_SLOT_COUNT) {
+        pthread_mutex_lock(&sony_api_lock);
+        rc = profile_slot_clear(slot);
+        usleep(SONY_API_POST_SLEEP_US);
+        pthread_mutex_unlock(&sony_api_lock);
+    }
     char resp[96];
     int len = snprintf(resp, sizeof(resp), "{\"ok\":%s,\"slot\":%d}",
                        rc == 0 ? "true" : "false", slot);
@@ -14639,7 +14661,15 @@ static int handle_profile_clear_slot(int client_fd, uint64_t trace_id,
 static int handle_profile_apply_avatar(int client_fd, uint64_t trace_id,
                                        const char *body) {
     uint32_t uid = (uint32_t)extract_json_uint64_field(body, "uid");
-    if (uid == 0) uid = profile_foreground_user(NULL, 0);
+    if (uid == 0) {
+        pthread_mutex_lock(&sony_api_lock);
+        uid = profile_foreground_user(NULL, 0);
+        usleep(SONY_API_POST_SLEEP_US);
+        pthread_mutex_unlock(&sony_api_lock);
+    }
+    /* profile_apply_avatar is filesystem-only (no Sony APIs), so it runs
+     * without the lock — it can be slow (copies 11 files) and needn't
+     * block other Sony calls. */
     int copied = 0;
     int rc = (uid != 0) ? profile_apply_avatar(uid, &copied) : -1;
     char resp[160];
@@ -14655,7 +14685,13 @@ static int handle_profile_set_local_username(int client_fd, uint64_t trace_id,
     uint32_t uid = (uint32_t)extract_json_uint64_field(body, "uid");
     char name[64] = {0};
     extract_json_string_field(body, "name", name, sizeof(name));
-    int rc = (uid != 0 && name[0]) ? profile_set_local_username(uid, name) : -1;
+    int rc = -1;
+    if (uid != 0 && name[0]) {
+        pthread_mutex_lock(&sony_api_lock);
+        rc = profile_set_local_username(uid, name);
+        usleep(SONY_API_POST_SLEEP_US);
+        pthread_mutex_unlock(&sony_api_lock);
+    }
     char nesc[128];
     json_escape_into(name, nesc, sizeof(nesc));
     char resp[224];
