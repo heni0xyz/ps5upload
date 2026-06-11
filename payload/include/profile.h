@@ -75,6 +75,12 @@ uint32_t profile_foreground_user(char *name_out, size_t name_out_size);
  * name_out (NUL-terminated), -1 on failure (name_out set to ""). */
 int profile_user_name(uint32_t uid, char *name_out, size_t name_out_size);
 
+/* Rename a local console user via sceUserServiceSetUserName. Returns 0 on
+ * success, -1 on failure (incl. the symbol not being exported on this
+ * firmware). This is the *active profile* display name, distinct from the
+ * offline-account slots above. */
+int profile_set_local_username(uint32_t uid, const char *name);
+
 /* ── Avatar apply ───────────────────────────────────────────────────────
  * Copy every regular file from PROFILE_STAGE_ROOT/0x<UID>/ into
  * /system_data/priv/cache/profile/0x<UID>/ (privileged), creating the

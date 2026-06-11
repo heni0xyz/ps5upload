@@ -173,6 +173,7 @@ pub fn run() {
             commands::sevenz_inspect_stream,
             commands::profile_info,
             commands::profile_set_username,
+            commands::profile_rename_user,
             commands::profile_activate,
             commands::profile_clear_slot,
             commands::profile_avatar_preview,

@@ -26,6 +26,7 @@ import {
   profileApplyAvatar,
   profileAvatarPreview,
   profileSetUsername,
+  profileRenameUser,
   type ProfileInfo,
   type SquareMode,
 } from "../../api/ps5";
@@ -381,6 +382,7 @@ function UsernameSection({
   onChanged: () => void;
 }) {
   const tr = useTr();
+  const users = info?.users ?? [];
   const slots = info?.slots ?? [];
 
   return (
@@ -388,39 +390,136 @@ function UsernameSection({
       <div className="mb-1 flex items-center gap-2">
         <UserPen size={16} className="text-[var(--color-accent)]" />
         <h2 className="text-sm font-semibold">
-          {tr("profile.username.title", "Username (offline accounts)")}
+          {tr("profile.username.title", "Username")}
         </h2>
       </div>
       <p className="mb-4 text-xs text-[var(--color-muted)]">
         {tr(
           "profile.username.description",
-          "Rename an activated offline-account slot. These slots are only present when offline accounts have been set up on the console.",
+          "Rename a console user. The PS5 limits names to 16 characters.",
         )}
       </p>
 
-      {slots.length === 0 ? (
+      {users.length === 0 ? (
         <EmptyState
-          title={tr("profile.username.empty", "No offline-account slots")}
+          title={tr("profile.username.empty", "No console users")}
           message={tr(
             "profile.username.emptyHint",
-            "Nothing to rename here on this console.",
+            "Sign in to a profile on the PS5, then refresh.",
           )}
         />
       ) : (
         <div className="space-y-2">
-          {slots.map((s) => (
-            <SlotRow
-              key={s.slot}
+          {users.map((u) => (
+            <UserRow
+              key={u.uid}
               addr={addr}
-              slot={s.slot}
-              name={s.name}
-              activated={s.activated}
+              uid={u.uid}
+              uidHex={u.uid_hex}
+              name={u.username}
               onChanged={onChanged}
             />
           ))}
         </div>
       )}
+
+      {/* Offline-account slots are an advanced case — only shown when the
+          console actually has them. */}
+      {slots.length > 0 && (
+        <div className="mt-5 border-t border-[var(--color-border)] pt-4">
+          <h3 className="mb-2 text-xs font-semibold text-[var(--color-muted)]">
+            {tr("profile.username.slotsTitle", "Offline-account slots")}
+          </h3>
+          <div className="space-y-2">
+            {slots.map((s) => (
+              <SlotRow
+                key={s.slot}
+                addr={addr}
+                slot={s.slot}
+                name={s.name}
+                activated={s.activated}
+                onChanged={onChanged}
+              />
+            ))}
+          </div>
+        </div>
+      )}
     </Card>
+  );
+}
+
+function UserRow({
+  addr,
+  uid,
+  uidHex,
+  name,
+  onChanged,
+}: {
+  addr: string;
+  uid: number;
+  uidHex: string;
+  name: string;
+  onChanged: () => void;
+}) {
+  const tr = useTr();
+  const [draft, setDraft] = useState(name);
+  const [saved, setSaved] = useState(name);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDraft(name);
+    setSaved(name);
+  }, [name]);
+
+  const dirty = draft.trim() !== saved && draft.trim().length > 0;
+
+  async function save() {
+    if (!dirty) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await profileRenameUser(uid, draft.trim(), addr);
+      setSaved(draft.trim());
+      onChanged();
+    } catch (e) {
+      setError(`${e}`);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-2">
+      <div className="flex items-center gap-2">
+        <span
+          className="shrink-0 font-mono text-xs text-[var(--color-muted)]"
+          title={uidHex}
+        >
+          {uidHex}
+        </span>
+        <input
+          className="min-w-0 flex-1 rounded-md border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2 py-1 text-sm"
+          value={draft}
+          maxLength={16}
+          placeholder={tr("profile.username.placeholder", "User name")}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void save();
+          }}
+        />
+        <Button
+          variant="secondary"
+          size="sm"
+          disabled={!dirty || saving}
+          loading={saving}
+          onClick={save}
+        >
+          {tr("profile.username.save", "Save")}
+        </Button>
+      </div>
+      {error && <p className="mt-1 text-xs text-[var(--color-warn)]">{error}</p>}
+    </div>
   );
 }
 

@@ -356,6 +356,12 @@ fn do_profile_set_username(addr: &str, slot: i32, name: &str) -> Result<()> {
     Ok(())
 }
 
+fn do_profile_rename_user(addr: &str, uid: u32, name: &str) -> Result<()> {
+    ps5upload_core::profile::profile_set_local_username(&to_mgmt_addr(addr), uid, name)?;
+    println!("renamed user 0x{uid:08X} -> {name:?}");
+    Ok(())
+}
+
 fn do_profile_activate(addr: &str, slot: i32, id: Option<u64>) -> Result<()> {
     let id = ps5upload_core::profile::profile_activate(&to_mgmt_addr(addr), slot, id)?;
     println!("activated slot {slot}, id={id}");
@@ -459,6 +465,7 @@ fn usage() -> ! {
     eprintln!("  saves                      list save-data folders + sizes (:9114)");
     eprintln!("  profile-info                       foreground user + account name slots (:9114)");
     eprintln!("  profile-set-username SLOT NAME     rename an account-name slot");
+    eprintln!("  profile-rename-user  UID_HEX NAME  rename a local console user");
     eprintln!("  profile-activate     SLOT [ID_HEX] activate a slot (derive id if omitted)");
     eprintln!("  profile-clear-slot   SLOT          de-activate a slot (zero id+flags)");
     eprintln!("  profile-apply-avatar IMAGE [crop|fit]  set the foreground user's avatar");
@@ -644,6 +651,17 @@ fn main() -> Result<()> {
                 .unwrap_or_else(|| usage());
             let name = rest.get(2).map(|s| s.as_str()).unwrap_or_else(|| usage());
             do_profile_set_username(addr, slot, name)
+        }
+        "profile-rename-user" => {
+            let uid = rest.get(1).and_then(|s| {
+                let s = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")).unwrap_or(s);
+                u32::from_str_radix(s, 16).ok()
+            });
+            let name = rest.get(2).map(|s| s.as_str()).unwrap_or_else(|| usage());
+            match uid {
+                Some(u) => do_profile_rename_user(addr, u, name),
+                None => usage(),
+            }
         }
         "profile-activate" => {
             let slot: i32 = rest

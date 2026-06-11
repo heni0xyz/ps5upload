@@ -421,6 +421,14 @@ pub struct ProfileUsernameReq {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct ProfileLocalUsernameReq {
+    #[serde(default)]
+    pub addr: Option<String>,
+    pub uid: u32,
+    pub name: String,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct ProfileActivateReq {
     #[serde(default)]
     pub addr: Option<String>,
@@ -474,6 +482,16 @@ pub async fn profile_set_username(req: ProfileUsernameReq) -> Result<JsonValue, 
     let base = engine::url();
     let url = format!("{base}/api/profile/username");
     let body = serde_json::json!({ "addr": req.addr, "slot": req.slot, "name": req.name });
+    post_json(&url, &body).await
+}
+
+/// Rename a local console user (active profile display name).
+/// Proxies `/api/profile/local-username`.
+#[tauri::command]
+pub async fn profile_rename_user(req: ProfileLocalUsernameReq) -> Result<JsonValue, String> {
+    let base = engine::url();
+    let url = format!("{base}/api/profile/local-username");
+    let body = serde_json::json!({ "addr": req.addr, "uid": req.uid, "name": req.name });
     post_json(&url, &body).await
 }
 

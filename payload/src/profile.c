@@ -107,18 +107,34 @@ int profile_slot_clear(int slot) {
  * Resolved by dlsym, same defensive pattern as sys_registry.c.
  * sceUserServiceInitialize is already called once at startup by
  * register.c, so we only need the getters here. */
+typedef int (*uss_init_fn)(void *params);
 typedef int (*uss_get_foreground_fn)(int *user_id);
 typedef int (*uss_get_username_fn)(int32_t user_id, char *name, size_t size);
+typedef int (*uss_set_username_fn)(int32_t user_id, const char *name);
 
+static uss_init_fn           g_uss_init = NULL;
 static uss_get_foreground_fn g_uss_get_fg = NULL;
 static uss_get_username_fn   g_uss_get_name = NULL;
+static uss_set_username_fn   g_uss_set_name = NULL;
 static pthread_once_t        g_uss_once = PTHREAD_ONCE_INIT;
 
 static void uss_resolve_impl(void) {
+    g_uss_init = (uss_init_fn)dlsym(RTLD_DEFAULT, "sceUserServiceInitialize");
     g_uss_get_fg = (uss_get_foreground_fn)dlsym(
         RTLD_DEFAULT, "sceUserServiceGetForegroundUser");
     g_uss_get_name = (uss_get_username_fn)dlsym(
         RTLD_DEFAULT, "sceUserServiceGetUserName");
+    g_uss_set_name = (uss_set_username_fn)dlsym(
+        RTLD_DEFAULT, "sceUserServiceSetUserName");
+    /* The name getters/setters need the service initialized; idempotent. */
+    if (g_uss_init) g_uss_init(NULL);
+}
+
+int profile_set_local_username(uint32_t uid, const char *name) {
+    if (!name) return -1;
+    pthread_once(&g_uss_once, uss_resolve_impl);
+    if (!g_uss_set_name) return -1;
+    return g_uss_set_name((int32_t)uid, name) == 0 ? 0 : -1;
 }
 
 int profile_user_name(uint32_t uid, char *name_out, size_t name_out_size) {
@@ -140,7 +156,8 @@ uint32_t profile_foreground_user(char *name_out, size_t name_out_size) {
     pthread_once(&g_uss_once, uss_resolve_impl);
     if (!g_uss_get_fg) return 0;
     int uid = 0;
-    if (g_uss_get_fg(&uid) != 0 || uid == 0) return 0;
+    /* uid <= 0 covers both "no foreground" (0) and Sony's -1 sentinel. */
+    if (g_uss_get_fg(&uid) != 0 || uid <= 0) return 0;
     if (name_out && name_out_size > 0) {
         profile_user_name((uint32_t)uid, name_out, name_out_size);
     }

@@ -334,6 +334,11 @@ extern int posix_fallocate(int fd, off_t offset, off_t len);
 #define FTX2_FRAME_PROFILE_APPLY_AVATAR_ACK 157u
 #define FTX2_FRAME_PROFILE_CLEAR_SLOT       158u
 #define FTX2_FRAME_PROFILE_CLEAR_SLOT_ACK   159u
+/* Rename a local console user (the active profile's display name) via
+ * sceUserServiceSetUserName. req {"uid":N,"name":".."} → ack {"ok":bool,...}.
+ * Distinct from PROFILE_SET_USERNAME, which renames an offline-account slot. */
+#define FTX2_FRAME_PROFILE_SET_LOCAL_USERNAME     160u
+#define FTX2_FRAME_PROFILE_SET_LOCAL_USERNAME_ACK 161u
 /* Where we place mount points. Scoped under /mnt/ps5upload/ so it
  * never collides with mount paths owned by other utilities. */
 #define FS_MOUNT_BASE "/mnt/ps5upload"
@@ -14455,6 +14460,7 @@ static int handle_pkg_install_status(runtime_state_t *state, int client_fd,
 /* ── Profile (avatar + offline-account) frame handlers ──────────────────── */
 
 static int handle_profile_info(int client_fd, uint64_t trace_id) {
+    sceUserServiceInitialize(NULL); /* idempotent; name lookups need it */
     char username[64] = {0};
     uint32_t uid = profile_foreground_user(username, sizeof(username));
     char uesc[128];
@@ -14494,16 +14500,40 @@ static int handle_profile_info(int client_fd, uint64_t trace_id) {
         len += n;
         first = 0;
     }
-    /* Close the slots array, then enumerate the console's local users by
-     * scanning /user/home (each subdir is an 8-hex-digit user id — the same
-     * id the profile-cache path uses). The avatar feature targets one of
-     * these, so it works even when no user is in the foreground (the daemon
-     * has no session, so sceUserServiceGetForegroundUser often returns 0). */
+    /* Close the slots array, then enumerate the console's local users.
+     * Primary source: sceUserServiceGetLoginUserIdList — gives the real
+     * display name via GetUserName even when there's no foreground user
+     * (login != foreground). Supplemented by a /user/home scan for any
+     * on-disk user not currently logged in (uid known, name may be empty).
+     * The uid is the same value the profile-cache path uses. */
     int mid = snprintf(body + len, sizeof(body) - len, "],\"users\":[");
     if (mid > 0 && mid < (int)(sizeof(body) - len)) len += mid;
+
+    int seen[USER_SERVICE_MAX_USERS];
+    int seen_count = 0;
+    int ufirst = 1;
+
+    int login_ids[USER_SERVICE_MAX_USERS];
+    for (int i = 0; i < USER_SERVICE_MAX_USERS; i++) login_ids[i] = -1;
+    sceUserServiceGetLoginUserIdList(login_ids);
+    for (int i = 0; i < USER_SERVICE_MAX_USERS; i++) {
+        if (login_ids[i] < 0) continue;
+        uint32_t uuid = (uint32_t)login_ids[i];
+        char uname[64] = {0};
+        sceUserServiceGetUserName(login_ids[i], uname, sizeof(uname));
+        char uesc2[128];
+        json_escape_into(uname, uesc2, sizeof(uesc2));
+        int un = snprintf(body + len, sizeof(body) - len,
+            "%s{\"uid\":%u,\"uid_hex\":\"0x%08X\",\"username\":\"%s\"}",
+            ufirst ? "" : ",", uuid, uuid, uesc2);
+        if (un <= 0 || un >= (int)(sizeof(body) - len)) break;
+        len += un;
+        ufirst = 0;
+        if (seen_count < USER_SERVICE_MAX_USERS) seen[seen_count++] = login_ids[i];
+    }
+
     DIR *ud = opendir("/user/home");
     if (ud) {
-        int ufirst = 1;
         struct dirent *ue;
         while ((ue = readdir(ud)) != NULL) {
             /* Accept exactly 8 hex chars (a user id dir). */
@@ -14519,6 +14549,14 @@ static int handle_profile_info(int client_fd, uint64_t trace_id) {
             }
             if (hexlen != 8 || nm[8] != '\0') continue;
             uint32_t uuid = (uint32_t)strtoul(nm, NULL, 16);
+            int already = 0;
+            for (int k = 0; k < seen_count; k++) {
+                if ((uint32_t)seen[k] == uuid) {
+                    already = 1;
+                    break;
+                }
+            }
+            if (already) continue;
             char uname[64] = {0};
             char uesc2[128];
             profile_user_name(uuid, uname, sizeof(uname));
@@ -14609,6 +14647,22 @@ static int handle_profile_apply_avatar(int client_fd, uint64_t trace_id,
         "{\"ok\":%s,\"uid\":%u,\"uid_hex\":\"0x%08X\",\"copied\":%d}",
         rc == 0 ? "true" : "false", uid, uid, copied);
     return send_frame(client_fd, FTX2_FRAME_PROFILE_APPLY_AVATAR_ACK, 0,
+                      trace_id, resp, (uint64_t)len);
+}
+
+static int handle_profile_set_local_username(int client_fd, uint64_t trace_id,
+                                             const char *body) {
+    uint32_t uid = (uint32_t)extract_json_uint64_field(body, "uid");
+    char name[64] = {0};
+    extract_json_string_field(body, "name", name, sizeof(name));
+    int rc = (uid != 0 && name[0]) ? profile_set_local_username(uid, name) : -1;
+    char nesc[128];
+    json_escape_into(name, nesc, sizeof(nesc));
+    char resp[224];
+    int len = snprintf(resp, sizeof(resp),
+        "{\"ok\":%s,\"uid\":%u,\"uid_hex\":\"0x%08X\",\"name\":\"%s\"}",
+        rc == 0 ? "true" : "false", uid, uid, nesc);
+    return send_frame(client_fd, FTX2_FRAME_PROFILE_SET_LOCAL_USERNAME_ACK, 0,
                       trace_id, resp, (uint64_t)len);
 }
 
@@ -16096,6 +16150,10 @@ abort_done:
     if (hdr.frame_type == FTX2_FRAME_PROFILE_CLEAR_SLOT) {
         return handle_profile_clear_slot(client_fd, hdr.trace_id,
                                          request_body);
+    }
+    if (hdr.frame_type == FTX2_FRAME_PROFILE_SET_LOCAL_USERNAME) {
+        return handle_profile_set_local_username(client_fd, hdr.trace_id,
+                                                 request_body);
     }
     if (hdr.frame_type == FTX2_FRAME_PKG_INSTALL) {
         return handle_pkg_install(state, client_fd, hdr.trace_id,

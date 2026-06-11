@@ -545,6 +545,30 @@ struct ActivateResult {
     id: String,
 }
 
+/// Rename a local console user (the active profile's display name) via
+/// `sceUserServiceSetUserName`. `uid` is the console user id (as listed in
+/// [`ProfileInfo::users`]). Distinct from [`profile_set_username`], which
+/// renames an offline-account registry slot.
+pub fn profile_set_local_username(addr: &str, uid: u32, name: &str) -> Result<()> {
+    let body = serde_json::to_vec(&serde_json::json!({ "uid": uid, "name": name }))?;
+    let resp = round_trip_body(
+        addr,
+        FrameType::ProfileSetLocalUsername,
+        &body,
+        FrameType::ProfileSetLocalUsernameAck,
+        "PROFILE_SET_LOCAL_USERNAME",
+    )?;
+    let r: OkResult = serde_json::from_slice(&resp)?;
+    if !r.ok {
+        bail!(
+            "the console rejected the rename — sceUserServiceSetUserName \
+             isn't available on this firmware, or the name is invalid \
+             (max 16 chars, no control characters)"
+        );
+    }
+    Ok(())
+}
+
 /// Activate a slot: set its id (derived from the name when `id` is None),
 /// type "np", and the default flags. Returns the resulting id string.
 pub fn profile_activate(addr: &str, slot: i32, id: Option<u64>) -> Result<String> {

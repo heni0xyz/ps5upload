@@ -3383,6 +3383,13 @@ struct ProfileUsernameReq {
 }
 
 #[derive(Deserialize)]
+struct ProfileLocalUsernameReq {
+    addr: Option<String>,
+    uid: u32,
+    name: String,
+}
+
+#[derive(Deserialize)]
 struct ProfileActivateReq {
     addr: Option<String>,
     slot: i32,
@@ -3442,6 +3449,26 @@ async fn profile_username_handler(
     crate::log_info!("profile_set_username: addr={addr} slot={slot}");
     let r = tokio::task::spawn_blocking(move || {
         ps5upload_core::profile::profile_set_username(&addr, slot, &name)
+    })
+    .await
+    .map_err(anyhow::Error::from)
+    .and_then(|r| r);
+    match r {
+        Ok(()) => (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response(),
+        Err(e) => json_err(StatusCode::BAD_GATEWAY, format!("{e:#}")).into_response(),
+    }
+}
+
+async fn profile_local_username_handler(
+    State(state): State<AppState>,
+    Json(req): Json<ProfileLocalUsernameReq>,
+) -> impl IntoResponse {
+    let addr = mgmt_addr_or_default(req.addr, &state.default_ps5_addr);
+    let uid = req.uid;
+    let name = req.name;
+    crate::log_info!("profile_set_local_username: addr={addr} uid={uid}");
+    let r = tokio::task::spawn_blocking(move || {
+        ps5upload_core::profile::profile_set_local_username(&addr, uid, &name)
     })
     .await
     .map_err(anyhow::Error::from)
@@ -4990,6 +5017,7 @@ async fn run(cfg: EngineConfig) -> anyhow::Result<()> {
         .route("/api/transfer/download", post(transfer_download_handler))
         .route("/api/profile/info", get(profile_info_handler))
         .route("/api/profile/username", post(profile_username_handler))
+        .route("/api/profile/local-username", post(profile_local_username_handler))
         .route("/api/profile/activate", post(profile_activate_handler))
         .route("/api/profile/clear-slot", post(profile_clear_slot_handler))
         .route("/api/profile/avatar", post(profile_avatar_handler))

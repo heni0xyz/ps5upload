@@ -494,6 +494,12 @@ pub enum FrameType {
     ProfileApplyAvatarAck = 157,
     ProfileClearSlot = 158,
     ProfileClearSlotAck = 159,
+    /// Rename a local console user (the active profile's display name) via
+    /// sceUserServiceSetUserName. req `{"uid":N,"name":".."}` → ack
+    /// `{"ok":bool,"uid":N,"name":".."}`. Distinct from PROFILE_SET_USERNAME
+    /// (which renames an offline-account registry slot).
+    ProfileSetLocalUsername = 160,
+    ProfileSetLocalUsernameAck = 161,
 }
 
 impl FrameType {
@@ -643,6 +649,8 @@ impl FrameType {
             157 => Ok(Self::ProfileApplyAvatarAck),
             158 => Ok(Self::ProfileClearSlot),
             159 => Ok(Self::ProfileClearSlotAck),
+            160 => Ok(Self::ProfileSetLocalUsername),
+            161 => Ok(Self::ProfileSetLocalUsernameAck),
             _ => Err(DecodeError::UnknownFrameType(v)),
         }
     }

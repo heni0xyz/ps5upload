@@ -206,6 +206,17 @@ export async function profileSetUsername(
   });
 }
 
+/** Rename a local console user (the active profile's display name). */
+export async function profileRenameUser(
+  uid: number,
+  name: string,
+  addr?: string,
+): Promise<void> {
+  await invoke("profile_rename_user", {
+    req: { addr: addr ?? null, uid, name },
+  });
+}
+
 /** Activate an offline-account slot (id derived from the name if omitted). */
 export async function profileActivate(
   slot: number,
