@@ -52,8 +52,13 @@ export function Button({
   // Keyboard focus comes from the global :focus-visible ring in index.css
   // (v3) so buttons match every other interactive element — no per-component
   // ring classes needed.
+  // `whitespace-nowrap`: a button is a single-line control. Without it, a
+  // button squeezed in a tight flex row (min-width:0 globally) wraps its
+  // label vertically, one character per line. If a label is genuinely too
+  // long, that's a layout decision for the call site (truncate / give room),
+  // never a reason to stack letters.
   const base =
-    "inline-flex items-center justify-center gap-1.5 rounded-md font-medium " +
+    "inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md font-medium " +
     "transition-colors " +
     "disabled:cursor-not-allowed disabled:opacity-50";
 

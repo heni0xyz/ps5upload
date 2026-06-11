@@ -124,7 +124,7 @@ export function OverflowMenu({
               }}
               title={item.title}
               className={
-                "flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors " +
+                "flex w-full items-center gap-2 whitespace-nowrap px-3 py-2 text-left text-xs transition-colors " +
                 "disabled:cursor-not-allowed disabled:opacity-50 " +
                 (item.destructive
                   ? "text-[var(--color-bad)] hover:bg-[var(--color-bad-soft)]"

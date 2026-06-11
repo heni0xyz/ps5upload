@@ -84,13 +84,13 @@ function PlatformBadge({ title }: { title: InstalledTitle }) {
   const p = platformOf(title);
   if (p === "ps4")
     return (
-      <span className="rounded bg-[var(--color-ps4-soft)] px-1.5 py-0.5 text-xs font-semibold text-[var(--color-ps4)]">
+      <span className="shrink-0 whitespace-nowrap rounded bg-[var(--color-ps4-soft)] px-1.5 py-0.5 text-xs font-semibold text-[var(--color-ps4)]">
         {tr("installed_badge_ps4", undefined, "PS4")}
       </span>
     );
   if (p === "ps5")
     return (
-      <span className="rounded bg-[var(--color-ps5-soft)] px-1.5 py-0.5 text-xs font-semibold text-[var(--color-ps5)]">
+      <span className="shrink-0 whitespace-nowrap rounded bg-[var(--color-ps5-soft)] px-1.5 py-0.5 text-xs font-semibold text-[var(--color-ps5)]">
         {tr("installed_badge_ps5", undefined, "PS5")}
       </span>
     );
@@ -101,10 +101,10 @@ function KindBadge({ title }: { title: InstalledTitle }) {
   const tr = useTr();
   const k = kindOf(title);
   const base =
-    "inline-flex items-center gap-1 rounded bg-[var(--color-surface-3)] px-1.5 py-0.5 text-xs font-medium text-[var(--color-muted)]";
+    "inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded bg-[var(--color-surface-3)] px-1.5 py-0.5 text-xs font-medium text-[var(--color-muted)]";
   if (k === "system")
     return (
-      <span className="inline-flex items-center gap-1 rounded bg-[var(--color-bad-soft)] px-1.5 py-0.5 text-xs font-medium text-[var(--color-bad)]">
+      <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded bg-[var(--color-bad-soft)] px-1.5 py-0.5 text-xs font-medium text-[var(--color-bad)]">
         <AlertTriangle size={11} />
         {tr("installed_badge_system", undefined, "System")}
       </span>

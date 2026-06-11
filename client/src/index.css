@@ -438,10 +438,18 @@ button {
  *    lets them shrink. This is specificity (0,0,0), so any intentional
  *    Tailwind `min-w-[Npx]` (e.g. tables inside `overflow-x-auto`, which are
  *    SUPPOSED to scroll within their own block) still wins.
- * 2. `overflow-wrap: anywhere` (inherited from body) lets long unbreakable
+ * 2. `overflow-wrap: break-word` (inherited from body) lets long unbreakable
  *    tokens — PS5 paths, content-ids, kernel build strings, MACs — wrap
- *    instead of forcing width. Normal prose is unaffected (spaces break
- *    first); it only acts when a word would otherwise overflow.
+ *    instead of forcing width. CRITICAL: this is `break-word`, NOT `anywhere`.
+ *    `anywhere` additionally collapses an element's min-content intrinsic
+ *    width to a single CHARACTER, so any flex/grid item under width pressure
+ *    (min-width:0 above) shrinks to ~1 char and its text wraps vertically —
+ *    one letter per line ("J-u-g-a-r", "R-e-g-i-s-t-e-r"). `break-word` wraps
+ *    the same long tokens but keeps the min-content at the widest WORD, so
+ *    short labels (buttons, menu items, status chips) stay intact and only
+ *    genuinely-too-long tokens break. (Regression introduced in the v3.0.0
+ *    responsive pass; reported as "the update enlarged the text / nothing is
+ *    visible" on both Android and desktop.)
  * 3. media + form controls never exceed their container.
  *
  * `flex-shrink: 0` (Tailwind `shrink-0`, e.g. icons) still pins size, so this
@@ -462,7 +470,7 @@ button {
   }
 
   body {
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
 
   img,
