@@ -3760,6 +3760,329 @@ pub fn transfer_7z_resumable(
     })
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+//  .rar transfer  (feature = "rar", desktop-only)
+//
+//  Real RAR support needs the UnRAR C++ source (the `unrar` crate): there is no
+//  production-grade pure-Rust RAR decoder, and only UnRAR covers RAR5 +
+//  multi-volume + AES passwords. That's a C dependency, which would break the
+//  Android pure-Rust cross-compile the zip/7z pins guard — so the whole feature
+//  is gated behind the `rar` Cargo feature, which the desktop build enables and
+//  the Android build does NOT (Android keeps zip/7z only).
+//
+//  Streaming model differs from zip/7z: the `unrar` crate reads a whole entry
+//  into memory at once (no chunked reader), which would OOM on a .rar wrapping
+//  a single huge image. So a .rar is EXTRACTED to a host temp dir and then
+//  handed to the existing directory transfer — bounded memory, any entry size,
+//  and the same resume/hash/progress machinery. The PS5 still receives only the
+//  extracted files (no double storage on the console; the host staging dir is
+//  transient and removed afterwards). Multi-volume sets are opened from the
+//  first volume (UnRAR pulls in the siblings automatically); a password flows
+//  in but is never logged or persisted.
+// ═══════════════════════════════════════════════════════════════════════════
+#[cfg(not(target_os = "android"))]
+pub use rar_support::{inspect_rar, rar_plan_preview, transfer_rar_resumable};
+
+#[cfg(not(target_os = "android"))]
+mod rar_support {
+    use super::*;
+    use unrar::error::{Code as RarCode, UnrarError};
+    use unrar::{Archive, FileHeader};
+
+    /// Map UnRAR errors to stable, UI-detectable strings for the two cases the
+    /// UI must react to (prompt for / re-prompt the password); everything else
+    /// passes through verbatim with context.
+    fn map_rar_err(ctx: &str, e: UnrarError) -> anyhow::Error {
+        match e.code {
+            RarCode::MissingPassword => anyhow::anyhow!("rar_password_required"),
+            RarCode::BadPassword => anyhow::anyhow!("rar_password_wrong"),
+            _ => anyhow::anyhow!("{ctx}: {e}"),
+        }
+    }
+
+    /// Sanitise a RAR entry path with the same zip-slip rules as 7z (RAR, like
+    /// 7z, can use '\\' separators on Windows-created archives).
+    fn sanitize_rar_entry(name: &Path) -> Option<String> {
+        sanitize_7z_entry(&name.to_string_lossy())
+    }
+
+    /// Open the archive's file list (with or without a password) as an iterator
+    /// of headers. The returned `OpenArchive` owns its handle, so the borrowed
+    /// `path` / `password` only need to live across this call.
+    fn list_headers(
+        path: &str,
+        password: Option<&str>,
+    ) -> std::result::Result<
+        impl Iterator<Item = std::result::Result<FileHeader, UnrarError>>,
+        UnrarError,
+    > {
+        match password {
+            Some(pw) => Archive::with_password(path, pw).open_for_listing(),
+            None => Archive::new(path).open_for_listing(),
+        }
+    }
+
+    /// Inspect a `.rar` (counts + uncompressed bytes) without extracting. Opens
+    /// the first volume; UnRAR spans the rest of the set. `compressed_size` is
+    /// the first volume's size only (a rough hint); `total_uncompressed` is the
+    /// meaningful figure.
+    pub fn inspect_rar(archive_path: &Path, password: Option<&str>) -> Result<ZipInspect> {
+        let path_str = archive_path.to_string_lossy().into_owned();
+        let compressed_size = std::fs::metadata(archive_path)
+            .with_context(|| format!("stat rar {}", archive_path.display()))?
+            .len();
+        let mut file_count = 0u64;
+        let mut total_uncompressed = 0u64;
+        for entry in list_headers(&path_str, password).map_err(|e| map_rar_err("open rar", e))? {
+            let e = entry.map_err(|e| map_rar_err("read rar header", e))?;
+            if e.is_directory() {
+                continue;
+            }
+            file_count += 1;
+            total_uncompressed += e.unpacked_size;
+        }
+        Ok(ZipInspect {
+            file_count,
+            total_uncompressed,
+            compressed_size,
+            title: None,
+            title_id: None,
+            content_id: None,
+            application_category_type: None,
+            game_root: None,
+        })
+    }
+
+    /// Metadata-only plan preview: total bytes + sanitised dest paths (sorted)
+    /// for the live file tree. No extraction.
+    pub fn rar_plan_preview(
+        archive_path: &Path,
+        password: Option<&str>,
+        excludes: &[String],
+    ) -> Result<(u64, Vec<(String, u64)>)> {
+        let path_str = archive_path.to_string_lossy().into_owned();
+        let mut total = 0u64;
+        let mut files: Vec<(String, u64)> = Vec::new();
+        for entry in list_headers(&path_str, password).map_err(|e| map_rar_err("open rar", e))? {
+            let e = entry.map_err(|e| map_rar_err("read rar header", e))?;
+            if e.is_directory() {
+                continue;
+            }
+            let Some(rel) = sanitize_rar_entry(&e.filename) else {
+                bail!("rar contains an unsafe or invalid entry path: {:?}", e.filename);
+            };
+            if !excludes.is_empty()
+                && crate::excludes::is_excluded_strings(Path::new(&rel), excludes)
+            {
+                continue;
+            }
+            total += e.unpacked_size;
+            files.push((rel, e.unpacked_size));
+        }
+        files.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok((total, files))
+    }
+
+    /// Extract every non-excluded file to `dest_dir` under sanitised relative
+    /// paths (forward-only processing loop). Returns the count extracted.
+    fn extract_rar_to_dir(
+        archive_path: &Path,
+        password: Option<&str>,
+        dest_dir: &Path,
+        excludes: &[String],
+    ) -> Result<u64> {
+        let path_str = archive_path.to_string_lossy().into_owned();
+        let mut open = match password {
+            Some(pw) => Archive::with_password(&path_str, pw).open_for_processing(),
+            None => Archive::new(&path_str).open_for_processing(),
+        }
+        .map_err(|e| map_rar_err("open rar", e))?;
+
+        let mut extracted = 0u64;
+        loop {
+            let header = match open
+                .read_header()
+                .map_err(|e| map_rar_err("read rar header", e))?
+            {
+                Some(h) => h,
+                None => break,
+            };
+            let entry_name = header.entry().filename.clone();
+            if header.entry().is_directory() {
+                open = header.skip().map_err(|e| map_rar_err("skip rar entry", e))?;
+                continue;
+            }
+            let Some(rel) = sanitize_rar_entry(&entry_name) else {
+                bail!("rar contains an unsafe or invalid entry path: {:?}", entry_name);
+            };
+            if !excludes.is_empty()
+                && crate::excludes::is_excluded_strings(Path::new(&rel), excludes)
+            {
+                open = header.skip().map_err(|e| map_rar_err("skip rar entry", e))?;
+                continue;
+            }
+            let dest = dest_dir.join(&rel);
+            if let Some(parent) = dest.parent() {
+                std::fs::create_dir_all(parent)
+                    .with_context(|| format!("create rar staging dir {}", parent.display()))?;
+            }
+            open = header
+                .extract_to(&dest)
+                .map_err(|e| map_rar_err("extract rar entry", e))?;
+            extracted += 1;
+        }
+        if extracted == 0 {
+            bail!(
+                "rar has no extractable files (after exclusions): {}",
+                archive_path.display()
+            );
+        }
+        Ok(extracted)
+    }
+
+    /// Transfer a `.rar` (any volume set): extract to a host staging dir, stream
+    /// the extracted tree to the PS5 via the directory transfer (which carries
+    /// resume/hash/progress), then remove the staging dir.
+    pub fn transfer_rar_resumable(
+        cfg: &TransferConfig,
+        tx_id: [u8; 16],
+        dest_root: &str,
+        archive_path: &Path,
+        password: Option<&str>,
+        max_retries: u32,
+        initial_flags: u32,
+    ) -> Result<TransferResult> {
+        // Stage under the archive's own directory (same volume → space is where
+        // the .rar already lives, IO stays local). Unique per-tx so concurrent
+        // transfers can't collide.
+        let tx_hex = bytes_to_hex(&tx_id);
+        let base = archive_path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(std::env::temp_dir);
+        let stage = base.join(format!(".ps5upload-rar-{tx_hex}"));
+        let _ = std::fs::remove_dir_all(&stage); // clear any stale staging
+        std::fs::create_dir_all(&stage)
+            .with_context(|| format!("create rar staging dir {}", stage.display()))?;
+
+        // Extract → transfer; ALWAYS remove the staging dir afterwards, even on
+        // error (a partial extraction must not linger next to the user's file).
+        let result = (|| {
+            extract_rar_to_dir(archive_path, password, &stage, &cfg.excludes)?;
+            transfer_dir_resumable(cfg, tx_id, dest_root, &stage, max_retries, initial_flags)
+        })();
+        let _ = std::fs::remove_dir_all(&stage);
+        result
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        fn fixture(name: &str) -> std::path::PathBuf {
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("testdata/rar")
+                .join(name)
+        }
+
+        // crypted.rar: content-encrypted (names listable without a password),
+        // password "unrar", first entry ".gitignore" = "target\nCargo.lock\n".
+        #[test]
+        fn content_encrypted_lists_names_without_password() {
+            let (_total, files) =
+                rar_plan_preview(&fixture("crypted.rar"), None, &[]).unwrap();
+            assert!(
+                files.iter().any(|(p, _)| p == ".gitignore"),
+                "names should be listable without a password: {files:?}"
+            );
+        }
+
+        #[test]
+        fn content_encrypted_extract_needs_password() {
+            let tmp = std::env::temp_dir().join("ps5u-rar-test-nopw");
+            let _ = std::fs::remove_dir_all(&tmp);
+            std::fs::create_dir_all(&tmp).unwrap();
+            let err = extract_rar_to_dir(&fixture("crypted.rar"), None, &tmp, &[])
+                .unwrap_err();
+            assert!(
+                err.to_string().contains("rar_password_required"),
+                "got: {err}"
+            );
+            let _ = std::fs::remove_dir_all(&tmp);
+        }
+
+        #[test]
+        fn content_encrypted_extract_with_password() {
+            let tmp = std::env::temp_dir().join("ps5u-rar-test-pw");
+            let _ = std::fs::remove_dir_all(&tmp);
+            std::fs::create_dir_all(&tmp).unwrap();
+            extract_rar_to_dir(&fixture("crypted.rar"), Some("unrar"), &tmp, &[])
+                .unwrap();
+            let content =
+                std::fs::read_to_string(tmp.join(".gitignore")).unwrap();
+            assert_eq!(content, "target\nCargo.lock\n");
+            let _ = std::fs::remove_dir_all(&tmp);
+        }
+
+        // comment-hpw-password.rar: HEADER-encrypted (names need the password),
+        // password "password".
+        #[test]
+        fn header_encrypted_list_needs_password() {
+            let err = inspect_rar(&fixture("comment-hpw-password.rar"), None)
+                .unwrap_err();
+            assert!(
+                err.to_string().contains("rar_password_required"),
+                "got: {err}"
+            );
+        }
+
+        #[test]
+        fn header_encrypted_inspect_with_password() {
+            let ins = inspect_rar(
+                &fixture("comment-hpw-password.rar"),
+                Some("password"),
+            )
+            .unwrap();
+            assert!(ins.file_count >= 1);
+            assert!(ins.total_uncompressed > 0);
+        }
+
+        #[test]
+        fn wrong_password_is_reported() {
+            let tmp = std::env::temp_dir().join("ps5u-rar-test-badpw");
+            let _ = std::fs::remove_dir_all(&tmp);
+            std::fs::create_dir_all(&tmp).unwrap();
+            let err = extract_rar_to_dir(
+                &fixture("comment-hpw-password.rar"),
+                Some("definitely-wrong"),
+                &tmp,
+                &[],
+            )
+            .unwrap_err();
+            assert!(
+                err.to_string().contains("rar_password_wrong"),
+                "got: {err}"
+            );
+            let _ = std::fs::remove_dir_all(&tmp);
+        }
+
+        // Excludes drop matching entries from the plan.
+        #[test]
+        fn excludes_apply_to_plan() {
+            let (_t, all) =
+                rar_plan_preview(&fixture("crypted.rar"), None, &[]).unwrap();
+            let (_t2, filtered) = rar_plan_preview(
+                &fixture("crypted.rar"),
+                None,
+                &[".gitignore".to_string()],
+            )
+            .unwrap();
+            assert!(all.iter().any(|(p, _)| p == ".gitignore"));
+            assert!(filtered.iter().all(|(p, _)| p != ".gitignore"));
+        }
+    }
+}
+
 #[cfg(test)]
 mod bandwidth_throttle_tests {
     use super::BandwidthThrottle;

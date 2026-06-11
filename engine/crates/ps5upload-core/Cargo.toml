@@ -32,3 +32,16 @@ sevenz-rust2 = { version = "0.21", default-features = false }
 # resize + DXT5/DDS encode (ported to match the PS5 reference byte-for-byte),
 # so only the decode + PNG re-encode sides of `image` are exercised.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "bmp", "gif"] }
+# Read .rar game dumps (incl. multi-volume + AES password) — host-extract to a
+# temp dir, then stream via the directory transfer (transfer.rs `rar_support`).
+# UnRAR is the only thing that fully handles RAR5 + multi-volume + passwords;
+# the `unrar` crate bundles the UnRAR C++ source (a C dependency, built via cc).
+# To keep the pure-Rust aarch64-linux-android cross-compile the zip/7z pins
+# protect, RAR is desktop-ONLY: the dependency is target-gated to non-Android
+# targets, and the code is `#[cfg(not(target_os = "android"))]`. This needs NO
+# `--features` plumbing — desktop builds include it automatically, the Android
+# target excludes it automatically (Android keeps zip/7z only). Note also: the
+# UnRAR license is GPL-incompatible; see docs/rar-support-design.md for the
+# distribution/licensing decision.
+[target.'cfg(not(target_os = "android"))'.dependencies]
+unrar = "0.5"
