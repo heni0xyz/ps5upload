@@ -4,6 +4,17 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 3.1.4
+
+- **Game details open on Android now.** Tapping a game's **Details** in the
+  Library did nothing on phones — the detail popup was being positioned to a
+  scrolled area instead of the screen, so it opened off-screen. It now opens
+  centered, every time.
+- Internal: green CI again (code formatting, translation coverage, and the
+  RAR test fixtures) — no user-facing change.
+
+---
+
 ## 3.1.3
 
 - **Each PS5 keeps its own upload, even when you switch.** Pick a file and set
