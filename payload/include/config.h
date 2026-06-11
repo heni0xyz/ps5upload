@@ -88,6 +88,27 @@
  */
 #define PS5UPLOAD2_SHARD_IO_BUF (4 * 1024 * 1024)
 
+/* Periodic writeback interval for the single-file persistent writer. After
+ * this many bytes of streamed data, the writer thread issues one fsync() to
+ * flush accumulated dirty pages to storage.
+ *
+ * Why: the streaming write path intentionally never fsync'd mid-transfer (only
+ * at COMMIT). For a SINGLE very large file (e.g. a 150+ GiB disk image), dirty
+ * pages then accumulate in the PS5 kernel page cache faster than the backing
+ * store can flush them. Once the dirty backlog crosses the kernel's throttle
+ * threshold, the kernel hard-throttles every write(2) and throughput collapses
+ * ~1000× (observed: >100 MB/s decaying to ~100 KiB/s over a 154 GiB upload).
+ * A reconnect "recovered" it only because closing the fd let writeback drain.
+ *
+ * A coarse periodic fsync converts the backlog to clean (reclaimable) pages so
+ * the dirty count stays bounded and throughput settles at the storage's honest
+ * sustained rate instead of collapsing. Coarse (256 MiB) on purpose: an earlier
+ * per-record posix_fadvise(DONTNEED) experiment regressed the 1 GiB path
+ * (synchronous writeback through the single writer thread, every record); at
+ * 256 MiB the flush cost is amortized to noise while still bounding the
+ * backlog. 0 would disable the periodic flush. */
+#define PS5UPLOAD2_WRITEBACK_FSYNC_BYTES (256u * 1024u * 1024u)
+
 /* Minimum shard size (payload bytes) for spawning the double-buffered writer
  * thread. Below this, the pthread_create/join cost — measured at ~4–6 ms per
  * shard on FreeBSD 11 / PS5 — dominates the write itself. For small shards

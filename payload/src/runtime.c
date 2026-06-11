@@ -2093,6 +2093,11 @@ static void direct_writer_discard(runtime_tx_entry_t *entry);
 static void *piped_writer_thread(void *arg) {
     piped_writer_t *pw = (piped_writer_t *)arg;
     int i = 0;
+    /* Bytes written since the last periodic fsync. Bounds the kernel
+     * dirty-page backlog for huge single-file streams so the kernel's
+     * dirty-page write-throttle never engages and collapses throughput. See
+     * PS5UPLOAD2_WRITEBACK_FSYNC_BYTES. */
+    uint64_t since_fsync = 0;
     for (;;) {
         ssize_t len;
         unsigned char *buf;
@@ -2121,6 +2126,25 @@ static void *piped_writer_thread(void *arg) {
             pthread_mutex_unlock(&pw->lock);
             return NULL;
         }
+        /* Periodically flush so the kernel's dirty-page backlog can't grow
+         * unbounded on a huge single-file stream and throttle write(2) to a
+         * crawl. fsync converts the dirty pages to clean (reclaimable) ones,
+         * so the dirty count stays bounded and throughput settles at the
+         * storage's sustained rate instead of collapsing late in the transfer.
+         * Done OUTSIDE the lock (between write and the empty-signal) so it adds
+         * natural backpressure — the producer blocks on a full slot during the
+         * flush, which is exactly the pacing we want. Disabled when the
+         * interval is 0. A flush failure isn't fatal here: COMMIT_TX still does
+         * a final fsync, and a real I/O error surfaces via write_full above. */
+#if PS5UPLOAD2_WRITEBACK_FSYNC_BYTES > 0
+        if (len > 0) {
+            since_fsync += (uint64_t)len;
+            if (since_fsync >= PS5UPLOAD2_WRITEBACK_FSYNC_BYTES) {
+                (void)fsync(pw->fd);
+                since_fsync = 0;
+            }
+        }
+#endif
         pthread_mutex_lock(&pw->lock);
         pw->slot[i].len = 0;
         pthread_cond_signal(&pw->cv_empty[i]);
