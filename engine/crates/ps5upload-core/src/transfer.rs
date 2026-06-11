@@ -3779,6 +3779,21 @@ pub fn transfer_7z_resumable(
 //  transient and removed afterwards). Multi-volume sets are opened from the
 //  first volume (UnRAR pulls in the siblings automatically); a password flows
 //  in but is never logged or persisted.
+//
+//  REQUIRED UnRAR NOTICE (UnRAR license, paragraph 2 — reproduced verbatim, as
+//  the license mandates it appear "in source code comments of resulting
+//  package"):
+//    UnRAR source code may be used in any software to handle RAR archives
+//    without limitations free of charge, but cannot be used to develop RAR
+//    (WinRAR) compatible archiver and to re-create RAR compression algorithm,
+//    which is proprietary. Distribution of modified UnRAR source code in
+//    separate form or as a part of other software is permitted, provided that
+//    full text of this paragraph, starting from "UnRAR source code" words, is
+//    included in license, or in documentation if license is not available, and
+//    in source code comments of resulting package.
+//  ps5upload uses UnRAR ONLY to extract; it never compresses RAR. GPLv3 §7
+//  linking exception + the full UnRAR license: see LICENSES/UnRAR-exception.md
+//  and LICENSES/UnRAR-license.txt.
 // ═══════════════════════════════════════════════════════════════════════════
 #[cfg(not(target_os = "android"))]
 pub use rar_support::{inspect_rar, rar_plan_preview, transfer_rar_resumable};

@@ -191,8 +191,14 @@ Mirrors the 7z feature 1:1; each layer already has the template:
 
 ## Open decisions for the maintainer
 
-1. **License path** (#1 GPL-exception vs #2 don't-distribute vs #3 libarchive).
-   This gates everything; resolve first.
+1. **License path — RESOLVED: GPLv3 §7 linking exception.** Audit confirmed the
+   engine has NO third-party GPL code (the only GPL-3.0 crates are ps5upload's
+   own; the offact/profile GPL code lives in the *separate* payload binary, not
+   linked with UnRAR — mere aggregation). So the project can grant a GPLv3 §7
+   exception for UnRAR directly. Done: `LICENSES/UnRAR-exception.md` (the
+   exception + the required UnRAR paragraph-2 notice), `LICENSES/UnRAR-license.txt`
+   (verbatim), the notice in `transfer.rs`'s `rar_support` header, and README.
+   UnRAR is used to *extract only*, never to compress.
 2. **Android**: accept RAR as desktop-only (recommended), or pursue Option B
    for Android parity.
 3. The vendored GPL-3.0 profile/offact code's authors vs a UnRAR exception —

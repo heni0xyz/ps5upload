@@ -503,6 +503,8 @@ This software builds on the following open-source projects:
 * [serde](https://serde.rs/) — Serialization
 * [anyhow](https://github.com/dtolnay/anyhow) — Error handling
 * [uuid](https://github.com/uuid-rs/uuid) — Job IDs
+* [zip](https://github.com/zip-rs/zip2) + [sevenz-rust2](https://crates.io/crates/sevenz-rust2) — pure-Rust `.zip` / `.7z` extraction
+* [unrar / unrar_sys](https://crates.io/crates/unrar) — `.rar` extraction on **desktop** (bundles the **UnRAR** source by Alexander Roshal; used to *extract only*, never to compress). See the required notice and the GPLv3 §7 linking exception in [`LICENSES/`](LICENSES/).
 
 **Payload (PS5):**
 * [PS5 Payload SDK](https://github.com/ps5-payload-dev/sdk) — Open-source SDK for PS5 payload development
@@ -521,6 +523,13 @@ knowledge. None of this exists without your collective effort. 🙏
 
 GNU General Public License v3.0 (GPLv3).
 Free to use, free to modify. See [`LICENSE`](LICENSE).
+
+**`.rar` support / UnRAR:** the desktop build bundles the UnRAR source (used
+only to *extract* RAR — never to compress or build a RAR-compatible archiver).
+A GPLv3 §7 linking exception covers combining it with this GPL code, and
+UnRAR's own license is reproduced as required. See
+[`LICENSES/UnRAR-exception.md`](LICENSES/UnRAR-exception.md) and
+[`LICENSES/UnRAR-license.txt`](LICENSES/UnRAR-license.txt).
 
 ## Author
 
