@@ -4,6 +4,15 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 3.1.2
+
+- **Windows packaging fixed.** The new `.rar` support pulled in a library that
+  didn't link cleanly on Windows, which broke the 3.1.0 / 3.1.1 Windows builds
+  (so those never shipped). Fixed — this release packages on every platform
+  again, and includes everything from 3.1.0 and 3.1.1 below.
+
+---
+
 ## 3.1.1
 
 Fixes and polish from your feedback.
