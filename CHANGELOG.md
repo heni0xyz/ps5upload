@@ -4,6 +4,31 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 3.1.1
+
+Fixes and polish from your feedback.
+
+- **Community payloads download again.** Fixed the download for NP Fake
+  Sign-in and the other earthonion payloads (their host moved), and **added
+  Ghostpad** (virtual controller / input redirection) to the payload list.
+- **Library details open on your phone.** On Android the game row's
+  Play / Details / ⋯ buttons could be pushed off the edge of the screen and
+  were untappable — the row now wraps so every action is reachable.
+- **A clearer Activity log.** Clearing history no longer removes uploads that
+  are still running; you can **delete individual entries**; each row has a
+  **View** button that shows the full details; and an upload that hasn't
+  started moving bytes now says **"Preparing…"** (compressed `.rar`/`.7z`
+  archives are extracted on your PC first, so there's a wait before the speed
+  appears) instead of a confusing "Uploading…" with no progress.
+- **Upload button tidy-up.** The button just says **Upload** again; which PS5
+  you're sending to is shown as a small chip next to it, so a long console
+  name no longer stretches the button.
+- **Profile changes tell you to reboot.** After changing a console avatar or a
+  local username, a note reminds you the change only shows on the PS5 after a
+  restart.
+
+---
+
 ## 3.1.0
 
 More formats, faster big uploads, and packages that install themselves.
