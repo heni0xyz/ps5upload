@@ -4,6 +4,38 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 3.1.0
+
+More formats, faster big uploads, and packages that install themselves.
+
+- **Upload `.7z` and `.rar` archives, not just `.zip`.** Pick a compressed
+  game dump and it's decompressed on your PC and streamed in — it lands
+  already extracted on the PS5. RAR also handles **multi-part sets** (just
+  pick the first part — the rest are found automatically) and
+  **password-protected** archives. (RAR is desktop-only; Android does `.zip`
+  and `.7z`.)
+- **Packages install themselves — in your queue.** Add a `.pkg` on the Upload
+  tab and it uploads, installs, and (optionally) deletes the staged copy as
+  one step, right alongside your folders, images, and archives. Add it to the
+  queue and it ends up playable — no separate trip to the Install Package tab
+  (which is still there as a package manager).
+- **Big uploads stay fast the whole way.** Fixed a slowdown where a large
+  single file — like a 150 GB disk image — would crawl to a few KB/s partway
+  through and only recover if you restarted. It now holds full speed from
+  start to finish.
+- **Every PS5 keeps its own everything.** Switch consoles and the library,
+  uploads, saves, and installed-apps lists all switch with you — no leftover
+  data from the other console, and no risk of a Restore or Uninstall landing
+  on the wrong PS5 mid-switch.
+- **Profile pictures + rename local users.** Set a console avatar and rename
+  offline accounts right from the Profile screen.
+- **Text fits everywhere.** Fixed text wrapping one letter per line in tight
+  or large-font layouts (the Register overflow menu and others) — on every OS.
+- **Steadier under the hood.** Fixed a payload crash during profile reads and
+  tightened a few rough edges.
+
+---
+
 ## 3.0.0
 
 The big redesign. Same tool, sharper look, fewer steps, fewer surprises.

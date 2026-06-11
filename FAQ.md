@@ -40,14 +40,20 @@ protocol (FTX2) over your LAN.
 **Q: What does it actually do?**
 - **Transfer** files and folders at near-wire speed, with BLAKE3
   per-shard verification and resume on drop.
-- **Upload a compressed `.zip`** of a game — decompressed on your PC
-  and streamed in, so it lands already extracted on the PS5 (no manual
-  unzip, no temp copy of the whole game).
+- **Upload a compressed archive** — `.zip`, `.7z`, or `.rar` — of a
+  game, decompressed on your PC and streamed in so it lands already
+  extracted on the PS5 (no manual unpack, no temp copy of the whole
+  game). RAR handles **multi-part sets** (pick the first part — the
+  rest are found automatically) and **password-protected** archives.
+  (RAR is desktop-only; Android uploads `.zip` and `.7z`.)
 - **Mount** `.exfat` and `.ffpkg` disk images natively on the PS5
   (via MDIOCATTACH + nmount). No third-party tool required.
-- **Install fakepkgs** — pick a `.pkg`, click Install. Three-tier
-  pipeline routes Sony's installer through ShellUI's authid via
-  ptrace RPC; verified end-to-end on FW 9.60. Game pkgs (CUSA /
+- **Install fakepkgs** — pick a `.pkg` and it uploads, installs, and
+  (optionally) cleans up the staged copy. On the Upload tab a `.pkg`
+  is a first-class queue item, so it rides the same queue as your
+  folders, images, and archives — add it and it ends up playable.
+  Three-tier pipeline routes Sony's installer through ShellUI's authid
+  via ptrace RPC; verified end-to-end on FW 9.60. Game pkgs (CUSA /
   PPSA / PCSA / EP / UP) install cleanly.
 - **Register + launch** in the XMB — Library row's Play button
   always registers first (idempotent), retries with a DRM-type
