@@ -4,6 +4,41 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 3.1.6
+
+- **Renaming a profile sticks now.** Renaming a console user updated the name
+  everywhere except the PS5 home screen, which kept showing the old name after a
+  reboot — even though the console still said the new name was "already taken."
+  The rename now also updates the home-screen display name so the two match, and
+  your avatar is left untouched. (Verified end-to-end on a real console.)
+- **No more shutdown moving a game from an external SSD to internal.** A
+  cross-volume move falls back to a local copy, and the faster copy path added
+  in 3.1.4 could flood the kernel with un-flushed writes during a multi-GB game
+  and panic the console. The copy now flushes on a fixed cadence so that backlog
+  can't build up. (Stress-tested with a sustained multi-GB copy on real
+  hardware.)
+- **Package installs stop claiming success when they didn't.** On FW 12.x an
+  install could be accepted and then fail in the background, leaving a
+  "corrupted" tile while the app showed "Installed." The app now waits for the
+  install to actually finish and surfaces a real error — pointing you to the
+  PS5's own Package Installer — instead of a false success. The Cancel button
+  can no longer interrupt a real install mid-way either.
+- **Android: bug reports and exports save again.** Saving a bug report, crash
+  bundle, settings / search / stats / log export, or save-data backup failed on
+  Android ("No such file or directory"). They now land in your Downloads folder,
+  each with its own filename.
+- **A pile of reliability and UI fixes.** Switching consoles no longer leaves
+  stale info on the Profile, Hardware, Screenshots, or Upload screens; failed
+  exports now tell you instead of silently doing nothing; the USB autoloader no
+  longer gets stuck after a failed scan; the command palette scrolls to keep the
+  selected item in view; `.rar` uploads land in a correctly named folder; the
+  engine re-extracts itself if its file goes missing; and the settings backup
+  now captures every preference (and stops losing your play-time on restore).
+  Plus internal fixes to large uploads, the transfer engine, and broader
+  translation coverage.
+
+---
+
 ## 3.1.5
 
 - **Stop a running upload, for real.** The Stop button on the Activity page now
