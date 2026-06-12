@@ -154,8 +154,9 @@ export default function SavesScreen() {
       // File-save dialog so the user picks a .zip target directly. The
       // default name `<title_id>.zip` matches the layout we enforce on
       // restore — keep the two in sync.
+      const destZipName = `${entry.title_id}.zip`;
       const destZip = await saveDialog({
-        defaultPath: `${entry.title_id}.zip`,
+        defaultPath: destZipName,
         filters: [{ name: "ZIP archive", extensions: ["zip"] }],
         title: tr("saves_download_picker", undefined, "Save backup as…"),
       });
@@ -177,7 +178,7 @@ export default function SavesScreen() {
       // savemgr's view of the save and the cross-tool resigner format.
       await saveArchiveBackupFinalize(tempDir, entry.title_id);
       // 4) Zip the cleaned `<scratch>/<title_id>/` → user-picked .zip.
-      await saveArchiveZip(tempDir, entry.title_id, destZip);
+      await saveArchiveZip(tempDir, entry.title_id, destZip, destZipName);
       pushNotification(
         "success",
         withConsolePrefix(host, `Backed up ${entry.title_id}`),

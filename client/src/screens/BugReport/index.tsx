@@ -246,8 +246,9 @@ export default function BugReportScreen() {
       };
 
       const { save } = await import("@tauri-apps/plugin-dialog");
+      const destFilename = `ps5upload-bugreport-${stamp(new Date())}.zip`;
       const dest = await save({
-        defaultPath: `ps5upload-bugreport-${stamp(new Date())}.zip`,
+        defaultPath: destFilename,
         filters: [{ name: "Zip", extensions: ["zip"] }],
       });
       if (!dest || typeof dest !== "string") {
@@ -258,6 +259,10 @@ export default function BugReportScreen() {
       const res = await invoke<BuildResult>("bug_report_build", {
         args: {
           dest,
+          // On Android `dest` is a content:// SAF URI std::fs can't write to;
+          // the backend redirects to Downloads using this name and returns the
+          // real path it wrote (shown in the success summary).
+          dest_filename: destFilename,
           report_json: JSON.stringify(manifest, null, 2),
           window_minutes: windowMinutes,
           klog_text: include.ps5_logs ? klog : null,

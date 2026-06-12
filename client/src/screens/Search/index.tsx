@@ -18,6 +18,7 @@ import {
 } from "../../components";
 // Direct import to avoid the barrel's circular-dep warning at build.
 import { usePrompt } from "../../components/ConfirmDialog";
+import { pushNotification } from "../../state/notifications";
 import { useTr } from "../../state/lang";
 import { formatBytes } from "../../lib/format";
 
@@ -136,7 +137,10 @@ export default function SearchScreen() {
   }, [host]);
 
   const run = async () => {
-    if (!host?.trim() || !pattern.trim()) return;
+    // `loading` guard: a re-entrant call (Enter pressed during an in-flight
+    // scan) would otherwise overwrite abortRef with a new controller, orphaning
+    // the running scan so it can never be cancelled and racing two result writes.
+    if (loading || !host?.trim() || !pattern.trim()) return;
     // Capture the host this scan targets so the result write below can be
     // dropped if the user switches console while the fan-out is running.
     const searchedHost = host;
@@ -335,12 +339,10 @@ export default function SearchScreen() {
               </span>
               <span className="text-xs text-[var(--color-muted)]">
                 {progress.scanned.toLocaleString()}{" "}
-                {tr("search_entr", undefined, "entr")}
-                {progress.scanned === 1 ? "y" : "ies"}{" "}
+                {tr("search_entries_result", undefined, "entries")}{" "}
                 {tr("search_scanned_progress", undefined, "scanned ·")}{" "}
                 {progress.hits.toLocaleString()}{" "}
-                {tr("search_match_progress", undefined, "match")}
-                {progress.hits === 1 ? "" : "es"}{" "}
+                {tr("search_match_progress", undefined, "matches")}{" "}
                 {tr("search_so_far", undefined, "so far")}
               </span>
             </div>
@@ -379,8 +381,7 @@ export default function SearchScreen() {
             <div className="mb-2 flex items-center gap-3 text-xs text-[var(--color-muted)]">
               <span>
                 {result.hits.length.toLocaleString()}{" "}
-                {tr("search_match_result", undefined, "match")}
-                {result.hits.length === 1 ? "" : "es"}{" "}
+                {tr("search_match_result", undefined, "matches")}{" "}
                 {tr("search_scanned_result", undefined, "· scanned")}{" "}
                 {result.scanned.toLocaleString()}{" "}
                 {tr("search_entries_result", undefined, "entries")}
@@ -440,24 +441,37 @@ export default function SearchScreen() {
 async function exportSearchResults(hits: SearchHit[], format: "csv" | "json") {
   const { save } = await import("@tauri-apps/plugin-dialog");
   const { writeTextFileToPath } = await import("../../lib/saveTextFile");
-  const dest = await save({
-    defaultPath: `ps5upload-search-${Date.now()}.${format}`,
-    filters: [{ name: format.toUpperCase(), extensions: [format] }],
-  });
-  if (!dest || typeof dest !== "string") return;
-  if (format === "json") {
-    await writeTextFileToPath(dest, JSON.stringify(hits, null, 2));
-    return;
+  const fileName = `ps5upload-search-${Date.now()}.${format}`;
+  // Surface write failures (e.g. a read-only dest, disk full, Android SAF
+  // error) instead of swallowing them — a failed export must not look like a
+  // successful one.
+  try {
+    const dest = await save({
+      defaultPath: fileName,
+      filters: [{ name: format.toUpperCase(), extensions: [format] }],
+    });
+    if (!dest || typeof dest !== "string") return;
+    if (format === "json") {
+      await writeTextFileToPath(dest, JSON.stringify(hits, null, 2), fileName);
+    } else {
+      // CSV
+      const esc = (v: string | number) => {
+        const s = String(v);
+        if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+        return s;
+      };
+      const rows = ["path,name,size,kind"];
+      for (const h of hits) {
+        rows.push([h.path, h.name, h.size, h.kind].map(esc).join(","));
+      }
+      await writeTextFileToPath(dest, rows.join("\n"), fileName);
+    }
+    pushNotification("success", "Search results exported", {
+      body: `Saved ${hits.length.toLocaleString()} ${format.toUpperCase()} rows.`,
+    });
+  } catch (e) {
+    pushNotification("error", "Couldn't export search results", {
+      body: e instanceof Error ? e.message : String(e),
+    });
   }
-  // CSV
-  const esc = (v: string | number) => {
-    const s = String(v);
-    if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
-    return s;
-  };
-  const rows = ["path,name,size,kind"];
-  for (const h of hits) {
-    rows.push([h.path, h.name, h.size, h.kind].map(esc).join(","));
-  }
-  await writeTextFileToPath(dest, rows.join("\n"));
 }

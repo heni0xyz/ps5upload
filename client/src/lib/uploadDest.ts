@@ -55,7 +55,21 @@ export function resolveUploadDest(
     return { destRoot, dest: destRoot };
   }
   const raw = basename(sourcePath);
-  const name = isArchive ? raw.replace(/\.(zip|7z)$/i, "") : raw;
+  // Strip the archive extension so `MyGame.rar` extracts to `<root>/MyGame`,
+  // matching zip/7z. `.rar` is a first-class archive source (archiveFormat()
+  // returns "rar", pickFile sets kind:"archive"), so it must be stripped too —
+  // otherwise the contents land in a folder literally named `MyGame.rar`.
+  let name = raw;
+  if (isArchive) {
+    if (/\.rar$/i.test(raw)) {
+      // Also peel a trailing `.partN` from multi-volume names like
+      // `MyGame.part1.rar` (rar-only — zip/7z don't use that scheme, so we
+      // don't risk mangling a zip that merely has ".partN" in its name).
+      name = raw.replace(/\.rar$/i, "").replace(/\.part\d+$/i, "");
+    } else {
+      name = raw.replace(/\.(zip|7z)$/i, "");
+    }
+  }
   const dest = name ? `${destRoot}/${name}` : destRoot;
   return { destRoot, dest };
 }

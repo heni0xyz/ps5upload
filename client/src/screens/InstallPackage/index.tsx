@@ -241,6 +241,7 @@ export default function InstallPackageScreen() {
   const error = usePkgLibrary(host, (s) => s.error);
   const installing = usePkgLibrary(host, (s) => s.installing);
   const busyNotice = usePkgLibrary(host, (s) => s.busyNotice);
+  const installPending = usePkgLibrary(host, (s) => s.installPending);
   const refresh = usePkgLibrary(host, (s) => s.refresh);
   const addAndUpload = usePkgLibrary(host, (s) => s.addAndUpload);
   const install = usePkgLibrary(host, (s) => s.install);
@@ -548,9 +549,15 @@ export default function InstallPackageScreen() {
             />
             <span>{busyNotice}</span>
           </div>
-          <Button variant="secondary" size="sm" onClick={cancelPendingInstall}>
-            {tr("cancel", undefined, "Cancel")}
-          </Button>
+          {/* Only offer Cancel while the install is still WAITING its turn.
+              During the real install (FW 12.x keeps busyNotice set for the
+              "screen may go black" notice) cancelling would tear the payload
+              out mid-swap, so the button is hidden then. */}
+          {installPending && (
+            <Button variant="secondary" size="sm" onClick={cancelPendingInstall}>
+              {tr("cancel", undefined, "Cancel")}
+            </Button>
+          )}
         </div>
       )}
 

@@ -60,9 +60,15 @@ type StepState = "idle" | "busy" | "ok" | "fail";
  *  sees explicit progress in the thing they just clicked. Takes the
  *  active `tr` translator so the labels render in the user's locale —
  *  this is a pure helper but its outputs are user-facing. */
+type SendPhase = "locating" | "sending" | "waiting";
+
 function sendButtonLabel(
   state: StepState,
-  msg: string,
+  // The explicit send phase, set by handleSend. Previously this re-parsed the
+  // localized status MESSAGE with English substring matches (`includes("locating")`),
+  // so under any non-English locale the message never matched and the button
+  // was stuck on "Working…". Switching on a phase token localizes correctly.
+  phase: SendPhase | null,
   elapsedMs: number,
   tr: (
     key: string,
@@ -76,12 +82,11 @@ function sendButtonLabel(
       : tr("connection_send_send", undefined, "Send helper");
   }
   const sec = Math.max(1, Math.round(elapsedMs / 1000));
-  const m = (msg || "").toLowerCase();
-  if (m.includes("locating"))
+  if (phase === "locating")
     return tr("connection_send_locating", { sec }, `Locating ELF… (${sec}s)`);
-  if (m.includes("sending"))
+  if (phase === "sending")
     return tr("connection_send_sending", { sec }, `Sending to PS5… (${sec}s)`);
-  if (m.includes("waiting"))
+  if (phase === "waiting")
     return tr(
       "connection_send_waiting",
       { sec },
@@ -177,6 +182,10 @@ export default function ConnectionScreen() {
    *  otherwise-silent ~3-20s probe window. null when not in progress. */
   const sendStartedAt = useRef<number | null>(null);
   const [elapsedMs, setElapsedMs] = useState(0);
+  // Explicit send phase for the Send button label — set by handleSend, cleared
+  // on settle. Drives sendButtonLabel so the label localizes (it used to be
+  // re-derived from the localized status message via English substring matches).
+  const [sendPhase, setSendPhase] = useState<SendPhase | null>(null);
 
   /** Active boot-probe poller. Held so the component-unmount effect can
    *  cancel it — otherwise a poll fires up to 20 s after unmount and
@@ -269,7 +278,7 @@ export default function ConnectionScreen() {
       setTransientStep1(null);
       setTransientStep1Msg(null);
     } else {
-      setStoredStep1("idle", "Enter your PS5's address and check");
+      setStoredStep1("idle", tr("connection_step1_idle", undefined, "Enter your PS5's address and check"));
       setTransientStep1(s);
       setTransientStep1Msg(msg);
     }
@@ -279,6 +288,7 @@ export default function ConnectionScreen() {
     setTransientStep2Msg(msg);
   };
   const settleStep2 = (s: "ok" | "fail" | "idle", msg: string) => {
+    setSendPhase(null);
     if (s === "ok") {
       setStoredStep2("ok", msg);
       setTransientStep2(null);
@@ -357,6 +367,7 @@ export default function ConnectionScreen() {
       payloadVersion: null,
       ps5Kernel: null,
     });
+    setSendPhase("locating");
     flashStep2(
       "busy",
       tr(
@@ -367,6 +378,7 @@ export default function ConnectionScreen() {
     );
     try {
       const elf = await bundledPayloadPath();
+      setSendPhase("sending");
       flashStep2(
         "busy",
         tr(
@@ -384,6 +396,7 @@ export default function ConnectionScreen() {
       settleStep2("fail", e instanceof Error ? e.message : String(e));
       return;
     }
+    setSendPhase("waiting");
     flashStep2(
       "busy",
       tr("connection_waiting_boot", undefined, "Waiting for payload to boot…"),
@@ -540,7 +553,7 @@ export default function ConnectionScreen() {
               value={host}
               onChange={(e) => {
                 setHost(e.target.value);
-                settleStep1("idle", "Enter your PS5's address and check");
+                settleStep1("idle", tr("connection_step1_idle", undefined, "Enter your PS5's address and check"));
                 settleStep2("idle", tr("connection_payload_not_loaded", undefined, "Helper not loaded yet"));
               }}
               onKeyDown={(e) => {
@@ -575,7 +588,7 @@ export default function ConnectionScreen() {
               // (d) clicking Check. The point of discovery is to
               // collapse those into one gesture.
               setHost(picked);
-              settleStep1("idle", "Enter your PS5's address and check");
+              settleStep1("idle", tr("connection_step1_idle", undefined, "Enter your PS5's address and check"));
               settleStep2("idle", tr("connection_payload_not_loaded", undefined, "Helper not loaded yet"));
               // Pass the picked host explicitly so we don't race
               // React's re-render — handleCheck's closure captures
@@ -615,7 +628,7 @@ export default function ConnectionScreen() {
               disabled={step2 === "busy"}
               loading={step2 === "busy"}
             >
-              {sendButtonLabel(step2, step2Msg, elapsedMs, tr)}
+              {sendButtonLabel(step2, sendPhase, elapsedMs, tr)}
             </Button>
             {step2 === "busy" && (
               <p className="mt-3 text-xs text-[var(--color-muted)]">

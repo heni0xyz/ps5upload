@@ -112,5 +112,13 @@ function formatSeconds(s: number | null): string {
 function formatThermal(flags: number | null): string {
   if (flags === null) return "—";
   if (flags === 0) return "no alerts";
-  return `0x${flags.toString(16)} (${flags} bit${flags === 1 ? "" : "s"} set)`;
+  // Count the SET bits, not the raw flag value — `${flags} bits set` labelled
+  // e.g. flag 0x4 as "4 bits set" when only one bit is set.
+  let n = flags;
+  let count = 0;
+  while (n) {
+    count += n & 1;
+    n >>>= 1;
+  }
+  return `0x${flags.toString(16)} (${count} bit${count === 1 ? "" : "s"} set)`;
 }

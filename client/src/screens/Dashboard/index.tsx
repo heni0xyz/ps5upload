@@ -169,10 +169,10 @@ export default function DashboardScreen() {
                   label={tr("dashboard_label_cpu_freq", "CPU freq")}
                   value={`${(temps.cpu_freq_mhz ?? 0).toFixed(0)} MHz`}
                 />
-                <KvRow
-                  label={tr("dashboard_label_soc_power", "SoC power")}
-                  value={`${((temps.soc_power_mw ?? 0) / 1000).toFixed(1)} W`}
-                />
+                {/* SoC power is an extended-read-only field; the Dashboard's
+                    basic auto-poll never fetches it, so it always read 0.0 W.
+                    Dropped to avoid showing a permanently-zero value (the
+                    Hardware screen removed it for the same reason). */}
               </>
             ) : (
               <KvRow label="—" value="(loading)" />

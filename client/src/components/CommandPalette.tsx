@@ -181,6 +181,7 @@ export function CommandPalette() {
   const [query, setQuery] = useState("");
   const [activeIdx, setActiveIdx] = useState(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const activeRef = useRef<HTMLButtonElement | null>(null);
 
   const close = () => {
     setOpen(false);
@@ -205,7 +206,16 @@ export function CommandPalette() {
       // don't have today.
       void target;
       e.preventDefault();
-      setOpen((v) => !v);
+      setOpen((v) => {
+        // Closing via the toggle must reset like close()/Escape/click-outside,
+        // otherwise the stale query + active index persist and the palette
+        // reopens mid-filtered with the wrong row highlighted.
+        if (v) {
+          setQuery("");
+          setActiveIdx(0);
+        }
+        return !v;
+      });
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
@@ -217,6 +227,14 @@ export function CommandPalette() {
       return () => window.clearTimeout(id);
     }
   }, [open]);
+
+  // Keep the arrow-key-selected command visible: without this, holding ↓ moves
+  // the highlight past the bottom of the scroll viewport and the user can't see
+  // what's selected. `block: "nearest"` avoids gratuitous scrolling when it's
+  // already in view. Depends on `open` since the ref only mounts while open.
+  useEffect(() => {
+    if (open) activeRef.current?.scrollIntoView({ block: "nearest" });
+  }, [activeIdx, open]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -313,7 +331,7 @@ export function CommandPalette() {
             grouped.map(({ group, items }) => (
               <div key={group}>
                 <div className="px-3 pb-1 pt-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-muted)]">
-                  {group}
+                  {tr(`cmdpalette_group_${group.toLowerCase()}`, group)}
                 </div>
                 {items.map((c) => {
                   flatIdx++;
@@ -321,6 +339,7 @@ export function CommandPalette() {
                   return (
                     <button
                       key={c.id}
+                      ref={isActive ? activeRef : undefined}
                       type="button"
                       onMouseEnter={() => setActiveIdx(flatIdx)}
                       onClick={() => void c.run()}

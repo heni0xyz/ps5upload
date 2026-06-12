@@ -58,16 +58,25 @@ export function LocalPathPicker() {
   const begin = useCallback(async () => {
     setError(null);
     setGranted(null);
+    // Show the loader during the access/roots probe so the picker doesn't flash
+    // "This folder is empty" before the first dir loads. loadDir() clears
+    // loading in its finally; every other exit path must clear it itself.
+    setLoading(true);
     try {
       const ok = await localFs.accessGranted();
       setGranted(ok);
-      if (!ok) return;
+      if (!ok) {
+        setLoading(false); // grant screen — no dir to load
+        return;
+      }
       const rs = await localFs.storageRoots();
       setRoots(rs);
-      if (rs.length) await loadDir(rs[0]);
+      if (rs.length) await loadDir(rs[0]); // loadDir clears loading
+      else setLoading(false); // no roots — stop the spinner
     } catch (e) {
       setError(String(e));
       setGranted(true); // don't trap the user on a probe failure
+      setLoading(false);
     }
   }, [loadDir]);
 

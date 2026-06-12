@@ -1879,6 +1879,35 @@ profile: "Profile",
 "upload.rar.needed":
   "This archive is encrypted — enter its password to continue.",
 "upload.rar.wrong": "Wrong password — try again.",
+
+// Keys referenced by components via tr() but previously absent from every
+// locale (including this source-of-truth), so non-English users always saw the
+// English fallback and the i18n-coverage gate couldn't track them.
+status_running_count: "{count} running",
+library_show_all: "Show all {count}",
+screenshots_bulk_partial:
+  "Downloaded {ok}; {failed} failed — failed ones stay selected to retry.",
+upload_done_registered: 'On your PS5 home screen as "{name}" — ready to launch.',
+fs_rename_target_exists:
+  'An item named "{name}" already exists here — rename would overwrite it. Pick another name or delete it first.',
+fs_op_on_other_console:
+  "A file operation is running on {name} — switch to that console's tab to see its progress.",
+
+// Command-palette group headers (rendered via tr(`cmdpalette_group_${group}`)).
+cmdpalette_group_navigation: "Navigation",
+cmdpalette_group_theme: "Theme",
+cmdpalette_group_connection: "Connection",
+cmdpalette_group_window: "Window",
+connection_step1_idle: "Enter your PS5's address and check",
+
+// Keyboard-shortcuts overlay (section headers + descriptions).
+shortcuts_sec_navigation: "Navigation",
+shortcuts_sec_filesystem: "File system",
+shortcuts_cmd_palette: "Open command palette",
+shortcuts_help: "Show this help",
+shortcuts_close: "Close any open modal or overlay",
+shortcuts_move_selection: "Move selection in lists / palette",
+shortcuts_activate: "Open / activate",
 };
 
 export default en;

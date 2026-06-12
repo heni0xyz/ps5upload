@@ -184,6 +184,13 @@ interface PkgLibraryState {
    *  upload is QUEUED behind an active transfer (the PS5 can only do one at a
    *  time). Null when nothing is waiting. */
   busyNotice: string | null;
+  /** True ONLY while an install is still WAITING its turn behind an active
+   *  transfer (the cancellable window). It is cleared the instant the real
+   *  install begins — unlike `busyNotice`, which on FW 12.x stays set during
+   *  the actual install to show the "screen may go black" notice. Cancel must
+   *  key off this, never `busyNotice`, or it could abort a real install
+   *  mid-swap and leave a half-loaded payload. */
+  installPending: boolean;
 
   refresh: (host: string) => Promise<void>;
   addAndUpload: (localPath: string, host: string) => Promise<void>;
@@ -242,6 +249,80 @@ export interface PkgInstallOutcome {
 }
 
 /**
+ * How long to wait for the async install to reach a terminal phase after the
+ * payload *accepts* the task. `pkg_install_start` returning rc==0 only means
+ * "Sony's installer accepted the task" — the actual decrypt+write runs
+ * asynchronously and can still fail (the FW-12.xx "installs but the tile is
+ * corrupted" symptom). We poll the real status so a Sony-reported failure
+ * surfaces as a failure instead of a false success. A genuine reject arrives
+ * fast; a large legitimate install may still be writing when this elapses, so
+ * on timeout we stay optimistic (no regression vs. the old accept==success).
+ */
+const PKG_VERIFY_WINDOW_MS = 30_000;
+const PKG_VERIFY_POLL_MS = 1_500;
+/** Give up verifying (stay optimistic) after this many consecutive poll
+ *  errors — e.g. the engine GC'd the session, or a transient socket blip. */
+const PKG_VERIFY_MAX_POLL_ERRORS = 3;
+
+/** Re-install guidance appended when Sony fails the async install — mirrors the
+ *  may-not-launch copy so the user has a concrete next step. */
+const PKG_ASYNC_FAILED_HINT =
+  'the PS5 reported the install didn’t complete (the tile may show "Can’t start the game or app. The data is corrupted."). Re-install from the PS5: Settings → System → Debug Settings → Game → Package Installer.';
+
+/**
+ * Poll `pkg_install_status` until the install reaches a terminal phase, to
+ * catch an install the payload accepted but Sony's installer then failed
+ * asynchronously. Returns `{ failed: true, message }` only on a definitive
+ * `error` phase; every other outcome (done, timeout, un-pollable session, or
+ * an engine too old to report a `phase`) returns `{ failed: false }` so we
+ * never downgrade a real success.
+ */
+async function verifyInstallCompleted(
+  session: string | undefined,
+): Promise<{ failed: boolean; message: string }> {
+  // No session id ⇒ older engine (or a test harness) that can't report status.
+  // Can't verify — preserve the pre-fix optimistic behavior.
+  if (!session) return { failed: false, message: "" };
+  const deadline = Date.now() + PKG_VERIFY_WINDOW_MS;
+  let pollErrors = 0;
+  while (Date.now() < deadline) {
+    await sleep(PKG_VERIFY_POLL_MS);
+    try {
+      const s = (await invoke("pkg_install_status", { session })) as {
+        phase?: string;
+        err_code?: number;
+        err_message?: string;
+      };
+      // An engine that doesn't speak status returns no `phase` — treat as
+      // "can't verify" and stop (stay optimistic) rather than spin to timeout.
+      if (typeof s?.phase !== "string") return { failed: false, message: "" };
+      if (s.phase === "error") {
+        const code = (s.err_code ?? 0) >>> 0;
+        const sony =
+          s.err_message ||
+          (code ? `0x${code.toString(16).padStart(8, "0")}` : "");
+        return {
+          failed: true,
+          message: sony
+            ? `${sony} — ${PKG_ASYNC_FAILED_HINT}`
+            : PKG_ASYNC_FAILED_HINT,
+        };
+      }
+      if (s.phase === "done") return { failed: false, message: "" };
+      pollErrors = 0; // a clean in-progress poll resets the error streak
+    } catch {
+      // Session GC'd or a transient blip: don't fail the install on polling
+      // trouble — give up verifying after a few and stay optimistic.
+      if (++pollErrors >= PKG_VERIFY_MAX_POLL_ERRORS) {
+        return { failed: false, message: "" };
+      }
+    }
+  }
+  // Still installing when the window elapsed (large title): stay optimistic.
+  return { failed: false, message: "" };
+}
+
+/**
  * The bare `.pkg` install mechanism, with NO store/UI side effects — shared by
  * the Install Package screen's manual install (`install()`) and the upload
  * queue's pkg finisher (`uploadQueue.runOne`). The `.pkg` must already be
@@ -264,6 +345,13 @@ export async function runPkgInstall(
 ): Promise<PkgInstallOutcome> {
   const ip = hostOf(host);
   let installed = false;
+  // Whether the payload *rejected* the install at register time (rc != 0 or an
+  // RPC error). Only a genuine start rejection should trigger the DPI fallback
+  // — an install that was ACCEPTED but then failed Sony's async install must
+  // NOT fall back to DPI, since DPI's local-path install is the metadata-only
+  // path that produces the very "data is corrupted" tile we're guarding against
+  // on FW 12.xx.
+  let startRejected = false;
   let mainErr = "";
   let mayNotLaunch = false;
   try {
@@ -279,19 +367,32 @@ export async function runPkgInstall(
       register_path?: string;
       err_message?: string;
       may_not_launch?: boolean;
+      session_id?: string;
     };
     const rc = (r.err_code ?? 0) >>> 0;
     if (rc === 0) {
-      installed = true;
-      mayNotLaunch = pkgInstallMayNotLaunch(r);
+      // Accept != complete. Verify the async install actually finished before
+      // reporting success — this is what catches the FW-12.xx case where the
+      // in-process InstallByPackage tier accepts the task, then Sony's
+      // installer fails the write and leaves an unlaunchable tile.
+      const verdict = await verifyInstallCompleted(r.session_id);
+      if (verdict.failed) {
+        mainErr = verdict.message;
+        // installed stays false, startRejected stays false → no DPI fallback.
+      } else {
+        installed = true;
+        mayNotLaunch = pkgInstallMayNotLaunch(r);
+      }
     } else {
+      startRejected = true;
       mainErr = r.err_message || `0x${rc.toString(16).padStart(8, "0")}`;
     }
   } catch (e) {
+    startRejected = true;
     mainErr = pkgError(e);
   }
 
-  if (!installed) {
+  if (!installed && startRejected) {
     // FALLBACK: the jailbroken-context install was rejected. Try the
     // standalone DPI daemon (replaces our payload on the single-payload
     // loader, installs, then we restore the payload).
@@ -352,6 +453,7 @@ const makePkgLibraryStore = () =>
   error: null,
   installing: false,
   busyNotice: null,
+  installPending: false,
 
   async refresh(host) {
     if (!host?.trim() || get().installing) return;
@@ -610,7 +712,7 @@ const makePkgLibraryStore = () =>
 
   async install(path, host) {
     if (!host?.trim() || get().installing) return;
-    set({ installing: true, busyNotice: null });
+    set({ installing: true, busyNotice: null, installPending: false });
     // Any transfer that the payload swap would interrupt: an Upload-screen
     // transfer, or a .pkg upload/queued here. Installing must wait for all of
     // them so it doesn't tear the payload out mid-upload.
@@ -627,7 +729,10 @@ const makePkgLibraryStore = () =>
       // Queue behind any active transfer instead of crashing it. Cancellable
       // via cancelPendingInstall (which flips `installing` off mid-wait).
       if (transfersActive()) {
+        // `installPending` marks the cancellable WAITING window — cleared the
+        // moment the real install starts below.
         set({
+          installPending: true,
           busyNotice:
             "Waiting for the current upload to finish before installing…",
         });
@@ -635,8 +740,11 @@ const makePkgLibraryStore = () =>
           if (!get().installing) return; // user cancelled the pending install
           await sleep(400);
         }
-        set({ busyNotice: null });
+        set({ installPending: false, busyNotice: null });
       }
+      // The real install begins here: clear installPending so Cancel can no
+      // longer abort it (even though busyNotice gets set again on FW 12.x).
+      set({ installPending: false });
       // Inside the try so any throw still hits `finally` and clears the
       // `installing` flag — otherwise a wedged flag would lock the screen.
       patch({ status: "installing", lastResult: undefined });
@@ -689,15 +797,18 @@ const makePkgLibraryStore = () =>
     } catch (e) {
       patch({ status: "idle", lastResult: { ok: false, message: pkgError(e) } });
     } finally {
-      set({ installing: false, busyNotice: null });
+      set({ installing: false, busyNotice: null, installPending: false });
     }
   },
 
   cancelPendingInstall() {
-    // Only abandon an install still WAITING its turn (busyNotice set) — never
+    // Only abandon an install still WAITING its turn (installPending) — never
     // yank a real install mid-swap, which would leave the payload half-loaded.
-    if (get().busyNotice) {
-      set({ installing: false, busyNotice: null });
+    // Keyed off installPending, NOT busyNotice: on FW 12.x busyNotice stays set
+    // during the genuine install to show the "screen may go black" notice, so
+    // keying off it let Cancel kill a real install.
+    if (get().installPending) {
+      set({ installing: false, busyNotice: null, installPending: false });
     }
   },
 

@@ -32,6 +32,7 @@ pub mod probes;
 pub mod ps5_engine;
 pub mod reveal;
 pub mod save_archive;
+pub mod save_dest;
 pub mod save_text_file;
 pub mod saves_screenshots;
 pub mod screenshot_convert;

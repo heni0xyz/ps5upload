@@ -1742,9 +1742,18 @@ export async function saveArchiveZip(
   srcDir: string,
   innerRoot: string,
   destZip: string,
+  // The filename offered as the dialog's defaultPath. On Android `destZip`
+  // is a content:// URI with no usable name; pass this so the backend keeps
+  // distinct backups from colliding on one fixed Downloads filename.
+  fileName?: string,
 ): Promise<void> {
   await invoke("save_archive_zip", {
-    req: { src_dir: srcDir, inner_root: innerRoot, dest_zip: destZip },
+    req: {
+      src_dir: srcDir,
+      inner_root: innerRoot,
+      dest_zip: destZip,
+      dest_filename: fileName,
+    },
   });
 }
 

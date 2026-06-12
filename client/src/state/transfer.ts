@@ -479,6 +479,13 @@ export const useTransferStore = create<TransferState>((set) => {
             } catch {
               handedToSmp = false;
             }
+            // Stop / reset / a fresh start() can land during the SMP round-trips
+            // (smpStatus + smpManualInstall) above. The hand-off is already
+            // durable PS5-side, so don't write stale UI for a superseded run —
+            // mirror the native mount path's post-await isLive() guard. Without
+            // this, the SMP branch falls through to the done-state / register
+            // writes and clobbers the UI of whatever run replaced it.
+            if (!isLive()) return;
             // Only mount it ourselves when SMP didn't take it.
             if (!handedToSmp)
               try {

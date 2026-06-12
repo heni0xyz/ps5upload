@@ -187,16 +187,15 @@ export const useRosterStore = create<RosterState>((set, get) => ({
   remove: (id) => {
     const removed = get().profiles.find((p) => p.id === id);
     const next = get().profiles.filter((p) => p.id !== id);
-    // Evict the removed console's isolated pkg-library store so a future
-    // console reusing the same IP starts clean — but only if no remaining
-    // profile still points at that bare host (two profiles can share an IP).
-    if (
-      removed &&
-      !next.some((p) => hostOf(p.host) === hostOf(removed.host))
-    ) {
+    // The removed host is "orphaned" (safe to evict its per-console state) only
+    // if no remaining profile still points at that bare host — two profiles can
+    // share an IP.
+    const hostOrphaned = (h: string) =>
+      !next.some((p) => hostOf(p.host) === hostOf(h));
+    // The pkg-library store is NOT re-created by switchToHost below, so it's
+    // safe to evict up front.
+    if (removed && hostOrphaned(removed.host)) {
       evictPkgLibraryStore(removed.host);
-      evictUploadDraft(removed.host);
-      evictFsClipboard(removed.host);
     }
     let next_active = get().active_id;
     if (next_active === id) {
@@ -212,6 +211,16 @@ export const useRosterStore = create<RosterState>((set, get) => ({
         useUploadStore.getState().switchToHost(next[0].host);
         useConnectionStore.getState().setHost(next[0].host);
       }
+    }
+    // Evict the removed host's upload draft + FS clipboard AFTER the promotion
+    // above. switchToHost stashes the CURRENT console's draft/clipboard under
+    // connection.host — which is still the REMOVED host until setHost() runs in
+    // that block. Evicting first would let switchToHost immediately re-stash the
+    // removed console's state, so a future console reusing the same IP would
+    // wrongly inherit it. Doing it here clears that just-created stash.
+    if (removed && hostOrphaned(removed.host)) {
+      evictUploadDraft(removed.host);
+      evictFsClipboard(removed.host);
     }
     set({ profiles: next, active_id: next_active });
     persist(next, next_active);

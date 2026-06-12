@@ -37,8 +37,16 @@ pub struct PayloadLogFile {
 
 #[derive(Deserialize)]
 pub struct BugReportArgs {
-    /// User-picked destination `.zip` path.
+    /// User-picked destination `.zip` path. On Android the save dialog returns
+    /// a `content://` SAF URI here, which `std::fs` can't create — the bundler
+    /// redirects those to a real path under Downloads (see `save_dest`).
     pub dest: String,
+    /// The filename the renderer offered in the save dialog (e.g.
+    /// `ps5upload-bugreport-<stamp>.zip`). Used as the leaf name when `dest`
+    /// is an Android `content://` URI and the write is redirected to Downloads.
+    /// Optional for backward compatibility with older renderers.
+    #[serde(default)]
+    pub dest_filename: Option<String>,
     /// Pretty-printed manifest JSON the renderer already built.
     pub report_json: String,
     /// How many minutes of app log to include (filters `app.jsonl`).
@@ -127,7 +135,18 @@ fn assemble_zip(
     dirs: &BundleDirs,
     now_ms: u64,
 ) -> Result<BugReportResult, String> {
-    let f = std::fs::File::create(&args.dest).map_err(|e| format!("create {}: {e}", args.dest))?;
+    // Resolve the destination to a real path. On Android the renderer's save
+    // dialog hands us a `content://` URI that std::fs can't create; redirect it
+    // to a real path under Downloads so the bundle actually writes (the failure
+    // users saw as "Couldn't build the report"). Desktop paths pass through.
+    let fallback_name = args
+        .dest_filename
+        .as_deref()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or("ps5upload-bugreport.zip");
+    let dest_path = super::save_dest::resolve_save_dest(&args.dest, fallback_name)?;
+    let f = std::fs::File::create(&dest_path)
+        .map_err(|e| format!("create {}: {e}", dest_path.display()))?;
     let mut zw = zip::ZipWriter::new(f);
     let opts = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
@@ -239,11 +258,14 @@ fn assemble_zip(
 
     zw.finish().map_err(|e| format!("zip finish: {e}"))?;
 
-    let bytes = std::fs::metadata(&args.dest).map(|m| m.len()).unwrap_or(0);
+    let bytes = std::fs::metadata(&dest_path).map(|m| m.len()).unwrap_or(0);
     Ok(BugReportResult {
         entries,
         bytes,
-        dest: args.dest.clone(),
+        // The path we actually wrote — equals args.dest on desktop, but is the
+        // redirected Downloads path on Android, so the success UI points the
+        // user at the real file.
+        dest: dest_path.to_string_lossy().into_owned(),
         log_lines,
         crash_reports,
         images,
@@ -337,6 +359,7 @@ mod tests {
         let dest = root.join("out.zip");
         let args = BugReportArgs {
             dest: dest.to_string_lossy().into_owned(),
+            dest_filename: None,
             report_json: r#"{"kind":"ps5upload-bug-report"}"#.to_string(),
             window_minutes: 30,
             // Real kernel logs contain non-UTF8 / control bytes after lossy
@@ -415,6 +438,7 @@ mod tests {
         let dest = root.join("out.zip");
         let args = BugReportArgs {
             dest: dest.to_string_lossy().into_owned(),
+            dest_filename: None,
             report_json: "{}".to_string(),
             window_minutes: 30,
             klog_text: Some("x".to_string()),

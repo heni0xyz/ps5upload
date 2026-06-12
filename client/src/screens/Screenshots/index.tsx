@@ -153,6 +153,18 @@ export default function ScreenshotsScreen() {
     refresh();
   }, [refresh]);
 
+  // Clear the rendered list + selection the instant the active console changes,
+  // before the new console's screenshotsList resolves. The stale guard in
+  // refresh() only stops a late result from overwriting state — it does NOT
+  // remove console A's already-rendered (and clickable) rows, and a selection
+  // made on A would otherwise leak into B so "Download N" targets A's paths
+  // against the now-current host. Mirrors Saves/Hardware/Dashboard.
+  useEffect(() => {
+    setItems(null);
+    setSelected(new Set());
+    setError(null);
+  }, [host]);
+
   async function downloadOne(item: ScreenshotEntry) {
     if (!host?.trim()) return;
     const dest = await pickPath({

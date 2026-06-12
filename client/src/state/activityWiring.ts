@@ -89,9 +89,21 @@ export function installActivityWiring() {
       const phase = state.phasesByHost[host] ?? IDLE_PHASE;
       const prevPhase = prev.phasesByHost[host] ?? IDLE_PHASE;
       if (phase === prevPhase) continue;
-      const prevKind = prevPhase.kind;
       const existingId = transferActivityIds.get(host) ?? null;
-      if (phase.kind === "starting" && prevKind === "idle") {
+      if (phase.kind === "starting") {
+        // Open a fresh entry on ANY transition into "starting" — not just
+        // idle→starting. A re-upload to the same console after a finished run
+        // arrives as done→starting / failed→starting (the phase never returns
+        // to idle in between), so the old `prevKind === "idle"` guard created
+        // NO entry: the ActivityBar/Activity tab stayed blank with no Stop and
+        // no history. The terminal branches already deleted the prior id; if one
+        // still lingers (abnormal running→starting), close it as stopped first
+        // so it isn't orphaned.
+        if (existingId !== null) {
+          useActivityHistoryStore.getState().finish(existingId, "stopped", {
+            error: "superseded by a new upload",
+          });
+        }
         transferActivityIds.set(
           host,
           // `addr: host` — the phasesByHost key IS the bare console host.

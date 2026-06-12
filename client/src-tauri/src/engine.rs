@@ -86,13 +86,23 @@ fn find_engine_binary(app: &AppHandle) -> Result<PathBuf> {
         hasher.finalize().to_hex().to_string()
     };
 
-    let needs_extract = match std::fs::read_to_string(&stamp_path) {
-        Ok(stored) => stored.trim() != embedded_hex,
-        // Stamp missing OR unreadable → assume cache is stale and
-        // re-extract. Worst case is one extra extract; correctness
-        // wins over avoiding the IO.
-        Err(_) => true,
-    };
+    // Re-extract if the stamp is missing/stale OR the binary itself is gone.
+    // Checking only the stamp leaves a permanent-failure hole: if the binary
+    // is removed but the tiny text stamp survives (Windows SmartScreen/AV
+    // quarantines the freshly-extracted .exe, a disk-cleaner reaps the ~14 MiB
+    // binary but keeps the stamp), `stored == embedded_hex` makes needs_extract
+    // false and we hand back a path to a nonexistent file — spawn then fails on
+    // every launch with no self-heal. Requiring the binary to exist restores
+    // the cross-restart recovery (re-extract rewrites the binary, re-applies
+    // the exec bit, and rewrites the stamp).
+    let needs_extract = !out_path.exists()
+        || match std::fs::read_to_string(&stamp_path) {
+            Ok(stored) => stored.trim() != embedded_hex,
+            // Stamp missing OR unreadable → assume cache is stale and
+            // re-extract. Worst case is one extra extract; correctness
+            // wins over avoiding the IO.
+            Err(_) => true,
+        };
 
     if needs_extract {
         std::fs::write(&out_path, EMBEDDED_ENGINE)

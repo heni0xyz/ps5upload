@@ -416,15 +416,11 @@ export default function UploadScreen() {
     // has no installer). "Upload now" therefore enqueues it and starts this
     // console's queue immediately — same end state, just routed through the
     // unified queue so it uploads → installs → cleans up as one item.
-    if (source.kind === "pkg") {
-      if (!host?.trim()) return;
-      handleAddToQueue("overwrite");
-      void queueStartHost(host);
-      return;
-    }
     if (!host?.trim()) {
       // No console selected — store the error under the "" sentinel key so
       // phaseForHost(s, "") (this screen with an empty host) renders it.
+      // Hoisted ABOVE the .pkg branch so a .pkg upload with no console gives
+      // the same inline feedback instead of a silent dead click.
       useTransferStore.setState((s) => ({
         phasesByHost: {
           ...s.phasesByHost,
@@ -434,6 +430,11 @@ export default function UploadScreen() {
           },
         },
       }));
+      return;
+    }
+    if (source.kind === "pkg") {
+      handleAddToQueue("overwrite");
+      void queueStartHost(host);
       return;
     }
     // Archives extract into a directory, so the pre-flight probe treats them
@@ -853,7 +854,11 @@ function Step2Options(props: {
             multiple GB. Read-only, no PS5 needed. */}
         {source.kind === "image" &&
           source.path.toLowerCase().endsWith(".ffpkg") && (
-            <FfpkgInspectorPanel path={source.path} />
+            // key on path so swapping one .ffpkg for another resets the panel's
+            // internal inspection state (meta/extractResult) — otherwise it
+            // shows image A's tree for image B and Extract targets the wrong
+            // entry. Mirrors the RarSourceCard reset.
+            <FfpkgInspectorPanel key={source.path} path={source.path} />
           )}
 
         {source.wrappedHint && (
@@ -2047,7 +2052,7 @@ function PreflightEtaBanner({
             "Estimated upload time: {eta}",
           )}
         </span>
-        {eta.usedDefaults && (
+        {eta.throughputDefaulted && (
           <span className="ml-2 italic">
             (
             {tr(
@@ -2080,7 +2085,7 @@ function PreflightEtaBanner({
       </div>
       <div className="mb-2 text-xs uppercase tracking-wide text-[var(--color-muted)]">
         {tr("upload_eta_section_title", undefined, "Estimated time")}
-        {eta.usedDefaults && (
+        {eta.throughputDefaulted && (
           <span className="ml-2 normal-case tracking-normal italic">
             (
             {tr(

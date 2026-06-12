@@ -32,15 +32,29 @@ const READ_TEXT_FILE_MAX_BYTES: u64 = 16 * 1024 * 1024;
 /// the user never finds a truncated artifact at their chosen path —
 /// same belt-and-suspenders cleanup `save_archive_zip` does on ENOSPC.
 #[tauri::command]
-pub async fn save_text_file(path: String, contents: String) -> Result<(), String> {
-    if path.is_empty() {
-        return Err("save_text_file: empty destination path".into());
-    }
+pub async fn save_text_file(
+    path: String,
+    contents: String,
+    // The filename the renderer offered in the save dialog (e.g.
+    // `ps5upload-settings-<ms>.json`). Needed on Android, where `path` is a
+    // content:// SAF URI with no usable name: without it every export
+    // (settings/search/stats/logs) collides on one fixed Downloads filename
+    // and overwrites the others. Optional; desktop ignores it.
+    dest_filename: Option<String>,
+) -> Result<(), String> {
     // std::fs::write is one open+write+close; on a slow/networked disk
     // that's enough to stutter the UI thread, so route it through the
     // blocking pool like the rest of the file-save commands.
     tokio::task::spawn_blocking(move || {
-        let dest = Path::new(&path);
+        // Android save dialogs return content:// URIs std::fs can't write to;
+        // redirect those to a real path under Downloads (desktop pass-through),
+        // using the renderer's chosen filename so distinct exports stay distinct.
+        let fallback = dest_filename
+            .as_deref()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or("ps5upload-export.txt");
+        let dest_buf = super::save_dest::resolve_save_dest(&path, fallback)?;
+        let dest = dest_buf.as_path();
         match std::fs::write(dest, contents.as_bytes()) {
             Ok(()) => Ok(()),
             Err(e) => {

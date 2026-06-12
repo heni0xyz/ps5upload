@@ -17,8 +17,13 @@ import { invoke } from "@tauri-apps/api/core";
 export async function writeTextFileToPath(
   path: string,
   contents: string,
+  // The filename the caller offered as the dialog's defaultPath. On Android
+  // `path` is a content:// URI with no usable name, so the backend uses this
+  // to keep distinct exports from colliding on one fixed Downloads filename.
+  // Pass it whenever you have it; desktop ignores it.
+  fileName?: string,
 ): Promise<void> {
-  await invoke("save_text_file", { path, contents });
+  await invoke("save_text_file", { path, contents, destFilename: fileName });
 }
 
 /**

@@ -617,6 +617,10 @@ export default function HardwareScreen() {
           )}
 
           <FanThresholdCard
+            // key on host so the card's session-local state (lastSetC/draftC,
+            // active preset, busy/error) resets on console switch — otherwise
+            // console B shows console A's "Set to X°C" / active preset.
+            key={host ?? ""}
             host={host ?? ""}
             payloadUp={payloadStatus === "up"}
           />
@@ -1088,7 +1092,11 @@ function SmpMetaCard({
         if (probe.isStale()) return;
         setError(e instanceof Error ? e.message : String(e));
       } finally {
-        if (!probe.isStale()) setBusy(false);
+        // Always clear the local busy flag — gating it on !isStale() left the
+        // whole SMP card permanently disabled when the host switched mid-RPC
+        // (busy is component-local UI state; the stale guard already blocks
+        // stale data/error writes above). Matches start()/runNow().
+        setBusy(false);
       }
     },
     [canTalk, busy, guard, refresh],

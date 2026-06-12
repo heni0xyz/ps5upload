@@ -743,41 +743,15 @@ function BackupRestorePanel() {
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
 
-  // List every persisted key the renderer owns. Adding a new
-  // store with localStorage backing? Add the key here so Backup
-  // captures it. Off-by-one names like "activityHistory" (no -v1
-  // suffix) are real — match what each store actually writes.
-  const KEYS = [
-    "ps5upload.theme",
-    "ps5upload.host",
-    "ps5upload.lang",
-    "ps5upload.roster.v1",
-    "ps5upload.notifications.v1",
-    "ps5upload.activityHistory",
-    "ps5upload.audit-log.v1",
-    "ps5upload.upload-settings",
-    "ps5upload.companion-suggestion.dismissed",
-    "ps5upload.schedules.v1",
-    "ps5upload.saved_searches.v1",
-    "ps5upload.recent_paths.v1",
-    "ps5upload.play_time.v1",
-    "ps5upload.window_state.v1",
-    "ps5upload.notif_prune_days.v1",
-    "ps5upload.last_route",
-    "ps5upload.fs.lastPath",
-    "ps5upload.library.sort",
-    "ps5upload.titleinfo.cache",
-    "ps5upload.mount.lastDest",
-    "ps5upload.install_queue.v1",
-    "ps5upload.bandwidth_cap_mbps",
-    "ps5upload.keep_awake",
-    "ps5upload.always_overwrite",
-    "ps5upload.show_transfer_files",
-    "ps5upload.upload_streams",
-    "ps5upload.parallel_consoles",
-    "ps5upload.auto_resume",
-    "ps5upload.keep_ps5_awake",
-  ];
+  // Backup captures EVERY persisted key in the app's `ps5upload.` namespace via
+  // a prefix scan, rather than a hand-maintained allowlist. The old allowlist
+  // had drifted: it referenced "ps5upload.play_time.v1" while the store had
+  // moved to ".v2" (playtime silently lost on migration), omitted actively
+  // persisted keys (log_level, osNotify, install prefs, keep-awake mode,
+  // register-after-upload, …), and listed phantom keys no store writes. A
+  // prefix scan is immune to that whole class of drift — any new store backed by
+  // a `ps5upload.`-prefixed key is captured automatically.
+  const NS_PREFIX = "ps5upload.";
 
   async function exportBundle() {
     setBusy(true);
@@ -794,15 +768,19 @@ function BackupRestorePanel() {
         local_storage: {} as Record<string, string | null>,
       };
       const ls = bundle.local_storage as Record<string, string | null>;
-      for (const k of KEYS) {
-        ls[k] = window.localStorage.getItem(k);
+      for (let i = 0; i < window.localStorage.length; i++) {
+        const k = window.localStorage.key(i);
+        if (k && k.startsWith(NS_PREFIX)) {
+          ls[k] = window.localStorage.getItem(k);
+        }
       }
+      const fileName = `ps5upload-settings-${Date.now()}.json`;
       const dest = await save({
-        defaultPath: `ps5upload-settings-${Date.now()}.json`,
+        defaultPath: fileName,
         filters: [{ name: "JSON", extensions: ["json"] }],
       });
       if (!dest || typeof dest !== "string") return;
-      await writeTextFileToPath(dest, JSON.stringify(bundle, null, 2));
+      await writeTextFileToPath(dest, JSON.stringify(bundle, null, 2), fileName);
       setInfo(`Saved to ${dest}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -834,7 +812,10 @@ function BackupRestorePanel() {
       }
       const ls = parsed.local_storage as Record<string, unknown>;
       const actions: Array<{ key: string; value: string | null }> = [];
-      for (const k of KEYS) {
+      for (const k of Object.keys(ls)) {
+        // Safety: only ever touch our own namespace, so a hand-edited or
+        // malicious bundle can't write arbitrary localStorage keys.
+        if (!k.startsWith(NS_PREFIX)) continue;
         const v = ls[k];
         if (typeof v === "string") {
           actions.push({ key: k, value: v });

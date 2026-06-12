@@ -22,23 +22,47 @@ import { isMobile } from "../lib/platform";
 
 interface Shortcut {
   keys: string;
+  /** i18n key for the description (English literal lives in `description`). */
+  descKey: string;
   description: string;
 }
 
-const SHORTCUTS: Array<{ section: string; items: Shortcut[] }> = [
+const SHORTCUTS: Array<{
+  sectionKey: string;
+  section: string;
+  items: Shortcut[];
+}> = [
   {
+    sectionKey: "shortcuts_sec_navigation",
     section: "Navigation",
     items: [
-      { keys: "Cmd/Ctrl + K", description: "Open command palette" },
-      { keys: "?", description: "Show this help" },
-      { keys: "Esc", description: "Close any open modal or overlay" },
+      {
+        keys: "Cmd/Ctrl + K",
+        descKey: "shortcuts_cmd_palette",
+        description: "Open command palette",
+      },
+      { keys: "?", descKey: "shortcuts_help", description: "Show this help" },
+      {
+        keys: "Esc",
+        descKey: "shortcuts_close",
+        description: "Close any open modal or overlay",
+      },
     ],
   },
   {
+    sectionKey: "shortcuts_sec_filesystem",
     section: "File system",
     items: [
-      { keys: "↑ ↓", description: "Move selection in lists / palette" },
-      { keys: "Enter", description: "Open / activate" },
+      {
+        keys: "↑ ↓",
+        descKey: "shortcuts_move_selection",
+        description: "Move selection in lists / palette",
+      },
+      {
+        keys: "Enter",
+        descKey: "shortcuts_activate",
+        description: "Open / activate",
+      },
     ],
   },
 ];
@@ -107,7 +131,7 @@ export function ShortcutsOverlay() {
           {SHORTCUTS.map((section) => (
             <div key={section.section} className="mb-4 last:mb-0">
               <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-muted)]">
-                {section.section}
+                {tr(section.sectionKey, section.section)}
               </div>
               <ul className="space-y-1">
                 {section.items.map((s) => (
@@ -115,7 +139,7 @@ export function ShortcutsOverlay() {
                     key={s.keys}
                     className="flex items-center justify-between"
                   >
-                    <span className="text-xs">{s.description}</span>
+                    <span className="text-xs">{tr(s.descKey, s.description)}</span>
                     <kbd className="rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 py-0.5 font-mono text-xs">
                       {s.keys}
                     </kbd>

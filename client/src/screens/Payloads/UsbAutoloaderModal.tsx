@@ -72,6 +72,10 @@ export default function UsbAutoloaderModal({
       setDrives(d);
     } catch (e) {
       setDrivesError(String(e));
+      // Clear the loading sentinel (drives === null) so the "Scanning…"
+      // spinner stops and the Rescan button (disabled while null) re-enables.
+      // Otherwise a failed scan wedges the wizard: endless spinner + no retry.
+      setDrives([]);
     }
   }
 
@@ -205,7 +209,14 @@ export default function UsbAutoloaderModal({
                           type="radio"
                           name="drive"
                           checked={pickedDrive === d.path}
-                          onChange={() => setPickedDrive(d.path)}
+                          onChange={() => {
+                            setPickedDrive(d.path);
+                            // The previous drive's success/error result no longer
+                            // applies to the newly selected drive — clear it so
+                            // the user doesn't see a stale "installed" message.
+                            setResult(null);
+                            setInstallError(null);
+                          }}
                         />
                         <div className="min-w-0 flex-1">
                           <div className="font-medium">{d.label}</div>

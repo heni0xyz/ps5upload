@@ -249,7 +249,17 @@ fn is_missing_optional_file_error(message: &str) -> bool {
 /// list. Centralised so a new probe can't drift back to the partial check
 /// that surfaced `opendir_errno_2` on the SmpPanel Probe-Errors list.
 fn is_payload_enoent(message: &str) -> bool {
-    message.contains("ENOENT") || message.contains("No such file") || message.contains("_errno_2")
+    if message.contains("ENOENT") || message.contains("No such file") {
+        return true;
+    }
+    // The payload encodes errno as a trailing integer, e.g. `..._errno_2`.
+    // Match the number EXACTLY so `_errno_20`..`_errno_29` (ENOTDIR, EISDIR,
+    // EMFILE, ENOSPC, …) are not mis-classified as ENOENT (2) and silently
+    // swallowed as "not installed / not yet created".
+    message.split("_errno_").skip(1).any(|rest| {
+        let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+        digits == "2"
+    })
 }
 
 /// Strip SMP's CRC32 hash suffix from a mount-point dir name.

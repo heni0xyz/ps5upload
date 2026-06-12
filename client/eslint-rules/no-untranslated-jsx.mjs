@@ -29,7 +29,7 @@
 // Exact-match strings that are intentionally not translated.
 const ALLOWED_STRINGS = new Set([
   // units / symbols
-  "ms", "MB/s", "KB", "MB", "GB", "%", "·", "—", "–", "/", "@",
+  "ms", "MB/s", "MiB/s", "MiB", "KB", "MB", "GB", "%", "·", "—", "–", "/", "@",
   // brand / proper nouns
   "PS5Upload", "PS5", "GitHub", "PhantomPtr", "@phantomptr", "GPL-3",
   // example values shown verbatim in inputs

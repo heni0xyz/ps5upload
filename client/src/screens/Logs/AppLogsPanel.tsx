@@ -131,14 +131,15 @@ export default function AppLogsPanel() {
     try {
       const { save } = await import("@tauri-apps/plugin-dialog");
       const { writeTextFileToPath } = await import("../../lib/saveTextFile");
+      const fileName = `ps5upload-logs-${new Date()
+        .toISOString()
+        .replace(/[:.]/g, "-")}.txt`;
       const dest = await save({
-        defaultPath: `ps5upload-logs-${new Date()
-          .toISOString()
-          .replace(/[:.]/g, "-")}.txt`,
+        defaultPath: fileName,
         filters: [{ name: "Text", extensions: ["txt"] }],
       });
       if (!dest) return; // user cancelled
-      await writeTextFileToPath(dest, text);
+      await writeTextFileToPath(dest, text, fileName);
       setSaveState("done");
       setTimeout(() => setSaveState("idle"), 1600);
     } catch (e) {

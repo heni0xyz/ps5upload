@@ -55,10 +55,14 @@ export interface UploadEta {
    *  so the math lives in one place. */
   totalSeconds: number;
   /** True if either `transferSeconds` or `commitSeconds` used a
-   *  default fallback rather than a measured per-host figure. The
-   *  banner uses this to show a "estimated — first upload to this
-   *  PS5" qualifier so users don't read the number as a promise. */
+   *  default fallback rather than a measured per-host figure. */
   usedDefaults: boolean;
+  /** True when no measured per-host THROUGHPUT was available — i.e. effectively
+   *  the first (recordable) upload to this PS5. This drives the "first upload to
+   *  this PS5" copy. Unlike `usedDefaults`, it is NOT forced true by the
+   *  commit term (commitMsPerFile is not yet measured anywhere, so `usedDefaults`
+   *  was permanently true and the qualifier never went away). */
+  throughputDefaulted: boolean;
 }
 
 export interface UploadEtaInput {
@@ -104,15 +108,16 @@ export function computeUploadEta(input: UploadEtaInput): UploadEta {
   const commitSeconds = (safeFileCount * commitMsPerFile) / 1000;
   const totalSeconds = transferSeconds + commitSeconds;
 
+  const throughputDefaulted = !isPositiveFinite(input.throughputMibps);
   const usedDefaults =
-    !isPositiveFinite(input.throughputMibps) ||
-    !isPositiveFinite(input.commitMsPerFile);
+    throughputDefaulted || !isPositiveFinite(input.commitMsPerFile);
 
   return {
     transferSeconds,
     commitSeconds,
     totalSeconds,
     usedDefaults,
+    throughputDefaulted,
   };
 }
 

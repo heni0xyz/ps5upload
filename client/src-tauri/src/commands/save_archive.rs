@@ -136,17 +136,27 @@ pub struct SaveArchiveZipReq {
     pub inner_root: String,
     /// Absolute path of the `.zip` file to write.
     pub dest_zip: String,
+    /// Filename the renderer offered in the save dialog (e.g. `<title_id>.zip`).
+    /// On Android `dest_zip` is a content:// SAF URI with no usable name; this
+    /// keeps each save backup from colliding on one fixed Downloads filename.
+    #[serde(default)]
+    pub dest_filename: Option<String>,
 }
 
 #[tauri::command]
 pub async fn save_archive_zip(req: SaveArchiveZipReq) -> Result<(), String> {
-    let dest = req.dest_zip.clone();
+    // Android save dialogs return content:// URIs std::fs can't create; redirect
+    // those to a real path under Downloads (desktop paths pass through), using
+    // the renderer's filename so distinct backups stay distinct.
+    let fallback = req
+        .dest_filename
+        .as_deref()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or("ps5upload-save-archive.zip");
+    let dest_buf = super::save_dest::resolve_save_dest(&req.dest_zip, fallback)?;
+    let dest = dest_buf.to_string_lossy().into_owned();
     let result = tokio::task::spawn_blocking(move || {
-        zip_folder(
-            Path::new(&req.src_dir),
-            &req.inner_root,
-            Path::new(&req.dest_zip),
-        )
+        zip_folder(Path::new(&req.src_dir), &req.inner_root, dest_buf.as_path())
     })
     .await
     .map_err(|e| format!("zip task: {e}"))?;

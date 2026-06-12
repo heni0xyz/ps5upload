@@ -53,7 +53,11 @@ export default function ProfileScreen() {
         )}
       />
       <ConnectionGate require="payload">
-        {addr ? <ProfileBody addr={addr} /> : null}
+        {/* key on addr so switching console fully resets per-console profile
+            state (avatar target uid, picked image, username draft). Without
+            the remount, the prior console's targetUid/imagePath leak into the
+            new console and an avatar Apply could write to the wrong uid. */}
+        {addr ? <ProfileBody key={addr} addr={addr} /> : null}
       </ConnectionGate>
     </div>
   );

@@ -12,6 +12,7 @@ import type { ActivityEntry } from "../../state/activityHistory";
 import { PageHeader, Button } from "../../components";
 import { useTr } from "../../state/lang";
 import { formatBytes } from "../../lib/format";
+import { pushNotification } from "../../state/notifications";
 
 /**
  * Activity stats dashboard.
@@ -37,15 +38,27 @@ export default function StatsScreen() {
 
   async function exportCsv() {
     if (entries.length === 0) return;
-    const { save } = await import("@tauri-apps/plugin-dialog");
-    const { writeTextFileToPath } = await import("../../lib/saveTextFile");
-    const dest = await save({
-      defaultPath: `ps5upload-activity-${Date.now()}.csv`,
-      filters: [{ name: "CSV", extensions: ["csv"] }],
-    });
-    if (!dest || typeof dest !== "string") return;
-    const csv = activityToCsv(entries);
-    await writeTextFileToPath(dest, csv);
+    const fileName = `ps5upload-activity-${Date.now()}.csv`;
+    // Surface write failures instead of swallowing them — a failed export must
+    // not silently look like it succeeded.
+    try {
+      const { save } = await import("@tauri-apps/plugin-dialog");
+      const { writeTextFileToPath } = await import("../../lib/saveTextFile");
+      const dest = await save({
+        defaultPath: fileName,
+        filters: [{ name: "CSV", extensions: ["csv"] }],
+      });
+      if (!dest || typeof dest !== "string") return;
+      const csv = activityToCsv(entries);
+      await writeTextFileToPath(dest, csv, fileName);
+      pushNotification("success", "Activity exported", {
+        body: `Saved ${entries.length.toLocaleString()} rows.`,
+      });
+    } catch (e) {
+      pushNotification("error", "Couldn't export activity", {
+        body: e instanceof Error ? e.message : String(e),
+      });
+    }
   }
 
   return (
@@ -225,7 +238,7 @@ function KpiRow({ stats }: { stats: ComputedStats }) {
         label={tr("stats_fastest", undefined, "Fastest")}
         value={
           stats.fastestUploadMbps !== null
-            ? `${stats.fastestUploadMbps.toFixed(1)} MB/s`
+            ? `${stats.fastestUploadMbps.toFixed(1)} MiB/s`
             : "—"
         }
         sub={stats.fastestUploadLabel ?? undefined}
@@ -377,7 +390,7 @@ function TopTransfers({
               <td className="truncate px-1 py-0.5">{t.label}</td>
               <td className="px-1 py-0.5 text-right tabular-nums">{formatBytes(t.bytes)}</td>
               <td className="px-1 py-0.5 text-right tabular-nums font-semibold">
-                {t.mbps.toFixed(1)} MB/s
+                {t.mbps.toFixed(1)} MiB/s
               </td>
               <td className="px-1 py-0.5 text-right text-[var(--color-muted)]">
                 {new Date(t.whenMs).toLocaleDateString()}

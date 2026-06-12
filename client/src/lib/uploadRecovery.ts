@@ -71,11 +71,19 @@ const FATAL_REASON_SUBSTRINGS = [
  *  precise "no such file" / "os error 2" forms. */
 const FATAL_MESSAGE_SUBSTRINGS = [
   "no such file", // ENOENT — source file/dir is gone
-  "os error 2", // ENOENT (numeric form)
+  // NOTE: ENOENT's numeric form ("os error 2") is matched separately via a
+  // digit-anchored regex below — a plain substring "os error 2" also matches
+  // "os error 20".."os error 29", which includes the TRANSIENT, recoverable
+  // EMFILE (24) / ENFILE (23) "too many open files" errors. Folding those in
+  // here would strand a large directory upload that a wait+retry could clear.
   "permission denied", // local EACCES on the source
   "no space left", // local disk full
   "enospc",
 ] as const;
+
+/** ENOENT only — `(os error 2)` not followed by another digit, so it won't
+ *  swallow `os error 20`..`os error 29` (EMFILE/ENFILE etc. are recoverable). */
+const FATAL_ENOENT_NUMERIC = /os error 2(?!\d)/;
 
 /**
  * Decide whether a failed upload job should be auto-recovered (wait +
@@ -100,6 +108,7 @@ export function isAutoRecoverable(
   if (!reason) {
     const m = (message ?? "").toLowerCase();
     if (FATAL_MESSAGE_SUBSTRINGS.some((s) => m.includes(s))) return false;
+    if (FATAL_ENOENT_NUMERIC.test(m)) return false; // ENOENT, not os error 20-29
   }
 
   // Default: transport/liveness failure → recoverable. Bounded by

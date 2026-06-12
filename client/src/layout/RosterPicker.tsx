@@ -196,7 +196,12 @@ function RosterManageModal({ onClose }: { onClose: () => void }) {
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-      onClick={onClose}
+      // Only a direct click on THIS scrim closes the picker. Without the
+      // target guard, a click on the nested delete-confirmation backdrop
+      // bubbles up here and dismisses the whole "Manage PS5s" modal too.
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
     >
       {confirmDialogNode}
       <div

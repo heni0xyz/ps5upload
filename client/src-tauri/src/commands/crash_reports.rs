@@ -118,7 +118,11 @@ pub async fn crash_reports_zip(app: AppHandle, dest: String) -> Result<usize, St
     if files.is_empty() {
         return Err("no crash reports to package".into());
     }
-    let f = std::fs::File::create(&dest).map_err(|e| format!("create {dest}: {e}"))?;
+    // Android save dialogs return content:// URIs std::fs can't create; redirect
+    // those to a real path under Downloads (desktop paths pass through).
+    let dest_path = super::save_dest::resolve_save_dest(&dest, "ps5upload-crash-reports.zip")?;
+    let f = std::fs::File::create(&dest_path)
+        .map_err(|e| format!("create {}: {e}", dest_path.display()))?;
     let mut zw = zip::ZipWriter::new(f);
     let opts = zip::write::SimpleFileOptions::default()
         .compression_method(zip::CompressionMethod::Deflated);
