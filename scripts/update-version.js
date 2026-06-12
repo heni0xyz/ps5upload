@@ -17,10 +17,13 @@
  *   - client/src-tauri/tauri.conf.json   (field: version)
  *   - client/src-tauri/Cargo.toml        (line: `version = "..."` under [package])
  *   - payload/include/config.h           (macro: PS5UPLOAD2_VERSION)
+ *   - engine/Cargo.toml                  (line: `version = "..."` under
+ *                                         [workspace.package]; all engine
+ *                                         crates inherit it via
+ *                                         `version.workspace = true`)
  *
- * The engine workspace (`engine/Cargo.toml`) is *intentionally* not
- * synced — engine crates are internal to the repo and versioned
- * independently. Keep that decoupled.
+ * The engine reports this same version from `/api/version`, so it stays on
+ * par with the client.
  */
 
 const fs = require("fs");
@@ -128,6 +131,18 @@ const results = [
     "payload/include/config.h",
     /^#define PS5UPLOAD2_VERSION "(\d+\.\d+\.\d+[^"]*)"/m,
     `#define PS5UPLOAD2_VERSION "${targetVersion}"`,
+    (m) => m[1],
+  ),
+  // Engine workspace version. All engine crates inherit it via
+  // `version.workspace = true`, so this one line drives the binary's
+  // reported version (`/api/version`) and keeps the engine on par with
+  // the client. The `^version = "x.y.z"` line lives under
+  // `[workspace.package]`; dependency versions are inline (`serde = {
+  // version = ... }`) and not line-anchored, so they're never matched.
+  patchRegex(
+    "engine/Cargo.toml",
+    /^version = "(\d+\.\d+\.\d+[^"]*)"/m,
+    `version = "${targetVersion}"`,
     (m) => m[1],
   ),
 ].filter(Boolean);
