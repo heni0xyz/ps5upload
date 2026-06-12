@@ -85,9 +85,19 @@ fn fs_read_recv_into(conn: &mut Connection, buf: &mut [u8], path: &str) -> Resul
     let ft = hdr.frame_type().unwrap_or(FrameType::Error);
     let len = hdr.body_len as usize;
     if ft == FrameType::Error {
-        let mut ebuf = vec![0u8; len];
-        if len > 0 {
+        // `len` is the body length straight off the wire — a corrupted header
+        // from a flaky link (or a modified payload) can carry a garbage
+        // multi-GB value. This streaming path bypasses Connection::recv_frame,
+        // so re-apply a bound here: error reasons are short strings, so cap the
+        // allocation and drain any remainder to keep the stream framed.
+        const MAX_ERR_BODY: usize = 64 * 1024;
+        let take = len.min(MAX_ERR_BODY);
+        let mut ebuf = vec![0u8; take];
+        if take > 0 {
             conn.recv_body_exact(&mut ebuf)?;
+        }
+        if len > take {
+            conn.drain_body((len - take) as u64)?;
         }
         bail!(
             "payload rejected FS_READ({path}): {}",

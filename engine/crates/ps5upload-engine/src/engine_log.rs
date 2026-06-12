@@ -42,7 +42,11 @@ pub(crate) struct LogEntry {
     pub(crate) msg: String,
 }
 
-static SEQ: AtomicU64 = AtomicU64::new(0);
+// Start at 1, not 0: the client bridge begins polling with `since = 0` and
+// tail_since() returns entries where `seq > since`, so a seq-0 entry (`0 > 0`
+// is false) would never be delivered — the very first engine log line was
+// silently dropped from the Log tab. Reserving 0 makes the first record seq=1.
+static SEQ: AtomicU64 = AtomicU64::new(1);
 
 fn ring() -> &'static Mutex<VecDeque<LogEntry>> {
     // SAFETY: OnceLock in a plain `fn` needs it to be inside the fn body.

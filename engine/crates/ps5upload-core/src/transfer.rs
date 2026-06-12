@@ -364,6 +364,14 @@ pub(crate) fn tx_meta_buf_flags(tx_id: [u8; 16], kind: u32, flags: u32, extra: &
     buf
 }
 
+/// True when this error is (or wraps) the `transfer_cancelled` sentinel a
+/// stream raises when the shared cancel flag is set — i.e. it's a CONSEQUENCE
+/// of some other stream's failure, not a root cause. Used by the multistream
+/// aggregator to prefer a real error over a sibling's induced cancellation.
+fn is_cancel_err(err: &anyhow::Error) -> bool {
+    err.chain().any(|c| c.to_string() == "transfer_cancelled")
+}
+
 /// Returns true when an error from a transfer is network-drop-ish and
 /// worth retrying via resume. Intentionally conservative: we only retry
 /// on errors whose root cause is "the TCP stream broke mid-transfer,"
@@ -1366,6 +1374,21 @@ fn transfer_file_path_with_flags(
         let src_disp = src.display().to_string();
 
         std::thread::scope(|scope| -> Result<()> {
+            // Take ownership of the consumer-side channel endpoints so they drop
+            // when THIS closure returns — including every `?` early-return below —
+            // BEFORE `thread::scope` joins the producer. If they stayed owned by
+            // the outer frame (the default for a non-`move` scope closure), a
+            // mid-transfer network send error would return Err from the consumer
+            // while the producer is still blocked on `empty_rx.recv()` or
+            // `full_tx.send()`; with `empty_tx`/`full_rx` still alive those calls
+            // never error, the producer never breaks, and the scope join (hence
+            // the whole spawn_blocking transfer thread) hangs forever instead of
+            // surfacing the retryable error to `resumable_retry`. Moving them in
+            // here closes the channels on the error path so the producer unblocks.
+            // (`let x = x;` forces a by-move capture of just these two; `sender`,
+            // `shards_sent`, and `cfg` stay borrowed and keep working.)
+            let empty_tx = empty_tx;
+            let full_rx = full_rx;
             // Producer: read + hash ahead, hand prepared shards to the sender.
             scope.spawn(move || {
                 let mut seq = first_seq;
@@ -2480,8 +2503,18 @@ pub fn transfer_file_list_multistream(
             }
             Err(e) => {
                 crate::core_log!("multistream: stream {} failed: {}", idx, e);
-                if first_err.is_none() {
-                    first_err = Some(e);
+                // When one stream fails it sets the shared cancel flag, so sibling
+                // streams abort at their next shard boundary with the generic
+                // `transfer_cancelled`. That's a CONSEQUENCE, not the root cause.
+                // Keep the first genuine error; only fall back to a cancellation
+                // error if nothing real was seen. Without this, a real failure in
+                // a higher-indexed stream could be masked by a lower-indexed
+                // sibling's `transfer_cancelled`, hiding the actionable cause.
+                let is_cancel = is_cancel_err(&e);
+                match &first_err {
+                    None => first_err = Some(e),
+                    Some(prev) if is_cancel_err(prev) && !is_cancel => first_err = Some(e),
+                    _ => {}
                 }
             }
         }
@@ -2756,21 +2789,41 @@ impl ZipMaterialiser {
                         std::process::id(),
                         self.id
                     ));
-                    let mut wf = std::fs::File::create(&path)
-                        .with_context(|| format!("create zip cache file {}", path.display()))?;
-                    let written = std::io::copy(&mut zf, &mut wf).with_context(|| {
-                        format!("inflate zip entry {index} to {}", path.display())
-                    })?;
-                    drop(zf);
-                    wf.sync_all().ok();
-                    drop(wf);
-                    if written != expected {
-                        let _ = std::fs::remove_file(&path);
-                        bail!("zip entry {index} inflated to {written} bytes, central directory said {expected}");
+                    // Spill the inflated entry to a temp file. Do the fallible work
+                    // in an IIFE so EVERY error path (failed create, a corrupt or
+                    // truncated DEFLATE stream, a disk that fills mid-copy, a
+                    // size mismatch, or a failed reopen) cleans up the temp file
+                    // below. Before this, those `?` early-returns leaked a
+                    // potentially multi-GB spill file: self.cache wasn't the `Tmp`
+                    // variant yet, so neither evict() nor Drop for ZipMaterialiser
+                    // could ever remove it. The IIFE captures `zf` by move (it
+                    // owns the drop) and `path` by shared ref, so `path` is free
+                    // to move into the cache / be removed once the IIFE returns.
+                    let materialise = || -> Result<std::fs::File> {
+                        let mut zf = zf;
+                        let mut wf = std::fs::File::create(&path)
+                            .with_context(|| format!("create zip cache file {}", path.display()))?;
+                        let written = std::io::copy(&mut zf, &mut wf).with_context(|| {
+                            format!("inflate zip entry {index} to {}", path.display())
+                        })?;
+                        drop(zf);
+                        wf.sync_all().ok();
+                        drop(wf);
+                        if written != expected {
+                            bail!("zip entry {index} inflated to {written} bytes, central directory said {expected}");
+                        }
+                        std::fs::File::open(&path)
+                            .with_context(|| format!("reopen zip cache file {}", path.display()))
+                    };
+                    match materialise() {
+                        Ok(file) => {
+                            self.cache = Some(ZipEntryCache::Tmp { index, file, path });
+                        }
+                        Err(e) => {
+                            let _ = std::fs::remove_file(&path);
+                            return Err(e);
+                        }
                     }
-                    let file = std::fs::File::open(&path)
-                        .with_context(|| format!("reopen zip cache file {}", path.display()))?;
-                    self.cache = Some(ZipEntryCache::Tmp { index, file, path });
                 }
             }
             Err(e) => open_err = Some(e),

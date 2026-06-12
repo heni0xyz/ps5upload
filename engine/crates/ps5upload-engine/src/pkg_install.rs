@@ -407,7 +407,9 @@ async fn install_start_handler(
     {
         let mut sessions = state.sessions.lock().unwrap_or_else(|e| e.into_inner());
         let now = now_unix();
-        let aggressive_cutoff = now.saturating_sub(pkg_session_max_age_sec() / 2);
+        let max_age = pkg_session_max_age_sec();
+        let full_cutoff = now.saturating_sub(max_age);
+        let aggressive_cutoff = now.saturating_sub(max_age / 2);
         // Aggressive prune: drop sessions that are clearly "done with
         // host-side work AND old enough." `staging_path == None`
         // *alone* doesn't qualify any more — HTTP-mode (streaming)
@@ -420,8 +422,20 @@ async fn install_start_handler(
         // some()` — set by the status handler the moment BGFT reaches
         // Done or Error. Sessions in either of those states have no
         // further polls to serve and can safely be reaped early.
-        sessions
-            .retain(|_, s| s.created_at_unix > aggressive_cutoff || s.terminal_status.is_none());
+        //
+        // ALSO apply a pure age prune at full max-age regardless of state.
+        // Register-reject installs (err_code != 0) never reach the status
+        // poll's Done/Error path, so their terminal_status stays None forever
+        // — the `terminal_status.is_none()` arm would otherwise retain them
+        // indefinitely (gc_old_sessions only runs from the status handler,
+        // which a register-reject never calls). The full-age sweep here is the
+        // only thing that reaps them, bounding the sessions map.
+        sessions.retain(|_, s| {
+            if s.created_at_unix <= full_cutoff {
+                return false;
+            }
+            s.created_at_unix > aggressive_cutoff || s.terminal_status.is_none()
+        });
         sessions.insert(session_id.clone(), session.clone());
     }
 

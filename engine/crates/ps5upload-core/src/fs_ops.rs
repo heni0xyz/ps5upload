@@ -995,6 +995,23 @@ const MAX_RECONCILE_PARENT_DIRS: usize = 12_000;
 const _: () = assert!(MAX_RECONCILE_PARENT_DIRS >= 2_000);
 const _: () = assert!(MAX_RECONCILE_PARENT_DIRS <= 100_000);
 
+/// True only for ENOENT(2) encoded as the payload's `errno_2` token — NOT
+/// `errno_20`..`errno_29` (ENOTDIR/EISDIR/EMFILE/ENOSPC/…). A plain
+/// `contains("errno_2")` swallows those structural errors as "missing → empty",
+/// which both hides real failures and defeats reconcile dedup. Anchors the match
+/// by requiring the char after `errno_2` to be a non-digit (or end of string).
+fn is_enoent_errno(es: &str) -> bool {
+    let mut from = 0;
+    while let Some(i) = es[from..].find("errno_2") {
+        let end = from + i + "errno_2".len();
+        match es[end..].chars().next() {
+            Some(c) if c.is_ascii_digit() => from = end, // errno_20..29 — keep scanning
+            _ => return true,                            // errno_2 at a boundary — ENOENT
+        }
+    }
+    false
+}
+
 /// Build the scoped remote inventory. The caller (`reconcile`) already holds
 /// this console's `addr:` reconcile key (see RECONCILE_KEYS), so at most one
 /// scan runs against any single console at a time — at most one mgmt connection
@@ -1062,7 +1079,7 @@ fn list_remote_scoped(
             if es.contains("ENOENT")
                 || es.contains("not found")
                 || es.contains("no such")
-                || es.contains("errno_2")
+                || is_enoent_errno(&es)
             {
                 crate::core_log!(
                     "list_remote_scoped: dest_root {} does not exist on PS5 — treating as empty, skipping {} per-parent list_dir call(s)",
@@ -1116,7 +1133,7 @@ fn list_remote_scoped(
                         && (es.contains("ENOENT")
                             || es.contains("not found")
                             || es.contains("no such")
-                            || es.contains("errno_2"))
+                            || is_enoent_errno(&es))
                     {
                         crate::core_log!(
                             "list_remote_scoped: [{}/{}] {} missing on PS5 — treating as empty",
