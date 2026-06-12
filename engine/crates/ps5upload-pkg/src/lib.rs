@@ -393,6 +393,35 @@ fn parse_sfo_string_keys(
 /// Magic bytes of a stock PS4/PS5 .pkg file: `\x7FCNT`.
 pub const PKG_MAGIC: u32 = 0x7F434E54;
 
+/// Magic bytes of a newer PS5-native fakepkg (`\x7FFIH`). Sony's installer
+/// accepts these; our parser doesn't read their metadata yet, but the magic
+/// alone tells us the target platform is PS5.
+pub const PKG_MAGIC_FIH: u32 = 0x7F464948;
+
+/// Classify a package's target platform for UI badging. `\x7FFIH` is
+/// PS5-native. For stock `\x7FCNT` packages the title-id prefix is the
+/// practical discriminator (CUSA = PS4, PPSA = PS5); falls back to the
+/// content-id's middle token when no SFO title-id was parsed. Returns
+/// `"ps4"`, `"ps5"`, or `""` (unknown — don't badge).
+pub fn derive_platform(magic: u32, content_id: &str, title_id: &str) -> String {
+    if magic == PKG_MAGIC_FIH {
+        return "ps5".to_string();
+    }
+    // Prefer the SFO title-id; else the middle token of the content-id
+    // (`EP4293-CUSA32097_00-…` → `CUSA32097`).
+    let token = if !title_id.is_empty() {
+        title_id
+    } else {
+        content_id.split('-').nth(1).unwrap_or("")
+    };
+    let prefix: String = token.chars().take(4).collect();
+    match prefix.as_str() {
+        "CUSA" => "ps4".to_string(),
+        "PPSA" => "ps5".to_string(),
+        _ => String::new(),
+    }
+}
+
 /// PARAM.SFO entry id inside a PKG.
 const ENTRY_PARAM_SFO: u32 = 0x1000;
 /// ICON0.PNG entry id inside a PKG.
@@ -456,6 +485,10 @@ pub struct PkgMetadata {
     /// when the category is unknown / SFO missing — caller may still
     /// attempt install with `package_type=PS4GD` as a default.
     pub package_type: Option<String>,
+    /// Target platform for UI badging: `"ps4"`, `"ps5"`, or `""` (unknown).
+    /// Derived from the header magic (`\x7FFIH` = PS5) and the title-id
+    /// prefix (CUSA = PS4, PPSA = PS5). See [`derive_platform`].
+    pub platform: String,
     /// PNG bytes from ICON0.PNG entry, if present. None if the entry
     /// is missing or oversize. Base64-encoded for transport across
     /// the Tauri/HTTP boundary; the React side decodes for <img>.
@@ -505,6 +538,7 @@ pub fn parse_pkg(path: &Path) -> Result<PkgMetadata, PkgError> {
         title_id: String::new(),
         category: String::new(),
         package_type: None,
+        platform: String::new(),
         icon_png_base64: None,
         warnings: Vec::new(),
     };
@@ -513,6 +547,9 @@ pub fn parse_pkg(path: &Path) -> Result<PkgMetadata, PkgError> {
         meta.kind = PkgKind::Unknown {
             magic_hex: format!("{magic:08X}"),
         };
+        // We can't read this format's metadata, but the magic still tells us
+        // the platform (`\x7FFIH` → PS5) — enough for the UI badge.
+        meta.platform = derive_platform(magic, "", "");
         // Soften the warning. On a jailbroken PS5 with kernel-level
         // Unknown header magic: most commonly 0x7F464948 (`\x7FFIH` —
         // newer PS5-native fakepkg signing tool format) which Sony's
@@ -558,6 +595,7 @@ pub fn parse_pkg(path: &Path) -> Result<PkgMetadata, PkgError> {
     }
 
     meta.package_type = derive_package_type(&meta.category);
+    meta.platform = derive_platform(magic, &meta.content_id, &meta.title_id);
     meta.warnings = warnings;
     Ok(meta)
 }
@@ -782,6 +820,27 @@ fn b64_encode(input: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn platform_from_magic_and_title_id() {
+        // \x7FFIH magic is always PS5-native, even with no ids.
+        assert_eq!(derive_platform(PKG_MAGIC_FIH, "", ""), "ps5");
+        // Stock \x7FCNT: title-id prefix decides.
+        assert_eq!(derive_platform(PKG_MAGIC, "", "CUSA32097"), "ps4");
+        assert_eq!(derive_platform(PKG_MAGIC, "", "PPSA01650"), "ps5");
+        // Falls back to the content-id middle token when no title-id.
+        assert_eq!(
+            derive_platform(PKG_MAGIC, "EP4293-CUSA32097_00-ASTNCPS4SIEE0000", ""),
+            "ps4"
+        );
+        assert_eq!(
+            derive_platform(PKG_MAGIC, "UP0000-PPSA01650_00-YOUTUBE000000000", ""),
+            "ps5"
+        );
+        // Unknown prefixes (NPXS system, homebrew) → no badge.
+        assert_eq!(derive_platform(PKG_MAGIC, "", "NPXS40047"), "");
+        assert_eq!(derive_platform(PKG_MAGIC, "", ""), "");
+    }
 
     #[test]
     fn unknown_magic_classifies_as_unknown() {

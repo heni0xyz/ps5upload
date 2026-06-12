@@ -14269,6 +14269,7 @@ static int handle_pkg_install(runtime_state_t *state, int client_fd,
     char content_id[64];
     char title[256];
     char package_type[16];
+    char method[32];
     uint64_t size = 0;
     int32_t task_id = -1;
     uint32_t err_code = 0;
@@ -14308,6 +14309,10 @@ static int handle_pkg_install(runtime_state_t *state, int client_fd,
     extract_json_string_field(json_buf, "content_id", content_id, sizeof(content_id));
     extract_json_string_field(json_buf, "title", title, sizeof(title));
     extract_json_string_field(json_buf, "package_type", package_type, sizeof(package_type));
+    /* Optional single-tier selector (engine-driven cascade). Absent ⇒ ""
+     * ⇒ payload's legacy internal cascade. */
+    method[0] = '\0';
+    extract_json_string_field(json_buf, "method", method, sizeof(method));
     size = extract_json_uint64_field(json_buf, "size");
 
     if (url[0] == '\0') {
@@ -14324,7 +14329,7 @@ static int handle_pkg_install(runtime_state_t *state, int client_fd,
     }
 
     int rc = bgft_install_start(url, content_id, size, title, package_type,
-                                 &task_id, &err_code);
+                                 method, &task_id, &err_code);
     /* Always reply with PKG_INSTALL_ACK carrying the err_code (even on
      * failure) so the host can map it to a user-facing message. We
      * only emit ERROR for true protocol-level violations (bad body). */

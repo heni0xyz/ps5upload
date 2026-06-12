@@ -76,11 +76,16 @@ typedef enum {
  *                 sentinel on pre-call machinery failure.
  *
  * Returns 0 on success, -1 on any failure with `*out_err_code` set. */
+/* `method` (optional, may be NULL or ""): when set to a single-tier name
+ * ("appinst-bypackage", "appinst-local", "shellui"), run ONLY that tier
+ * and report its raw result so the engine can drive a verify-and-fall-
+ * through cascade. NULL/""/"auto" keeps the legacy internal cascade. */
 int bgft_install_start(const char *url,
                         const char *content_id,
                         uint64_t size,
                         const char *title,
                         const char *package_type,
+                        const char *method,
                         int32_t *out_task_id,
                         uint32_t *out_err_code);
 

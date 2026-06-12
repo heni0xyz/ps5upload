@@ -2465,6 +2465,135 @@ async fn ps5_app_icon(
     }
 }
 
+/// One `.pkg` found on a connected external/USB drive.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ExternalPkg {
+    /// Absolute on-console path, e.g. `/mnt/usb0/games/foo.pkg`. This is a
+    /// local PS5 path, so install runs straight through the normal
+    /// install-from-path cascade — no upload/staging needed.
+    pub path: String,
+    /// The drive mount this was found under (`/mnt/usb0`, `/mnt/ext1`).
+    pub drive: String,
+    /// Basename (`foo.pkg`).
+    pub name: String,
+    /// File size in bytes.
+    pub size: u64,
+    /// ContentID from the header (empty for `\x7FFIH` / unreadable headers).
+    pub content_id: String,
+    /// Title id (CUSA…/PPSA…) derived from the content id.
+    pub title_id: String,
+    /// `"ps4"` | `"ps5"` | `""` — from header magic + title-id prefix.
+    pub platform: String,
+}
+
+/// Parse a `.pkg`'s first 0xA0 header bytes for the fields the scan needs.
+/// Cheap (one `fs_read` of 160 bytes) vs. a full PARAM.SFO walk — enough for
+/// the listing's name/size/platform badge.
+fn external_pkg_header(head: &[u8]) -> (String, String, String) {
+    if head.len() < 0xA0 {
+        return (String::new(), String::new(), String::new());
+    }
+    let magic = u32::from_be_bytes([head[0], head[1], head[2], head[3]]);
+    let content_id = if magic == ps5upload_pkg::PKG_MAGIC {
+        let raw = &head[0x40..0x40 + 36];
+        let end = raw.iter().position(|&b| b == 0).unwrap_or(36);
+        String::from_utf8_lossy(&raw[..end]).trim().to_string()
+    } else {
+        String::new()
+    };
+    let title_id =
+        ps5upload_core::pkg_install::title_id_from_content_id(&content_id).unwrap_or_default();
+    let platform = ps5upload_pkg::derive_platform(magic, &content_id, &title_id);
+    (content_id, title_id, platform)
+}
+
+/// Scan connected external/USB drives for installable `.pkg` files.
+///
+/// Walks every real `/mnt/usb*` and `/mnt/ext*` mount depth-first, reading
+/// each `.pkg`'s header for content_id + platform. Bounded on depth,
+/// directories visited, and packages returned so a multi-thousand-file game
+/// drive can't wedge the scan. Errors on individual dirs/files are skipped
+/// (best-effort) rather than failing the whole scan.
+pub fn scan_external_pkgs(addr: &str) -> anyhow::Result<Vec<ExternalPkg>> {
+    use ps5upload_core::fs_ops::{fs_read, list_dir, ListDirOptions};
+    const MAX_DEPTH: u32 = 5;
+    const MAX_DIRS: usize = 600;
+    const MAX_PKGS: usize = 256;
+
+    let join = |dir: &str, name: &str| format!("{}/{}", dir.trim_end_matches('/'), name);
+    let vols = list_volumes(addr)?;
+    let mut out: Vec<ExternalPkg> = Vec::new();
+    let mut dirs_visited = 0usize;
+
+    for v in vols.volumes.iter() {
+        let external = v.path.starts_with("/mnt/usb") || v.path.starts_with("/mnt/ext");
+        // Skip placeholder/empty slots (a hot-plug tmpfs left behind). We do
+        // NOT require `writable` — a read-only mount can still hold installable
+        // .pkg files — only that it's a real, non-empty device.
+        if !external || v.is_placeholder || v.total_bytes == 0 {
+            continue;
+        }
+        let mut stack: Vec<(String, u32)> = vec![(v.path.clone(), 0)];
+        while let Some((dir, depth)) = stack.pop() {
+            if out.len() >= MAX_PKGS || dirs_visited >= MAX_DIRS {
+                break;
+            }
+            dirs_visited += 1;
+            let listing = match list_dir(addr, &dir, ListDirOptions::default()) {
+                Ok(l) => l,
+                Err(_) => continue,
+            };
+            for e in listing.entries {
+                if e.kind == "dir" {
+                    if depth + 1 < MAX_DEPTH {
+                        stack.push((join(&dir, &e.name), depth + 1));
+                    }
+                } else if e.name.to_ascii_lowercase().ends_with(".pkg") {
+                    if out.len() >= MAX_PKGS {
+                        break;
+                    }
+                    let path = join(&dir, &e.name);
+                    let (content_id, title_id, platform) = match fs_read(addr, &path, 0, 0xA0) {
+                        Ok(bytes) => external_pkg_header(&bytes),
+                        Err(_) => (String::new(), String::new(), String::new()),
+                    };
+                    out.push(ExternalPkg {
+                        path,
+                        drive: v.path.clone(),
+                        name: e.name,
+                        size: e.size,
+                        content_id,
+                        title_id,
+                        platform,
+                    });
+                }
+            }
+        }
+    }
+    // Stable, human-friendly order: by drive then name.
+    out.sort_by(|a, b| a.drive.cmp(&b.drive).then(a.name.cmp(&b.name)));
+    Ok(out)
+}
+
+/// GET /api/ps5/pkg/scan-external?addr=IP:PORT — list `.pkg` files found on
+/// connected external/USB drives, parsed for platform + content id. These
+/// install in place (no upload) via the normal install-from-path cascade.
+async fn ps5_pkg_scan_external(
+    State(state): State<AppState>,
+    Query(q): Query<AddrQuery>,
+) -> impl IntoResponse {
+    let addr = mgmt_addr_or_default(q.addr, &state.default_ps5_addr);
+    let result: Result<Vec<ExternalPkg>, anyhow::Error> =
+        tokio::task::spawn_blocking(move || scan_external_pkgs(&addr))
+            .await
+            .map_err(anyhow::Error::from)
+            .and_then(|inner| inner);
+    match result {
+        Ok(v) => (StatusCode::OK, Json(serde_json::json!({ "packages": v }))).into_response(),
+        Err(e) => json_err(StatusCode::BAD_GATEWAY, format!("{e:#}")).into_response(),
+    }
+}
+
 /// GET /api/ps5/volumes?addr=IP:PORT — enumerate mounted PS5 storage volumes.
 async fn ps5_volumes(
     State(state): State<AppState>,
@@ -5291,6 +5420,7 @@ async fn run(cfg: EngineConfig) -> anyhow::Result<()> {
         .route("/api/ps5/status", get(ps5_status))
         .route("/api/ps5/cleanup", post(ps5_cleanup))
         .route("/api/ps5/volumes", get(ps5_volumes))
+        .route("/api/ps5/pkg/scan-external", get(ps5_pkg_scan_external))
         .route("/api/ps5/list-dir", get(ps5_list_dir))
         .route("/api/ps5/fs/delete", post(ps5_fs_delete))
         .route("/api/ps5/fs/move", post(ps5_fs_move))

@@ -79,6 +79,19 @@ pub struct InstallSession {
     /// poll. We snapshot the terminal status here and replay it for any
     /// later poll instead of hitting the (now-gone) task.
     pub terminal_status: Option<PkgInstallStatus>,
+    /// Unix time the engine first observed phase=Done and began the
+    /// app.db launchability verification (elf-arsenal `wait_for_install_row`
+    /// analogue). `None` until the first Done poll. Used to bound how long
+    /// we keep the client polling while the title is still promoting before
+    /// declaring it "installed but not launchable".
+    pub verify_started_unix: Option<u64>,
+    /// Resolved launchability once verification concludes: `Some(true)` =
+    /// the title_id appeared in app.db (definitively launchable),
+    /// `Some(false)` = it never appeared within the verification window,
+    /// `None` = verification wasn't applicable (sqlite unavailable on this
+    /// FW, or no real title_id) — the legacy optimistic behavior. Cached
+    /// alongside `terminal_status` so replayed polls stay consistent.
+    pub launchable: Option<bool>,
 }
 
 #[derive(Default)]
@@ -378,6 +391,8 @@ async fn install_start_handler(
         created_at_unix: now_unix(),
         staging_path: req.local_ps5_path.clone().filter(|s| !s.is_empty()),
         terminal_status: None,
+        verify_started_unix: None,
+        launchable: None,
     };
 
     // Insert *before* sending the install frame so the HTTP listener
@@ -445,6 +460,7 @@ async fn install_start_handler(
         size: session.total_size,
         title: session.title.clone(),
         package_type,
+        method: None,
     };
 
     crate::log_info!(
@@ -645,6 +661,21 @@ pub struct StatusResponse {
     /// start on some firmwares (notably FW 12.xx). See
     /// `ps5upload_core::pkg_install::install_may_not_launch`.
     pub may_not_launch: bool,
+    /// Definitive launchability from the engine's app.db verification
+    /// (elf-arsenal `wait_for_install_row` analogue), once the install
+    /// reaches Done:
+    ///   `Some(true)`  — the title appeared in the PS5's app.db; it is
+    ///                   launchable (overrides the `may_not_launch`
+    ///                   heuristic — even an `appinst-local` install shows
+    ///                   a clean success once verified).
+    ///   `Some(false)` — the title never registered within the verification
+    ///                   window; treat as "installed but won't launch".
+    ///   `None`        — verification not applicable (app.db unreadable on
+    ///                   this firmware, or no real title_id) — fall back to
+    ///                   the `may_not_launch` heuristic. Pre-verification
+    ///                   payloads/clients see this and behave as before.
+    #[serde(default)]
+    pub launchable: Option<bool>,
 }
 
 /// Default maximum age (seconds) of an install session before the
@@ -673,6 +704,26 @@ fn pkg_session_max_age_sec() -> u64 {
         .unwrap_or(PKG_SESSION_MAX_AGE_SEC_DEFAULT)
 }
 
+/// How long (seconds) the engine keeps polling app.db for the installed
+/// title to register before declaring it "installed but not launchable".
+/// Matches elf-arsenal's 90s `wait_for_install_row` budget: Sony's
+/// installer copies + promotes content asynchronously after BGFT /
+/// AppInstUtil returns, so the title row can take tens of seconds to
+/// appear — especially for the synthetic-DONE tiers (shellui-rpc /
+/// appinst-local) that report Done the instant Sony accepts the request.
+///
+/// Override via `PS5UPLOAD_PKG_VERIFY_WINDOW_SEC` (e.g. shrink to seconds
+/// in tests, or extend for very large titles on slow storage). 0 disables
+/// the wait entirely — a single app.db check per Done poll, then resolve.
+const PKG_VERIFY_WINDOW_SEC_DEFAULT: u64 = 90;
+
+fn pkg_verify_window_sec() -> u64 {
+    std::env::var("PS5UPLOAD_PKG_VERIFY_WINDOW_SEC")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(PKG_VERIFY_WINDOW_SEC_DEFAULT)
+}
+
 /// Drop sessions older than the configured GC threshold. Called as a
 /// best-effort sweep at the start of every status handler invocation.
 /// Cheap (linear in active session count, which is bounded by the
@@ -697,7 +748,7 @@ async fn install_status_handler(
     Query(q): Query<StatusQuery>,
 ) -> Response<Body> {
     gc_old_sessions(&state);
-    let (ps5_addr, task_id, total, cancelled, terminal) = {
+    let (ps5_addr, task_id, total, cancelled, terminal, content_id, cached_launchable) = {
         let sessions = state.sessions.lock().unwrap_or_else(|e| e.into_inner());
         match sessions.get(&q.session) {
             None => {
@@ -712,6 +763,8 @@ async fn install_status_handler(
                 s.total_size,
                 s.cancelled,
                 s.terminal_status.clone(),
+                s.content_id.clone(),
+                s.launchable,
             ),
         }
     };
@@ -727,7 +780,12 @@ async fn install_status_handler(
         // raw, including "never got one").
         let tid = task_id.unwrap_or(0);
         return json_ok(&build_status_response(
-            q.session, status, total, cancelled, tid,
+            q.session,
+            status,
+            total,
+            cancelled,
+            tid,
+            cached_launchable,
         ));
     }
     let task_id = match task_id {
@@ -738,7 +796,7 @@ async fn install_status_handler(
     // blocking STATUS frame exchange against a slow/wedged console would
     // otherwise park a worker thread per poll — with several installs that
     // starves the whole engine. (See install_start_handler.)
-    let status: PkgInstallStatus = {
+    let mut status: PkgInstallStatus = {
         let addr = ps5_addr.clone();
         match tokio::task::spawn_blocking(move || pkg_install_status(&addr, task_id)).await {
             Ok(Ok(s)) => s,
@@ -760,6 +818,65 @@ async fn install_status_handler(
     // (`total` from the session is the fallback for build_status_response,
     // which prefers the BGFT-reported size when non-zero — BGFT reports 0
     // before the download starts.)
+
+    // ── elf-arsenal-style launchability verification ────────────────────
+    // When the payload reports Done, confirm the title actually registered
+    // on the PS5 before treating the install as terminal. The synthetic-DONE
+    // tiers (shellui-rpc, appinst-local) report Done the instant Sony
+    // *accepts* the request — long before the content is promoted to a
+    // launchable title — so historically a "Done" there was an optimistic
+    // guess (the "may not launch" caveat). We now check that the title_id
+    // derived from the content_id is registered, exactly as elf-arsenal's
+    // wait_for_install_row polls tbl_contentinfo — but via the all-firmware
+    // /user/app filesystem scan rather than sqlite (hardware-confirmed on FW
+    // 9.60, where the sqlite app.db is unreadable; see verify_launchable).
+    // See ps5upload_core::pkg_install::verify_launchable.
+    let mut launchable: Option<bool> = None;
+    if matches!(status.phase, InstallPhase::Done) {
+        let addr = ps5_addr.clone();
+        let cid = content_id.clone();
+        let check = tokio::task::spawn_blocking(move || {
+            ps5upload_core::pkg_install::verify_launchable(&addr, &cid)
+        })
+        .await
+        .unwrap_or(ps5upload_core::pkg_install::LaunchCheck::Unsupported);
+
+        match check {
+            // Title row present — definitively launchable. Overrides the
+            // register_path heuristic, so even an appinst-local install
+            // that genuinely booted now reports a clean success.
+            ps5upload_core::pkg_install::LaunchCheck::Registered => launchable = Some(true),
+            // Verification not applicable (sqlite unavailable on this FW, no
+            // real title_id, or RPC error) — keep the legacy optimistic
+            // behavior: terminal Done, fall back to the may_not_launch
+            // heuristic. No regression vs. pre-verification builds.
+            ps5upload_core::pkg_install::LaunchCheck::Unsupported => launchable = None,
+            // app.db readable but the title isn't registered yet. Inside the
+            // promotion window, keep the client polling (the title is still
+            // being written); past it, declare it unlaunchable.
+            ps5upload_core::pkg_install::LaunchCheck::Absent => {
+                let window = pkg_verify_window_sec();
+                let now = now_unix();
+                let started = {
+                    let mut sessions = state.sessions.lock().unwrap_or_else(|e| e.into_inner());
+                    match sessions.get_mut(&q.session) {
+                        Some(s) => *s.verify_started_unix.get_or_insert(now),
+                        None => now,
+                    }
+                };
+                if now.saturating_sub(started) < window {
+                    // Downgrade the reported phase to Install: keeps the UI
+                    // in "installing" AND skips the terminal-cache / staging-
+                    // cleanup blocks below (both guard on Done|Error), so the
+                    // next poll re-verifies instead of replaying a premature
+                    // terminal.
+                    status.phase = InstallPhase::Install;
+                } else {
+                    launchable = Some(false);
+                }
+            }
+        }
+    }
 
     // 2.2.52 Tier-1 staging cleanup. On terminal phase (Done | Error),
     // delete the staging file the desktop uploaded pre-install. We
@@ -810,11 +927,12 @@ async fn install_status_handler(
         let mut sessions = state.sessions.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(s) = sessions.get_mut(&q.session) {
             s.terminal_status = Some(status.clone());
+            s.launchable = launchable;
         }
     }
 
     json_ok(&build_status_response(
-        q.session, status, total, cancelled, task_id,
+        q.session, status, total, cancelled, task_id, launchable,
     ))
 }
 
@@ -828,6 +946,7 @@ fn build_status_response(
     fallback_total: u64,
     cancelled: bool,
     task_id: i32,
+    launchable: Option<bool>,
 ) -> StatusResponse {
     let total = if status.total > 0 {
         status.total
@@ -844,6 +963,7 @@ fn build_status_response(
         detail: status.detail,
         cancelled,
         may_not_launch: ps5upload_core::pkg_install::install_may_not_launch(&status.register_path),
+        launchable,
         register_path: status.register_path,
         intdebug_avail: status.intdebug_avail,
         kernel_rw: status.kernel_rw,
@@ -1206,6 +1326,11 @@ async fn resolve_parts_and_meta(
             title_id: String::new(),
             category: String::new(),
             package_type: req.package_type_override.clone(),
+            platform: ps5upload_pkg::derive_platform(
+                ps5upload_pkg::PKG_MAGIC,
+                req.content_id.as_deref().unwrap_or(""),
+                "",
+            ),
             icon_png_base64: None,
             warnings: vec![],
         };
@@ -1547,6 +1672,8 @@ mod tests {
             created_at_unix: 0,
             staging_path: None,
             terminal_status: None,
+            verify_started_unix: None,
+            launchable: None,
         }
     }
 

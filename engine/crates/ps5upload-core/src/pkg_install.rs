@@ -34,6 +34,24 @@ pub struct PkgInstallRequest {
     /// destination and DRM behavior; mismatch usually surfaces as a
     /// non-zero err_code from BGFT itself.
     pub package_type: String,
+    /// Optional install-method selector. When set, the payload runs ONLY
+    /// that single tier (instead of its internal best-effort cascade) and
+    /// reports its raw result — this is what lets the engine drive a
+    /// verify-and-fall-through cascade (try a method, confirm the content
+    /// actually landed under `/user/app/<id>/app.pkg`, else try the next).
+    /// Recognised values:
+    ///   "appinst-bypackage" — sceAppInstUtilInstallByPackage (local path
+    ///                         or http URL); the FW-portable primary.
+    ///   "appinst-local"     — sceAppInstUtilAppInstallPkg (local-disk).
+    ///                         Hardware-proven to be a silent no-op on FW
+    ///                         5.10 (returns 0, copies nothing) — kept only
+    ///                         as a probe / last resort.
+    ///   "shellui"           — ptrace into SceShellUI and install from there.
+    ///   "bgft"              — legacy BGFT IntDebug register/start.
+    /// `None`/"auto" keeps the payload's legacy internal cascade (back-compat
+    /// with older engines that don't drive the cascade themselves).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub method: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -255,6 +273,217 @@ pub fn install_may_not_launch(register_path: &str) -> bool {
     register_path == "appinst-local"
 }
 
+/// Whether `s` has the shape of a PS5 title_id: four uppercase letters
+/// (CUSA / PPSA / NPXS / …) followed by five digits, e.g. "CUSA12345".
+/// Mirrors `looks_like_title_id` in the payload's register.c so the two
+/// stay in agreement about what counts as a real title.
+fn looks_like_title_id(s: &str) -> bool {
+    let b = s.as_bytes();
+    b.len() == 9
+        && b[..4].iter().all(u8::is_ascii_uppercase)
+        && b[4..].iter().all(u8::is_ascii_digit)
+}
+
+/// Derive the PS5 title_id from a PKG content_id.
+///
+/// A content_id has the shape `IV9999-CUSA12345_00-ZGAMEFOO00000000`
+/// (region tag, '-', title_id, '_', label). elf-arsenal extracts the same
+/// field — the token between the first '-' and the following '_' — to key
+/// its `wait_for_install_row` app.db check. We reproduce that exactly.
+///
+/// Returns `None` when the content_id is empty/malformed, when the derived
+/// token isn't a real title_id shape, or when it names a `FAKE…`
+/// placeholder. elf-arsenal treats a "FAKE00000" titleId as a failed
+/// install (a real launchable title never carries one); we instead treat
+/// "can't derive a real title_id" as "verification not applicable" so the
+/// caller stays on the legacy optimistic path rather than failing an
+/// install we simply can't check.
+pub fn title_id_from_content_id(content_id: &str) -> Option<String> {
+    let cid = content_id.trim();
+    if cid.is_empty() {
+        return None;
+    }
+    // Token after the first '-', up to the next '_'.
+    let after_dash = cid.split_once('-')?.1;
+    let title = after_dash.split('_').next()?;
+    if title.starts_with("FAKE") || !looks_like_title_id(title) {
+        return None;
+    }
+    Some(title.to_string())
+}
+
+/// Outcome of a launchability check — the FW-safe analogue of
+/// elf-arsenal's `wait_for_install_row` poll of `tbl_contentinfo`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LaunchCheck {
+    /// The title_id is registered on the console (present under
+    /// `/user/app/<title_id>/`, and/or in app.db) — the install produced a
+    /// launchable title.
+    Registered,
+    /// The console is reachable and enumerable but the title_id is not
+    /// (yet) registered. During the verification window this means "still
+    /// promoting"; past it, "installed but never became launchable".
+    Absent,
+    /// Verification couldn't be performed — either we couldn't derive a
+    /// real title_id from the content_id, or neither the filesystem
+    /// enumeration nor app.db could be read (RPC failure). The caller keeps
+    /// the legacy optimistic behavior — no regression.
+    Unsupported,
+}
+
+/// Check whether `content_id`'s title is registered (and therefore
+/// launchable) on the PS5.
+///
+/// elf-arsenal verifies installs by polling app.db (`tbl_contentinfo`). We
+/// reproduce the *semantics* — "did the title row materialize?" — but the
+/// **primary** source is the filesystem enumeration (`app_list_registered`
+/// → `/user/app/<title_id>/` scan), NOT sqlite. Hardware on FW 9.60 proved
+/// the reason: the dlsym-only `AppDbQuery` returns `sqlite_unavailable`
+/// there (nothing `dlopen`s libSceSqlite — by design, since that hangs on
+/// 9.60), so an app.db-only check would no-op on the most common jailbreak
+/// firmware. The `/user/app/` scan works on every firmware (it's what the
+/// codebase already uses for the Library "installed" filter) and is the
+/// on-disk equivalent of Sony's app.db row — "any title Sony's XMB knows
+/// about has a /user/app/<id>/ directory" (register.h).
+///
+/// app.db (via `AppDbQuery`) is consulted as a **supplement** when the
+/// filesystem scan doesn't (yet) show the title and sqlite happens to be
+/// readable (newer firmwares) — it can surface a title that's registered
+/// in the DB a beat before the `/user/app` enumeration reflects it.
+///
+/// Any unverifiable case (no title_id, both sources unreadable) returns
+/// `Unsupported`, so a check we can't perform never fails a real install.
+pub fn verify_launchable(addr: &str, content_id: &str) -> LaunchCheck {
+    match title_id_from_content_id(content_id) {
+        Some(title_id) => verify_title_registered(addr, &title_id),
+        None => LaunchCheck::Unsupported,
+    }
+}
+
+/// On-disk probe of `/user/app/<title_id>/app.pkg`.
+enum PkgProbe {
+    /// `app.pkg` is present at non-zero size — Sony's installer wrote the
+    /// package content. Definitive "content landed".
+    Present,
+    /// The console answered, but the title's `app.pkg` is not there — either
+    /// the directory is missing (ENOENT) or it exists without the package
+    /// (a no-op tier's empty dir, or content still being copied).
+    Absent,
+    /// The directory couldn't be read for a reason other than "not found"
+    /// (RPC/socket trouble, permission) — verdict deferred to supplements.
+    Unreadable,
+}
+
+/// Probe whether Sony's installer actually wrote the package content for
+/// `title_id` to disk. The discriminator is `/user/app/<id>/app.pkg` at
+/// non-zero size — the real on-disk package the launcher boots (the
+/// reference doc §12 checks this exact file). Crucially this is NOT
+/// satisfied by a bare `/user/app/<id>/` directory, which a no-op install
+/// tier can leave behind (hardware-proven: `sceAppInstUtilAppInstallPkg`
+/// on FW 5.10 returns rc==0 but copies nothing, and an interrupted install
+/// can leave an empty dir) — that case is exactly the false-positive the
+/// older title-record scan produced.
+fn probe_installed_pkg(addr: &str, title_id: &str) -> PkgProbe {
+    let path = format!("/user/app/{title_id}");
+    match crate::fs_ops::list_dir(addr, &path, crate::fs_ops::ListDirOptions::default()) {
+        Ok(listing) => {
+            if listing.entries.iter().any(|e| e.name == "app.pkg" && e.size > 0) {
+                PkgProbe::Present
+            } else {
+                PkgProbe::Absent
+            }
+        }
+        Err(e) => {
+            // The payload reports a missing directory as
+            // `fs_list_dir_opendir_errno_2` (ENOENT) — that's a definitive
+            // "title not installed", not an inability to check. Anchor with
+            // `ends_with` so we don't also match errno 20/23/24/2xx (the
+            // payload formats `..._errno_<n>`), which would mis-tag a real
+            // read failure (ENOTDIR/EMFILE) as "absent".
+            if e.to_string().ends_with("errno_2") {
+                PkgProbe::Absent
+            } else {
+                PkgProbe::Unreadable
+            }
+        }
+    }
+}
+
+/// Whether app.db lists `title_id`. `Some(true/false)` only when sqlite is
+/// actually readable on this firmware (`err == None`); `None` otherwise (the
+/// dlsym-only AppDbQuery returns `sqlite_unavailable` on FW 9.60 — see the
+/// 9.60 note on [`verify_title_registered`]).
+fn appdb_has_title(addr: &str, title_id: &str) -> Option<bool> {
+    match crate::diagnostics::appdb_query(addr) {
+        Ok(list) if list.err.is_none() => Some(list.apps.iter().any(|a| a.title_id == title_id)),
+        _ => None,
+    }
+}
+
+/// Check whether `title_id` (e.g. "PPSA01650") installed a launchable title
+/// on the PS5.
+///
+/// The title_id-keyed core of [`verify_launchable`], split out because some
+/// PKG formats (notably the `\x7FFIH` PS5-native fakepkg header) don't expose
+/// a parseable content_id host-side — but their title_id is recoverable from
+/// the filename. Callers with a title_id in hand can verify directly.
+///
+/// **Discriminator:** the on-disk package `/user/app/<id>/app.pkg`
+/// ([`probe_installed_pkg`]) — the same file the reference doc §12 checks and
+/// the file the PS5 launcher boots. This deliberately does NOT trust the bare
+/// presence of a `/user/app/<id>/` directory: a no-op install tier can return
+/// `rc==0` and leave (or not even create) an empty dir, which the older
+/// title-record scan (`app_list_registered` / `list_registered_titles_json`)
+/// reported as "registered" — a false success. Hardware on FW 5.10 proved the
+/// no-op (`sceAppInstUtilAppInstallPkg`), and FW 9.60 proved sqlite app.db is
+/// unreadable, so the filesystem `app.pkg` check is the only thing that works
+/// on every firmware.
+///
+/// Supplements (only consulted when `app.pkg` isn't present): a homebrew
+/// title we registered via nullfs has no `app.pkg` but a non-empty `src`
+/// (its `mount.lnk`) and IS launchable; and app.db can confirm a title on
+/// firmwares where sqlite is readable. Any unverifiable case returns
+/// `Unsupported` so a check we can't perform never fails a real install.
+pub fn verify_title_registered(addr: &str, title_id: &str) -> LaunchCheck {
+    if !looks_like_title_id(title_id) || title_id.starts_with("FAKE") {
+        return LaunchCheck::Unsupported;
+    }
+
+    // PRIMARY: did the package content actually land on disk?
+    match probe_installed_pkg(addr, title_id) {
+        PkgProbe::Present => return LaunchCheck::Registered,
+        // Reachable, content not (yet) on disk — fall through to supplements,
+        // then Absent. The engine's verification window distinguishes "still
+        // promoting" from "never landed".
+        PkgProbe::Absent => {}
+        // Couldn't read the dir for a non-ENOENT reason — defer to app.db,
+        // else stay optimistic (Unsupported) rather than fail a real install.
+        PkgProbe::Unreadable => {
+            return match appdb_has_title(addr, title_id) {
+                Some(true) => LaunchCheck::Registered,
+                Some(false) => LaunchCheck::Absent,
+                None => LaunchCheck::Unsupported,
+            };
+        }
+    }
+
+    // SUPPLEMENT 1: a homebrew (nullfs-registered) title is launchable
+    // without an app.pkg — it carries a non-empty `src` (its mount.lnk).
+    // A bare-dir pkg install has `src == ""`, so this never re-introduces the
+    // false positive.
+    if let Ok(list) = crate::fs_ops::app_list_registered(addr) {
+        if list.apps.iter().any(|a| a.title_id == title_id && !a.src.is_empty()) {
+            return LaunchCheck::Registered;
+        }
+    }
+
+    // SUPPLEMENT 2: app.db, where sqlite is readable (newer firmwares).
+    match appdb_has_title(addr, title_id) {
+        Some(true) => LaunchCheck::Registered,
+        _ => LaunchCheck::Absent,
+    }
+}
+
 pub fn err_code_message(code: u32) -> Option<&'static str> {
     match code {
         0x0000_0000 => None, // success — no message
@@ -328,6 +557,47 @@ mod tests {
     }
 
     #[test]
+    fn title_id_parsed_from_real_content_ids() {
+        assert_eq!(
+            title_id_from_content_id("IV9999-CUSA12345_00-ZGAMEFOO00000000").as_deref(),
+            Some("CUSA12345")
+        );
+        assert_eq!(
+            title_id_from_content_id("EP4361-PPSA01234_00-REDEMPTION000002").as_deref(),
+            Some("PPSA01234")
+        );
+        // Surrounding whitespace (BGFT-padded ids) is tolerated.
+        assert_eq!(
+            title_id_from_content_id("  UP0000-NPXS40047_00-LABEL  ").as_deref(),
+            Some("NPXS40047")
+        );
+    }
+
+    #[test]
+    fn title_id_rejects_placeholders_and_garbage() {
+        // FAKE placeholder — elf-arsenal treats this as "no real title".
+        assert_eq!(title_id_from_content_id("IV9999-FAKE00000_00-X"), None);
+        // No '-' separator.
+        assert_eq!(title_id_from_content_id("CUSA12345"), None);
+        // Wrong shape (too short / lowercase / non-digit tail).
+        assert_eq!(title_id_from_content_id("IV9999-CUSA123_00-X"), None);
+        assert_eq!(title_id_from_content_id("IV9999-cusa12345_00-X"), None);
+        assert_eq!(title_id_from_content_id("IV9999-CUSA1234X_00-X"), None);
+        // Empty.
+        assert_eq!(title_id_from_content_id(""), None);
+        assert_eq!(title_id_from_content_id("   "), None);
+    }
+
+    #[test]
+    fn looks_like_title_id_shape() {
+        assert!(looks_like_title_id("CUSA12345"));
+        assert!(looks_like_title_id("PPSA00001"));
+        assert!(!looks_like_title_id("CUSA1234")); // 8 chars
+        assert!(!looks_like_title_id("CUSA123456")); // 10 chars
+        assert!(!looks_like_title_id("CUS012345")); // only 3 letters
+    }
+
+    #[test]
     fn via_tier_classifies_task_id_bits() {
         // Failure sentinel — was reported as "tier0-worker" before
         // the v2.16.1 hardware test caught the sign-bit bug.
@@ -382,6 +652,7 @@ mod tests {
             size: 1_234_567_890,
             title: "Test Title".into(),
             package_type: "PS4GD".into(),
+            method: None,
         };
         let s = serde_json::to_string(&req).unwrap();
         let back: PkgInstallRequest = serde_json::from_str(&s).unwrap();

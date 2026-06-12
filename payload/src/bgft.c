@@ -334,6 +334,17 @@ static int appinst_task_lookup(int32_t task_id, char *out, size_t out_cap) {
  * Sony's install API gates. */
 #define PS5_SHELLCORE_AUTHID 0x3800000000000010ull
 
+/* SYSTEM authid — what elf-arsenal's jb_escalate_pid (JB_AUTHID) and the
+ * install-service reference doc use to drive sceAppInstUtilAppInstallPkg so
+ * the CONTENT (not just the appmeta/title record) actually lands. ShellCore's
+ * authid is enough to register the title but the content-copy step is gated
+ * behind this SYSTEM token; running AppInstallPkg under ShellCore produced
+ * the "appmeta present, /user/app empty → dead tile" signature on FW 9.60.
+ * InstallByPackage's URL pre-flight still needs ShellCore (0x80B22404 from
+ * other authids — see note above), so the two local/URL paths use different
+ * tokens deliberately. */
+#define PS5_SYSTEM_INSTALL_AUTHID 0x4801000000000013ull
+
 /* External — defined in main.c, exposed via runtime.h. We re-declare
  * here rather than pulling kernel.h into bgft.c. */
 extern uint64_t kernel_get_ucred_authid(pid_t pid);
@@ -351,7 +362,7 @@ extern int kernel_set_ucred_authid(pid_t pid, uint64_t authid);
  *
  *  `site_tag` is a short identifier (e.g. "InstallByPackage") used
  *  only in the warn log line so multi-call traces are diagnosable. */
-static uint64_t authid_acquire_shellcore(const char *site_tag) {
+static uint64_t authid_acquire(const char *site_tag, uint64_t target_authid) {
     pid_t mypid = getpid();
     uint64_t saved = kernel_get_ucred_authid(mypid);
     if (saved == 0) {
@@ -361,14 +372,22 @@ static uint64_t authid_acquire_shellcore(const char *site_tag) {
          * jailbreak elevation yet." */
         return 0;
     }
-    if (kernel_set_ucred_authid(mypid, PS5_SHELLCORE_AUTHID) != 0) {
+    if (kernel_set_ucred_authid(mypid, target_authid) != 0) {
         fprintf(stderr,
-                "[bgft.%s] WARN: failed to swap to ShellCore authid; "
+                "[bgft.%s] WARN: failed to swap to authid 0x%llx; "
                 "Sony call will run with current authid (0x%llx)\n",
-                site_tag, (unsigned long long)saved);
+                site_tag, (unsigned long long)target_authid,
+                (unsigned long long)saved);
         return 0;
     }
     return saved;
+}
+
+/** Convenience wrapper: swap to ShellCore's authid (the InstallByPackage /
+ *  GetInstallStatus URL gate). The local AppInstallPkg path uses
+ *  PS5_SYSTEM_INSTALL_AUTHID instead — see authid_acquire callers. */
+static uint64_t authid_acquire_shellcore(const char *site_tag) {
+    return authid_acquire(site_tag, PS5_SHELLCORE_AUTHID);
 }
 
 /** Restore prior authid with retry-and-verify (3 attempts). No-op if
@@ -600,7 +619,13 @@ static int appinst_install_start_local(const char *path,
     pthread_mutex_lock(&sony_api_lock);
     /* kernel_rw_lock across the authid swap window — see appinst_install_start. */
     pthread_mutex_lock(&kernel_rw_lock);
-    uint64_t saved_authid = authid_acquire_shellcore("AppInstallPkg");
+    /* SYSTEM authid (not ShellCore) for the local content install — this is
+     * how elf-arsenal / the reference impl land the actual app content rather
+     * than just the title record. Held across init + the AppInstallPkg call;
+     * the install service captures the caller credential at request time, so
+     * restoring after the synchronous return is fine — the async content copy
+     * proceeds with the SYSTEM-authorised request it already accepted. */
+    uint64_t saved_authid = authid_acquire("AppInstallPkg", PS5_SYSTEM_INSTALL_AUTHID);
     pthread_once(&g_appinst_init_once, appinst_init_locked);
 
     int rc = app_install_pkg(path, &pkg_info);
@@ -1145,6 +1170,7 @@ int bgft_install_start(const char *url,
                         uint64_t size,
                         const char *title,
                         const char *package_type,
+                        const char *method,
                         int32_t *out_task_id,
                         uint32_t *out_err_code) {
     if (!url || !content_id || !out_task_id || !out_err_code) {
@@ -1183,6 +1209,77 @@ int bgft_install_start(const char *url,
      * confuse the user ("register_path=shellui-rpc but task_id=-1?").
      * "none" is the correct sentinel for "no tier succeeded yet". */
     g_last_register_path = "none";
+
+    /* ─── Host-driven single-method selector ─────────────────────────────
+     * When the engine requests a SPECIFIC install method, run ONLY that
+     * tier and report its raw result — no internal cascade. This is what
+     * lets the engine drive a verify-and-fall-through cascade: it tries a
+     * method, confirms the content actually landed under
+     * /user/app/<id>/app.pkg, and only then trusts the rc==0. A no-op tier
+     * (e.g. AppInstallPkg on FW 5.10, which returns 0 but copies nothing)
+     * is caught by the engine's post-install filesystem check and the next
+     * method is tried. An empty / "auto" method keeps the legacy internal
+     * cascade below (back-compat with older engines). */
+    if (method && method[0] && strcmp(method, "auto") != 0) {
+        if (strcmp(method, "appinst-local") == 0) {
+            int32_t t = -1; uint32_t e = 0;
+            int rc = appinst_install_start_local(url, content_id, &t, &e);
+            g_last_appinst_err = e; g_last_appinst_err_set = 1;
+            if (rc == 0) {
+                *out_task_id = t; *out_err_code = 0;
+                g_last_register_path = "appinst-local";
+                return 0;
+            }
+            *out_err_code = e ? e : BGFT_ERR_REGISTER_FAILED;
+            return -1;
+        }
+        if (strcmp(method, "appinst-bypackage") == 0) {
+            int32_t t = -1; uint32_t e = 0;
+            int rc = appinst_install_start(url, content_id, title, &t, &e);
+            g_last_appinst_err = e; g_last_appinst_err_set = 1;
+            if (rc == 0) {
+                *out_task_id = t; *out_err_code = 0;
+                g_last_register_path = "appinst";
+                return 0;
+            }
+            *out_err_code = e ? e : BGFT_ERR_REGISTER_FAILED;
+            return -1;
+        }
+        if (strcmp(method, "shellui") == 0) {
+            (void)shellui_rpc_init();
+            uint32_t e = 0;
+            int rc = shellui_rpc_install_pkg(url, content_id, title, &e);
+            g_last_shellui_err = e; g_last_shellui_err_set = 1;
+            if (rc == 0) {
+                int32_t tid = appinst_task_register(content_id, NULL);
+                if (tid < 0) { *out_err_code = BGFT_ERR_TASK_TABLE_FULL; return -1; }
+                *out_task_id = tid | APPINST_VIA_SHELLUI_FLAG;
+                *out_err_code = 0;
+                g_last_register_path = "shellui-rpc";
+                return 0;
+            }
+            *out_err_code = e ? e : BGFT_ERR_REGISTER_FAILED;
+            return -1;
+        }
+        /* "bgft" or any unrecognised value → fall through to the legacy
+         * cascade below (which ends in the BGFT IntDebug path). */
+    }
+
+    /* ─── No appinst-local Tier-0 — HARDWARE-DISPROVEN ───────────────────
+     * A previous iteration ran sceAppInstUtilAppInstallPkg FIRST under the
+     * SYSTEM authid (0x4801000000000013) on the theory (from elf-arsenal)
+     * that it lands launchable content. Hardware testing on FW 5.10 proved
+     * the opposite: AppInstallPkg returns err_code=0 ("Done") but copies
+     * NOTHING — /user/app/<id>/ is never created and Sony's klog shows zero
+     * installer activity. It is a silent no-op on this firmware. Trusting
+     * its rc==0 and returning first short-circuited the path that actually
+     * works (InstallByPackage, Tier 1 below — klog shows the full
+     * PlayGoCore transfer + prepromote, and /user/app/<id>/app.pkg lands
+     * with playgo locus=3). So AppInstallPkg stays the ABSOLUTE LAST RESORT
+     * (try_appinst_local_last_resort:), reached only when every real
+     * installer path has failed, and the engine verifies the content
+     * actually landed before reporting success (never trusts rc==0 — see
+     * ps5upload_core::pkg_install::verify_launchable). */
 
     /* ─── Tier ordering ──────────────────────────────────────────────
      *   1. **In-process AppInstUtil** (preferred): call
