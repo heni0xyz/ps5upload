@@ -553,11 +553,12 @@ const makePkgLibraryStore = () =>
       // Base/unknown live at the library root; updates + DLC in their own
       // sub-dirs (see lib/pkgStagingPath). Scan all three so a base and its
       // update both show, each badged by the dir it came from.
-      const SCAN = ["", "updates", "dlc"];
       const entries: PkgEntry[] = [];
-      for (const subdir of SCAN) {
-        const dir = subdir ? `${PKG_LIBRARY_DIR}/${subdir}` : PKG_LIBRARY_DIR;
-        const listed = await listOne(dir, subdir === "");
+      const addFrom = (
+        listed: Awaited<ReturnType<typeof listOne>>,
+        subdir: string,
+        dir: string,
+      ) => {
         for (const e of listed) {
           if (e.kind !== "file" || !e.name.toLowerCase().endsWith(".pkg")) {
             continue;
@@ -575,6 +576,25 @@ const makePkgLibraryStore = () =>
             status: "idle" as PkgStatus,
           });
         }
+      };
+      // Ensure the library dir exists so the root listing below never hits
+      // ENOENT (which the engine surfaces as a noisy 502 + WARN). `fsMkdir`
+      // is idempotent on the payload (EEXIST → success), so this is a no-op
+      // once the library has been used.
+      await fsMkdir(transferAddr(host), PKG_LIBRARY_DIR).catch(() => {});
+      // Base/unknown pkgs live at the library root; updates + DLC each get a
+      // sub-dir (see lib/pkgStagingPath). List the root once (strict — proves
+      // the console is reachable), then descend into `updates`/`dlc` ONLY when
+      // the root listing shows they exist (no speculative ENOENT probes).
+      const rootList = await listOne(PKG_LIBRARY_DIR, true);
+      addFrom(rootList, "", PKG_LIBRARY_DIR);
+      const presentDirs = new Set(
+        rootList.filter((e) => e.kind === "dir").map((e) => e.name),
+      );
+      for (const subdir of ["updates", "dlc"]) {
+        if (!presentDirs.has(subdir)) continue;
+        const dir = `${PKG_LIBRARY_DIR}/${subdir}`;
+        addFrom(await listOne(dir, false), subdir, dir);
       }
       set({ entries: mergeListing(get().entries, entries), loading: false });
     } catch (e) {
@@ -909,14 +929,24 @@ const makePkgLibraryStore = () =>
         set({ busyNotice: null });
       }
       // 1. On-console copy USB → internal staging (Sony can't install off the
-      //    exfat USB mount directly). `fsCopy` refuses to overwrite, so clear
-      //    any stale copy first.
+      //    exfat USB mount directly). `fsCopy` refuses to overwrite; rather
+      //    than speculatively delete (which logs an ENOENT warning on the
+      //    common fresh-install path), only clear + retry when the copy
+      //    actually reports the dest already exists.
       set({
         busyNotice: `Copying ${pkg.name || pkg.contentId} from ${pkg.drive}…`,
       });
       await fsMkdir(transferAddr(host), PKG_TEMP_DIR).catch(() => {});
-      await fsDelete(mgmtAddr(host), internalPath).catch(() => {});
-      await fsCopy(mgmtAddr(host), pkg.path, internalPath);
+      try {
+        await fsCopy(mgmtAddr(host), pkg.path, internalPath);
+      } catch (e) {
+        if (/fs_copy_dest_exists/.test(String(e))) {
+          await fsDelete(mgmtAddr(host), internalPath).catch(() => {});
+          await fsCopy(mgmtAddr(host), pkg.path, internalPath);
+        } else {
+          throw e;
+        }
+      }
       set({ busyNotice: null });
 
       // 2. Install from the internal copy via the shared cascade.

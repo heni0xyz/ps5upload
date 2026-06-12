@@ -6,7 +6,6 @@ import {
   RefreshCw,
   Loader2,
   Download,
-  HardDrive,
   Upload as UploadIcon,
   FolderOpen,
 } from "lucide-react";
@@ -14,7 +13,6 @@ import { openInFileSystem } from "../../state/fsNavigation";
 import {
   savesList,
   startTransferDir,
-  fsReadPreview,
   fsDelete,
   fsListDir,
   waitForJob,
@@ -33,6 +31,7 @@ import {
   EmptyState,
   ErrorCard,
   ConnectionGate,
+  GameIcon,
 } from "../../components";
 // Direct import to avoid the barrel's circular-dep warning at build.
 import { useConfirm } from "../../components/ConfirmDialog";
@@ -381,10 +380,16 @@ export default function SavesScreen() {
               className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4"
             >
               <header className="mb-2 flex items-center gap-2">
-                <SaveThumbnail
+                {/* Game cover from /user/appmeta/<id>/icon0.png (readable),
+                    not the save's own icon0.png — that lives inside an
+                    unmounted PFS container, so reading it failed for every
+                    save and only spammed warnings. Falls back to a glyph when
+                    the game isn't installed. */}
+                <GameIcon
+                  host={host}
                   titleId={title_id}
-                  userId={entries[0]?.user_id ?? 0}
-                  mgmtAddr={host?.trim() ? mgmtAddr(host.trim()) : null}
+                  size={32}
+                  rounded="rounded"
                 />
                 <h3 className="text-sm font-semibold">{title_id}</h3>
                 <span className="text-xs text-[var(--color-muted)]">
@@ -471,74 +476,8 @@ export default function SavesScreen() {
 }
 
 // formatBytes moved to lib/format.ts (and corrected to IEC binary).
-
-/**
- * Per-save thumbnail. Lazy-loads icon0.png from the save folder's
- * sce_sys/. The full path Sony uses is
- *   /user/home/<uid>/savedata_prospero/<title_id>/sce_sys/icon0.png
- * IntersectionObserver gates the FS_READ so a Saves screen with
- * 200+ entries doesn't fan out 200+ concurrent reads on mount.
- *
- * Falls back to the HardDrive icon when icon0.png is missing
- * (PS4 saves often don't have one).
- */
-function SaveThumbnail({
-  titleId,
-  userId,
-  mgmtAddr,
-}: {
-  titleId: string;
-  userId: number;
-  mgmtAddr: string | null;
-}) {
-  const [src, setSrc] = useState<string | null>(null);
-  const [tried, setTried] = useState(false);
-  const ref = useState<HTMLDivElement | null>(null);
-  const [refEl, setRefEl] = useState<HTMLDivElement | null>(null);
-  // Keep the unused ref tuple slot quiet without triggering the
-  // unused-var lint — we only need the setter.
-  void ref;
-
-  useEffect(() => {
-    if (tried || !refEl || !mgmtAddr) return;
-    const obs = new IntersectionObserver((entries) => {
-      for (const entry of entries) {
-        if (entry.isIntersecting) {
-          obs.disconnect();
-          setTried(true);
-          const path = `/user/home/${userId}/savedata_prospero/${titleId}/sce_sys/icon0.png`;
-          fsReadPreview(mgmtAddr, path, 64 * 1024)
-            .then((r) => {
-              if (r.size > 0) {
-                setSrc(`data:image/png;base64,${r.base64}`);
-              }
-            })
-            .catch(() => {
-              // Most saves don't have an icon — silently no-op.
-            });
-          break;
-        }
-      }
-    });
-    obs.observe(refEl);
-    return () => obs.disconnect();
-  }, [tried, refEl, mgmtAddr, titleId, userId]);
-
-  if (src) {
-    return (
-      <img
-        src={src}
-        alt={titleId}
-        className="h-8 w-8 shrink-0 rounded object-cover"
-      />
-    );
-  }
-  return (
-    <div
-      ref={setRefEl}
-      className="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-[var(--color-surface)]"
-    >
-      <HardDrive size={14} className="text-[var(--color-muted)]" />
-    </div>
-  );
-}
+// SaveThumbnail was removed: it read each save's own
+// /user/home/<uid>/savedata_prospero/<id>/sce_sys/icon0.png, which lives
+// inside an unmounted PFS container — so the read failed for every save and
+// only produced warnings. The save rows now use the shared <GameIcon> (the
+// game's appmeta cover), which is readable and actually shows art.
