@@ -8,7 +8,9 @@ import {
   Download,
   HardDrive,
   Upload as UploadIcon,
+  FolderOpen,
 } from "lucide-react";
+import { openInFileSystem } from "../../state/fsNavigation";
 import {
   savesList,
   startTransferDir,
@@ -389,6 +391,24 @@ export default function SavesScreen() {
                   {entries.length} {tr("saves_folder", undefined, "folder")}
                   {entries.length === 1 ? "" : "s"}
                 </span>
+                {/* Jump to this title's save directory in the File System
+                    browser — quick way to inspect/manage the raw files. */}
+                {entries[0]?.path && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="ml-auto"
+                    leftIcon={<FolderOpen size={12} />}
+                    onClick={() => openInFileSystem(navigate, entries[0].path)}
+                    title={tr(
+                      "saves_open_folder_hint",
+                      undefined,
+                      "Open this save's folder in the File System browser",
+                    )}
+                  >
+                    {tr("saves_open_folder", undefined, "Open folder")}
+                  </Button>
+                )}
               </header>
               <ul className="space-y-1">
                 {entries.map((e) => (

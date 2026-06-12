@@ -18,6 +18,8 @@ import {
   ClipboardPaste,
   Download,
   X,
+  HardDrive,
+  Usb,
 } from "lucide-react";
 import { pickPath } from "../../lib/pickPath";
 import {
@@ -49,6 +51,7 @@ import {
   type Volume,
 } from "../../api/ps5";
 import { loadFsLastPath, saveFsLastPath } from "../../lib/fsLastPath";
+import { useFsNavStore } from "../../state/fsNavigation";
 import { useActivityHistoryStore } from "../../state/activityHistory";
 import { pushNotification } from "../../state/notifications";
 import { useRecentPathsStore } from "../../state/recentPaths";
@@ -451,6 +454,19 @@ export default function FileSystemScreen() {
   useEffect(() => {
     setPath(loadFsLastPath(host));
   }, [host]);
+
+  // Honor a cross-screen "open this directory" request (Saves, Install
+  // Package, etc. call openInFileSystem then navigate here). Declared AFTER
+  // the host-restore effect so on a fresh mount it runs last and wins. The
+  // null→path→null transition is safe: the null branch is a no-op, so it
+  // never clobbers the jumped-to path.
+  const requestedPath = useFsNavStore((s) => s.requestedPath);
+  useEffect(() => {
+    if (requestedPath != null) {
+      setPath(requestedPath);
+      useFsNavStore.getState().consume();
+    }
+  }, [requestedPath]);
 
   // Persist `path` whenever it changes (and we have a real host).
   // Saved per-host so multiple PS5s remember their own last
@@ -1518,40 +1534,54 @@ export default function FileSystemScreen() {
           modal lets users pick a destination volume. The picker
           shows path + free-space so users can spot which mount has
           headroom for an upload at a glance. */}
+        {/* Drives — internal + external/USB storage as a dedicated, always-
+            visible category (rather than a separate Volumes section). Each
+            chip jumps to that drive's root; external/USB drives get a USB icon
+            + accent border so they stand out. The active drive is highlighted. */}
         {volumes && volumes.length > 0 && (
-          <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
-            <label className="text-[var(--color-muted)]">
-              {tr("fs_volume_picker_label", undefined, "Volume")}
-            </label>
-            <select
-              value={currentVolumePath ?? ""}
-              onChange={(e) => {
-                const v = e.target.value;
-                if (v) setPath(v);
-              }}
-              className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2 py-1 font-mono text-xs focus:border-[var(--color-accent)] focus:outline-none"
-              aria-label={tr(
-                "fs_volume_picker_aria",
-                undefined,
-                "Jump to a volume",
-              )}
-            >
-              {/* Empty option only when the current path doesn't sit
-                under any known volume — otherwise the controlled
-                value would mismatch the option list and React would
-                warn. The user sees "(custom path)" in that case so
-                they understand why no volume is highlighted. */}
-              {currentVolumePath === null && (
-                <option value="" disabled>
-                  {tr("fs_volume_picker_custom", undefined, "(custom path)")}
-                </option>
-              )}
-              {volumes.map((v) => (
-                <option key={v.path} value={v.path}>
-                  {v.path} · {formatBytes(v.free_bytes)} {tr("fs_free", "free")}
-                </option>
-              ))}
-            </select>
+          <div className="mb-2 flex flex-wrap items-center gap-1.5 text-xs">
+            <span className="mr-0.5 inline-flex items-center gap-1 text-[var(--color-muted)]">
+              <HardDrive size={12} />
+              {tr("fs_drives_label", undefined, "Drives")}
+            </span>
+            {volumes.map((v) => {
+              const external =
+                v.path.startsWith("/mnt/usb") || v.path.startsWith("/mnt/ext");
+              const active = currentVolumePath === v.path;
+              const Icon = external ? Usb : HardDrive;
+              return (
+                <button
+                  key={v.path}
+                  type="button"
+                  onClick={() => setPath(v.path)}
+                  title={`${v.path} · ${formatBytes(v.free_bytes)} ${tr("fs_free", "free")}`}
+                  className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 font-mono ${
+                    active
+                      ? "border-[var(--color-accent)] bg-[var(--color-surface)] text-[var(--color-text)]"
+                      : external
+                        ? "border-[var(--color-ps4)] text-[var(--color-text)] hover:bg-[var(--color-surface)]"
+                        : "border-[var(--color-border)] text-[var(--color-muted)] hover:bg-[var(--color-surface)]"
+                  }`}
+                >
+                  <Icon
+                    size={12}
+                    className={external ? "text-[var(--color-ps4)]" : undefined}
+                  />
+                  {v.path}
+                  <span className="opacity-60">
+                    · {formatBytes(v.free_bytes)}
+                  </span>
+                </button>
+              );
+            })}
+            {/* When the current path sits under no known volume, mirror the old
+                picker's "(custom path)" affordance so the lack of an active
+                chip isn't mysterious. */}
+            {currentVolumePath === null && (
+              <span className="rounded-md border border-dashed border-[var(--color-border)] px-2 py-1 font-mono text-[var(--color-muted)]">
+                {tr("fs_volume_picker_custom", undefined, "(custom path)")}
+              </span>
+            )}
           </div>
         )}
 

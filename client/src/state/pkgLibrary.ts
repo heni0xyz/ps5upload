@@ -2,7 +2,8 @@ import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
 import { invoke } from "@tauri-apps/api/core";
 
-import { fsListDir, fsDelete, fsMkdir } from "../api/ps5";
+import { fsListDir, fsDelete, fsMkdir, fsCopy } from "../api/ps5";
+import type { ExternalPkg } from "../api/ps5";
 import { hostOf, mgmtAddr, transferAddr } from "../lib/addr";
 import { humanizePs5Error } from "../lib/humanizeError";
 import {
@@ -41,20 +42,38 @@ import { parsePS5Firmware } from "../lib/ps5Firmware";
  */
 export const PKG_LIBRARY_DIR = "/user/data/ps5upload/pkg_library";
 
+/** Transient staging dir for install-from-USB: we copy a USB pkg here, install
+ *  it, then delete the copy. The payload sweeps this on boot, so a leftover
+ *  copy (e.g. after a crash) self-cleans. */
+export const PKG_TEMP_DIR = "/user/data/ps5upload/pkg_temp";
+
 /** Warning copy shown when an install lands via the unlaunchable last-resort
  *  path (register_path "appinst-local"); see `pkgInstallMayNotLaunch`. */
 export const PKG_MAY_NOT_LAUNCH_MESSAGE =
   "Installed, but via a fallback that may not launch on this firmware. If the game won't start (“can't start the game or app”), re-install it from the PS5: Settings → System → Debug Settings → Game → Package Installer.";
 
-/** Whether an install response indicates the title may not launch. True only
- *  when the engine flags `may_not_launch`, or (older engines that don't send
- *  the flag) when the payload reports the unlaunchable `appinst-local`
- *  last-resort path. Every launchable tier (appinst / shellui-rpc / intdebug /
- *  regular) → false. */
+/** Whether an install response indicates the title may not launch.
+ *
+ *  Precedence:
+ *   1. `launchable` — the engine's definitive app.db verification result
+ *      (elf-arsenal `wait_for_install_row` analogue). `true` means the
+ *      title_id was confirmed registered in the PS5's app.db, so the title
+ *      IS launchable even if it landed via the `appinst-local` last-resort
+ *      path → returns false (clean success). `false` means the title never
+ *      registered within the verification window → returns true.
+ *   2. When `launchable` is null/absent (verification not applicable —
+ *      sqlite unavailable on this firmware, no real title_id, or an older
+ *      engine/client), fall back to the heuristic: the engine's
+ *      `may_not_launch` flag, or the unlaunchable `appinst-local`
+ *      register_path. Every launchable tier (appinst / shellui-rpc /
+ *      intdebug / regular) → false. */
 export function pkgInstallMayNotLaunch(r: {
   register_path?: string;
   may_not_launch?: boolean;
+  launchable?: boolean | null;
 }): boolean {
+  if (r.launchable === true) return false;
+  if (r.launchable === false) return true;
   return r.may_not_launch ?? r.register_path === "appinst-local";
 }
 
@@ -93,6 +112,10 @@ export interface PkgEntry {
    *  it's inferred from the staging sub-directory the file lives in. Undefined
    *  for root-level files of unknown category. Drives the Update/DLC badge. */
   category?: string;
+  /** Target platform — "ps4" | "ps5" | "" (unknown). From the parsed header
+   *  on upload; inferred from the title-id prefix on refresh-from-disk.
+   *  Drives the PS4/PS5 badge. */
+  platform?: string;
   /** Transient per-row state (never persisted; recomputed each session). */
   status: PkgStatus;
   /** Bytes transferred so far (upload) — drives the row progress bar. */
@@ -117,6 +140,17 @@ export function titleIdFromContentId(contentId: string): string | null {
   const seg = contentId.split("-")[1]; // "CUSA00207_00"
   const id = seg?.split("_")[0] ?? "";
   return /^[A-Z]{4}\d{5}$/.test(id) ? id : null;
+}
+
+/** Target platform ("ps4" | "ps5" | "") from a title-id prefix — CUSA = PS4,
+ *  PPSA = PS5. Mirrors the engine's `derive_platform` fallback for the
+ *  refresh-from-disk path, where we list staged files without re-parsing the
+ *  header. Exported for unit testing. */
+export function platformFromTitleId(titleId: string | null | undefined): string {
+  if (!titleId) return "";
+  if (titleId.startsWith("CUSA")) return "ps4";
+  if (titleId.startsWith("PPSA")) return "ps5";
+  return "";
 }
 
 /** ContentID from a `<ContentID>.pkg` filename (strip the extension). */
@@ -163,6 +197,9 @@ interface SplitParseResponse {
      *  engine's parse-split response (it serialises the full PkgMetadata);
      *  we just hadn't been reading it. */
     category?: string;
+    /** Target platform for badging: "ps4" | "ps5" | "" (unknown). Derived
+     *  engine-side from the header magic + title-id prefix. */
+    platform?: string;
     warnings?: string[];
   };
 }
@@ -198,6 +235,16 @@ interface PkgLibraryState {
   /** Abandon an install that's still waiting its turn behind an upload. */
   cancelPendingInstall: () => void;
   remove: (path: string, host: string) => Promise<void>;
+  /** Install a `.pkg` discovered on an external/USB drive. Sony's installer
+   *  can't read the exfat USB mount directly (hardware-confirmed: it accepts
+   *  the request but installs nothing), so this copies the file to internal
+   *  staging on-console (fast, no upload), installs via the normal cascade,
+   *  then deletes the copy. Shares the `installing` lock with `install()`.
+   *  Returns `{ ok, message?, mayNotLaunch? }`. */
+  installExternal: (
+    pkg: ExternalPkg,
+    host: string,
+  ) => Promise<{ ok: boolean; message?: string; mayNotLaunch?: boolean }>;
   /** Delete (from the PS5) every staged package that has already been
    *  installed successfully — clears the spent-package clutter without
    *  touching anything mid-flight or not-yet-installed. */
@@ -257,8 +304,19 @@ export interface PkgInstallOutcome {
  * surfaces as a failure instead of a false success. A genuine reject arrives
  * fast; a large legitimate install may still be writing when this elapses, so
  * on timeout we stay optimistic (no regression vs. the old accept==success).
+ *
+ * The window must comfortably exceed the engine's app.db verification budget
+ * (PKG_VERIFY_WINDOW_SEC, default 90s) so we actually observe the definitive
+ * `launchable` verdict the engine resolves to — Sony promotes content
+ * asynchronously after accepting the task, and the synthetic-DONE tiers
+ * (shellui-rpc / appinst-local) only become provably launchable once the
+ * title row appears in app.db. The common cases stay fast: a quick register →
+ * `done` + launchable arrives in seconds, and firmwares where app.db isn't
+ * readable resolve to `done` on the first poll (engine returns launchable
+ * null). Only the genuine "accepted but never registered" failure case waits
+ * out the window — which is exactly when waiting is worth it.
  */
-const PKG_VERIFY_WINDOW_MS = 30_000;
+const PKG_VERIFY_WINDOW_MS = 100_000;
 const PKG_VERIFY_POLL_MS = 1_500;
 /** Give up verifying (stay optimistic) after this many consecutive poll
  *  errors — e.g. the engine GC'd the session, or a transient socket blip. */
@@ -279,7 +337,7 @@ const PKG_ASYNC_FAILED_HINT =
  */
 async function verifyInstallCompleted(
   session: string | undefined,
-): Promise<{ failed: boolean; message: string }> {
+): Promise<{ failed: boolean; message: string; launchable?: boolean | null }> {
   // No session id ⇒ older engine (or a test harness) that can't report status.
   // Can't verify — preserve the pre-fix optimistic behavior.
   if (!session) return { failed: false, message: "" };
@@ -292,6 +350,9 @@ async function verifyInstallCompleted(
         phase?: string;
         err_code?: number;
         err_message?: string;
+        // Engine's definitive app.db launchability verdict, present once the
+        // install reaches a terminal phase. null/absent = not applicable.
+        launchable?: boolean | null;
       };
       // An engine that doesn't speak status returns no `phase` — treat as
       // "can't verify" and stop (stay optimistic) rather than spin to timeout.
@@ -306,9 +367,14 @@ async function verifyInstallCompleted(
           message: sony
             ? `${sony} — ${PKG_ASYNC_FAILED_HINT}`
             : PKG_ASYNC_FAILED_HINT,
+          launchable: s.launchable,
         };
       }
-      if (s.phase === "done") return { failed: false, message: "" };
+      if (s.phase === "done") {
+        // Terminal success — carry the engine's launchability verdict back so
+        // the caller can show a definitive result instead of the heuristic.
+        return { failed: false, message: "", launchable: s.launchable };
+      }
       pollErrors = 0; // a clean in-progress poll resets the error streak
     } catch {
       // Session GC'd or a transient blip: don't fail the install on polling
@@ -381,7 +447,14 @@ export async function runPkgInstall(
         // installed stays false, startRejected stays false → no DPI fallback.
       } else {
         installed = true;
-        mayNotLaunch = pkgInstallMayNotLaunch(r);
+        // Prefer the engine's definitive app.db verdict captured during
+        // verification; fall back to the register_path heuristic when the
+        // status poll didn't carry one (older engine, app.db unreadable, or
+        // the window elapsed while still promoting).
+        mayNotLaunch = pkgInstallMayNotLaunch({
+          ...r,
+          launchable: verdict.launchable,
+        });
       }
     } else {
       startRejected = true;
@@ -498,6 +571,7 @@ const makePkgLibraryStore = () =>
             title: titles[contentId],
             titleId: titleIdFromContentId(contentId) ?? undefined,
             category: categoryForSubdir(subdir),
+            platform: platformFromTitleId(titleIdFromContentId(contentId)),
             status: "idle" as PkgStatus,
           });
         }
@@ -538,6 +612,11 @@ const makePkgLibraryStore = () =>
     const contentId = meta.head?.content_id ?? "";
     const title = meta.head?.title;
     const category = meta.head?.category;
+    // Prefer the engine's parsed platform; fall back to the title-id prefix
+    // (covers headerless / FIH pkgs whose ids we recovered another way).
+    const platform =
+      meta.head?.platform ||
+      platformFromTitleId(titleIdFromContentId(contentId));
     const totalBytes = meta.total_size ?? 0;
     if (title) cacheTitle(contentId, title);
 
@@ -590,6 +669,7 @@ const makePkgLibraryStore = () =>
       title,
       titleId: titleIdFromContentId(contentId) ?? undefined,
       category,
+      platform,
       status: othersBusy() ? "queued" : "uploading",
       bytes: 0,
       totalBytes,
@@ -796,6 +876,65 @@ const makePkgLibraryStore = () =>
       }
     } catch (e) {
       patch({ status: "idle", lastResult: { ok: false, message: pkgError(e) } });
+    } finally {
+      set({ installing: false, busyNotice: null, installPending: false });
+    }
+  },
+
+  async installExternal(pkg, host) {
+    if (!host?.trim() || get().installing) {
+      return { ok: false, message: "Another install is in progress." };
+    }
+    set({ installing: true, busyNotice: null, installPending: false });
+    // Stage to internal with the Sony-friendly `<ContentID>.pkg` basename
+    // (falls back to a unique name for headerless pkgs).
+    const basename = stagingBasename(
+      pkg.contentId,
+      Math.random().toString(36).slice(2),
+      Date.now(),
+    );
+    const internalPath = `${PKG_TEMP_DIR}/${basename}`;
+    try {
+      // Wait for any active transfer (the :9113 port is single-client and an
+      // install swaps the payload).
+      if (transferScreenBusy(host)) {
+        set({
+          busyNotice:
+            "Waiting for the current upload to finish before installing…",
+        });
+        while (transferScreenBusy(host)) {
+          if (!get().installing) return { ok: false, message: "Cancelled." };
+          await sleep(400);
+        }
+        set({ busyNotice: null });
+      }
+      // 1. On-console copy USB → internal staging (Sony can't install off the
+      //    exfat USB mount directly). `fsCopy` refuses to overwrite, so clear
+      //    any stale copy first.
+      set({
+        busyNotice: `Copying ${pkg.name || pkg.contentId} from ${pkg.drive}…`,
+      });
+      await fsMkdir(transferAddr(host), PKG_TEMP_DIR).catch(() => {});
+      await fsDelete(mgmtAddr(host), internalPath).catch(() => {});
+      await fsCopy(mgmtAddr(host), pkg.path, internalPath);
+      set({ busyNotice: null });
+
+      // 2. Install from the internal copy via the shared cascade.
+      const { installed, mayNotLaunch, errMessage } = await runPkgInstall(
+        host,
+        internalPath,
+        pkg.contentId || null,
+      );
+
+      // 3. Clean up the transient copy regardless of outcome.
+      await fsDelete(mgmtAddr(host), internalPath).catch(() => {});
+
+      return installed
+        ? { ok: true, mayNotLaunch }
+        : { ok: false, message: errMessage || "Install was rejected." };
+    } catch (e) {
+      await fsDelete(mgmtAddr(host), internalPath).catch(() => {});
+      return { ok: false, message: pkgError(e) };
     } finally {
       set({ installing: false, busyNotice: null, installPending: false });
     }

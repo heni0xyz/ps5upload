@@ -90,6 +90,16 @@ export function categoryForSubdir(subdir: string): string | undefined {
   }
 }
 
+/** Whether a package of this category is an "add-on" that needs its base game
+ *  already installed on the console — updates ("gp") and DLC ("ac"). Sony's
+ *  installer accepts an add-on with no base (err_code 0) but installs nothing
+ *  (hardware-confirmed: the patch lands in /user/patch/<id>/ only when
+ *  /user/app/<id>/ exists), so the UI warns before installing one whose base
+ *  isn't present. Base ("gd") and unknown categories return false. */
+export function isAddonCategory(category: string | null | undefined): boolean {
+  return category === "gp" || category === "ac";
+}
+
 /** Short human label for a package category, or null when it shouldn't get a
  *  badge. Drives the "Update" / "DLC" chip in the library UI. */
 export function pkgCategoryLabel(

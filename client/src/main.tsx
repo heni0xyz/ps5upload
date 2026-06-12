@@ -7,6 +7,7 @@ import { RootErrorBoundary } from "./components";
 // module-load side effects (setting <html data-theme> + <html lang dir>)
 // complete before React paints.
 import "./state/theme";
+import "./state/uiScale";
 import "./state/lang";
 import "./index.css";
 import {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Image as ImageIcon,
   RefreshCw,
@@ -7,12 +7,17 @@ import {
   FileImage,
   CheckSquare,
   Square,
+  Eye,
+  X,
 } from "lucide-react";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import {
   waitForJob,
   screenshotsList,
   startTransferDownload,
   convertScreenshot,
+  saveArchiveMakeTemp,
+  saveArchiveCleanupTemp,
   type ScreenshotEntry,
 } from "../../api/ps5";
 import { useConnectionStore, PS5_PAYLOAD_PORT } from "../../state/connection";
@@ -241,6 +246,96 @@ export default function ScreenshotsScreen() {
     }
   }
 
+  // ─── Preview lightbox ───────────────────────────────────────────────
+  // PS5 shots are HDR .jxr the WebView can't render, so a preview means:
+  // download to a scratch dir → tone-map to PNG → load that PNG via
+  // convertFileSrc. Desktop-only (same JPEG-XR codec gate as Convert). The
+  // scratch dir is cleaned when the lightbox closes.
+  const [preview, setPreview] = useState<{
+    item: ScreenshotEntry;
+    url: string | null;
+    tempDir: string | null;
+    loading: boolean;
+    error: string | null;
+  } | null>(null);
+
+  async function openPreview(item: ScreenshotEntry) {
+    if (!host?.trim() || !canConvert) return;
+    // Replacing an open preview: clean the outgoing scratch dir so opening
+    // several previews in a row doesn't leak one temp dir each.
+    setPreview((prev) => {
+      if (prev?.tempDir) void saveArchiveCleanupTemp(prev.tempDir).catch(() => {});
+      return { item, url: null, tempDir: null, loading: true, error: null };
+    });
+    let tempDir: string | null = null;
+    try {
+      tempDir = await saveArchiveMakeTemp("ss-preview");
+      const jobId = await startTransferDownload(
+        item.path,
+        tempDir,
+        `${host.trim()}:${PS5_PAYLOAD_PORT}`,
+        "file",
+      );
+      await waitForJob(jobId);
+      const name = basename(item.path);
+      const localJxr = joinDir(tempDir, name);
+      const localPng = joinDir(tempDir, pngNameForJxr(name));
+      await convertScreenshot(localJxr, localPng, true);
+      const url = convertFileSrc(localPng);
+      // Race guard: only commit if this item is still the one showing. If the
+      // user switched to a different preview (or closed) mid-convert, our
+      // scratch dir is now orphaned — clean it instead of leaking it.
+      const created = tempDir;
+      setPreview((p) => {
+        if (p && p.item.path === item.path) {
+          return { ...p, url, tempDir: created, loading: false };
+        }
+        void saveArchiveCleanupTemp(created).catch(() => {});
+        return p;
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (tempDir) await saveArchiveCleanupTemp(tempDir).catch(() => {});
+      setPreview((p) =>
+        p && p.item.path === item.path
+          ? { ...p, loading: false, error: msg, tempDir: null }
+          : p,
+      );
+    }
+  }
+
+  function closePreview() {
+    setPreview((p) => {
+      if (p?.tempDir) void saveArchiveCleanupTemp(p.tempDir).catch(() => {});
+      return null;
+    });
+  }
+
+  // Mirror the open preview's temp dir into a ref so the unmount cleanup
+  // (navigating away with the lightbox open) can reach it without re-running.
+  const previewTempRef = useRef<string | null>(null);
+  useEffect(() => {
+    previewTempRef.current = preview?.tempDir ?? null;
+  }, [preview]);
+  useEffect(
+    () => () => {
+      if (previewTempRef.current)
+        void saveArchiveCleanupTemp(previewTempRef.current).catch(() => {});
+    },
+    [],
+  );
+
+  // Esc closes the lightbox.
+  useEffect(() => {
+    if (!preview) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") closePreview();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preview]);
+
   return (
     <div className="p-6">
       <PageHeader
@@ -372,6 +467,24 @@ export default function ScreenshotsScreen() {
                   <Button
                     variant="ghost"
                     size="sm"
+                    leftIcon={<Eye size={11} />}
+                    onClick={() => void openPreview(item)}
+                    disabled={
+                      convertingPaths.has(item.path) || busyPaths.has(item.path)
+                    }
+                    title={tr(
+                      "screenshots_preview_hint",
+                      undefined,
+                      "Preview this screenshot",
+                    )}
+                  >
+                    {tr("screenshots_preview", undefined, "Preview")}
+                  </Button>
+                )}
+                {canConvert && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     leftIcon={
                       convertingPaths.has(item.path) ? (
                         <Loader2 size={11} className="animate-spin" />
@@ -419,6 +532,74 @@ export default function ScreenshotsScreen() {
         <div className="mt-4 text-center text-xs text-[var(--color-muted)]">
           <Loader2 size={12} className="mr-2 inline animate-spin" />
           {tr("screenshots_loading", undefined, "Reading screenshots…")}
+        </div>
+      )}
+
+      {/* Preview lightbox — click the backdrop or press Esc to close. */}
+      {preview && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6"
+          onClick={closePreview}
+          role="dialog"
+          aria-modal="true"
+        >
+          <div
+            className="relative flex max-h-full max-w-full flex-col items-center gap-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex w-full items-center justify-between gap-3 text-sm text-white">
+              <span className="min-w-0 truncate font-mono text-xs">
+                {preview.item.path.split("/").pop()}
+              </span>
+              <div className="flex shrink-0 items-center gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  leftIcon={
+                    busyPaths.has(preview.item.path) ? (
+                      <Loader2 size={12} className="animate-spin" />
+                    ) : (
+                      <Download size={12} />
+                    )
+                  }
+                  disabled={busyPaths.has(preview.item.path)}
+                  onClick={() => void downloadOne(preview.item)}
+                >
+                  {tr("screenshots_download", undefined, "Download")}
+                </Button>
+                <button
+                  type="button"
+                  onClick={closePreview}
+                  aria-label={tr("screenshots_preview_close", undefined, "Close")}
+                  className="rounded p-1 text-white/80 hover:text-white"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+            <div className="flex min-h-[40vh] min-w-[40vw] items-center justify-center overflow-hidden rounded-md bg-[var(--color-surface-2)]">
+              {preview.loading ? (
+                <div className="flex flex-col items-center gap-2 p-10 text-xs text-[var(--color-muted)]">
+                  <Loader2 size={20} className="animate-spin" />
+                  {tr(
+                    "screenshots_preview_loading",
+                    undefined,
+                    "Downloading + converting (HDR screenshots take a few seconds)…",
+                  )}
+                </div>
+              ) : preview.error ? (
+                <div className="max-w-md p-8 text-center text-xs text-[var(--color-bad)]">
+                  {preview.error}
+                </div>
+              ) : preview.url ? (
+                <img
+                  src={preview.url}
+                  alt=""
+                  className="max-h-[80vh] max-w-[88vw] object-contain"
+                />
+              ) : null}
+            </div>
+          </div>
         </div>
       )}
     </div>

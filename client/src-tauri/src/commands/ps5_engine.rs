@@ -152,6 +152,19 @@ pub async fn ps5_volumes(addr: Option<String>) -> Result<JsonValue, String> {
     get_json(&url).await
 }
 
+/// Scan connected external/USB drives for installable `.pkg` files (header
+/// parsed for platform + content id). They install in place via an on-console
+/// copy to /user/data + the normal install cascade — no upload.
+#[tauri::command]
+pub async fn pkg_scan_external(addr: Option<String>) -> Result<JsonValue, String> {
+    let base = engine::url();
+    let url = match addr {
+        Some(a) => format!("{base}/api/ps5/pkg/scan-external?addr={}", urlencoding(&a)),
+        None => format!("{base}/api/ps5/pkg/scan-external"),
+    };
+    get_json(&url).await
+}
+
 /// List every installed title on the PS5, tagged by origin (registered/
 /// mounted by us vs installed from a .pkg) with a system flag. Proxies
 /// GET /api/ps5/apps/installed. Cover art is fetched separately by the

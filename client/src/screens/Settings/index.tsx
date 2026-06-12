@@ -19,9 +19,15 @@ import {
   Zap,
   Trash2,
   ExternalLink,
+  ALargeSmall,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useThemeStore, type Theme } from "../../state/theme";
+import {
+  useUiScaleStore,
+  UI_SCALE_STEPS,
+  uiScaleLabel,
+} from "../../state/uiScale";
 
 import { PageHeader } from "../../components";
 import { useConfirm } from "../../components/ConfirmDialog";
@@ -169,6 +175,10 @@ export default function SettingsScreen() {
           title={tr("settings_section_appearance", undefined, "Appearance")}
         >
           <ThemePicker />
+        </Section>
+
+        <Section title={tr("settings_section_text_size", undefined, "Text size")}>
+          <TextSizePicker />
         </Section>
 
         {/* Mobile wording: the keep-awake store drives a screen wake
@@ -958,6 +968,56 @@ function ThemePicker() {
           )}
         </button>
       ))}
+    </div>
+  );
+}
+
+/** Lets the user rescale the whole UI. Every size in the app is rem-based off
+ *  one root font-size, so this one control resizes text, padding, icons, and
+ *  controls together — the durable, cross-platform fix for Android's system
+ *  Font/Display-size inflation clipping list rows to "ps5-image…". */
+function TextSizePicker() {
+  const tr = useTr();
+  const scale = useUiScaleStore((s) => s.scale);
+  const setScale = useUiScaleStore((s) => s.setScale);
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2 text-xs text-[var(--color-muted)]">
+        <ALargeSmall size={14} />
+        {tr(
+          "settings_text_size_hint",
+          undefined,
+          "Resize the whole app. Pick a smaller size if text is cut off (“ps5-image…”) on your phone.",
+        )}
+      </div>
+      {/* Stepper row: each button is a percentage of the designed size. The
+          buttons themselves sit OUTSIDE the rem flow (fixed text-[13px]) so
+          they stay tappable even when the user has scaled the app very small. */}
+      <div className="flex flex-wrap gap-1.5">
+        {UI_SCALE_STEPS.map((step) => {
+          const active = Math.abs(step - scale) < 0.001;
+          return (
+            <button
+              key={step}
+              type="button"
+              onClick={() => setScale(step)}
+              aria-pressed={active}
+              className={`min-w-[3rem] rounded-md border px-2 py-1.5 text-center text-[13px] ${
+                active
+                  ? "border-[var(--color-accent)] bg-[var(--color-surface)] font-semibold"
+                  : "border-[var(--color-border)] hover:bg-[var(--color-surface)]"
+              }`}
+            >
+              {uiScaleLabel(step)}
+              {Math.abs(step - 1) < 0.001 && (
+                <span className="ml-1 text-[10px] text-[var(--color-muted)]">
+                  {tr("settings_text_size_default", undefined, "default")}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }

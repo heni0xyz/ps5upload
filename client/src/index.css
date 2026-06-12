@@ -172,10 +172,15 @@ body,
     Arial,
     sans-serif;
   /* Base size that scales the whole app: every Tailwind text/spacing class
-   * is rem-based, so this one line proportionally enlarges text AND layout.
+   * is rem-based, so this one value proportionally enlarges text AND layout.
    * 18px (up from the 16px OS baseline) for comfortable, human-friendly
-   * readability. Verified not to overflow dense data tables at phone width. */
-  font-size: 18px;
+   * readability. Verified not to overflow dense data tables at phone width.
+   *
+   * Driven by the `--ui-base-size` custom property so the in-app "Text size"
+   * setting (state/uiScale.ts) can rescale the entire UI — the durable,
+   * cross-platform fix for Android's system Font/Display-size inflation
+   * clipping list rows. Default mirrors BASE_PX in uiScale.ts; keep in sync. */
+  font-size: var(--ui-base-size, 18px);
   /* Pin text to its specified size on mobile WebViews. Android System
    * WebView enables "font boosting" (text autosizing) by default, which
    * inflates the font size of text blocks based on their container width —

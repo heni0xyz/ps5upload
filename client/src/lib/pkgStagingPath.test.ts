@@ -6,6 +6,7 @@ import {
   stagingSubdirForCategory,
   categoryForSubdir,
   pkgCategoryLabel,
+  isAddonCategory,
 } from "./pkgStagingPath";
 
 describe("isSafeContentId", () => {
@@ -144,5 +145,19 @@ describe("pkgCategoryLabel", () => {
     expect(pkgCategoryLabel("")).toBeNull();
     expect(pkgCategoryLabel(undefined)).toBeNull();
     expect(pkgCategoryLabel("misc")).toBeNull();
+  });
+});
+
+describe("isAddonCategory", () => {
+  it("flags updates and DLC (which need the base installed first)", () => {
+    expect(isAddonCategory("gp")).toBe(true); // update
+    expect(isAddonCategory("ac")).toBe(true); // DLC
+  });
+  it("does not flag base games or unknown categories", () => {
+    expect(isAddonCategory("gd")).toBe(false); // base
+    expect(isAddonCategory("")).toBe(false);
+    expect(isAddonCategory(undefined)).toBe(false);
+    expect(isAddonCategory(null)).toBe(false);
+    expect(isAddonCategory("misc")).toBe(false);
   });
 });

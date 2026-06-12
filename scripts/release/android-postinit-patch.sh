@@ -30,13 +30,18 @@
 # acquiring the MulticastLock via JNI is still TODO for full reliability).
 #
 # 3) Pin WebView textZoom to 100% in MainActivity. Android WebView scales
-#    every font by the device's system Font size / Display size accessibility
-#    setting, so a user with a larger-than-default font sees the whole UI
-#    blown up — dense rows (Library, Upload) clip their text to the first few
-#    characters. The layout is rem-based off an 18px root and tuned for phone
-#    width; it can't reflow for a 1.5-2x system font. Overriding the
+#    every font by the device's system **Font size** accessibility setting,
+#    so a user with a larger-than-default font sees text blown up — dense rows
+#    (Library, Upload) clip to the first few characters. Overriding the
 #    onWebViewCreate hook (exposed by WryActivity) to set textZoom = 100 makes
 #    the app render at its designed size regardless of that setting.
+#
+#    NOTE: textZoom only counters **Font size**, NOT **Display size**. Display
+#    size changes the WebView's density and scales the WHOLE viewport (icons,
+#    padding, controls — not just text), which textZoom can't touch. That case
+#    is handled in-app by the user-adjustable "Text size" setting
+#    (client/src/state/uiScale.ts), which rescales the rem root and so resizes
+#    the entire UI. The two fixes are complementary.
 
 set -euo pipefail
 

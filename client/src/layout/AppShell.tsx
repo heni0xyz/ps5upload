@@ -5,6 +5,7 @@ import Sidebar from "./Sidebar";
 import StatusBar from "./StatusBar";
 import ConsoleTabs from "./ConsoleTabs";
 import ActivityBar from "./ActivityBar";
+import UpdateToast from "./UpdateToast";
 import { Button } from "../components/Button";
 import { useConnectionStore, EMPTY_HOST_RUNTIME } from "../state/connection";
 import { log } from "../state/logs";
@@ -681,6 +682,9 @@ export default function AppShell() {
               while every console's uploads/installs keep running in their own
               background loops. Hidden for single-console users. */}
           <ConsoleTabs />
+          {/* Slim, dismissible "update available" bar (the auto-check already
+              ran on mount). Pinned above the scroll area so it stays visible. */}
+          <UpdateToast />
           {/* Vertical scroll only. overflow-x-hidden is a backstop: the
               index.css width safety net makes content fit, but this guarantees
               the page can never scroll sideways. Nested blocks that are meant

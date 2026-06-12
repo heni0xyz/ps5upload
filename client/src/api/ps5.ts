@@ -2814,6 +2814,53 @@ export async function appsInstalled(
   return { titles, registeredUnavailable: !!res?.registered_unavailable };
 }
 
+/** One `.pkg` found on a connected external/USB drive. */
+export interface ExternalPkg {
+  /** Absolute on-console path, e.g. `/mnt/usb0/games/foo.pkg`. */
+  path: string;
+  /** The drive mount it was found under (`/mnt/usb0`, `/mnt/ext1`). */
+  drive: string;
+  /** Basename. */
+  name: string;
+  size: number;
+  /** ContentID (empty for `\x7FFIH` / unreadable headers). */
+  contentId: string;
+  /** Title id (CUSA…/PPSA…) derived from the content id. */
+  titleId: string;
+  /** "ps4" | "ps5" | "" — from header magic + title-id prefix. */
+  platform: string;
+}
+
+/** List `.pkg` files on connected external/USB drives. These install in place
+ *  (the engine copies the file to /user/data first — Sony's installer can't
+ *  read the exfat USB mount directly — then runs the normal install cascade),
+ *  so they need no upload from the desktop. */
+export async function pkgScanExternal(transferAddr: string): Promise<ExternalPkg[]> {
+  const addr = toMgmtAddr(transferAddr);
+  const res = await invoke<{
+    packages?: Array<{
+      path?: string;
+      drive?: string;
+      name?: string;
+      size?: number;
+      content_id?: string;
+      title_id?: string;
+      platform?: string;
+    }>;
+  }>("pkg_scan_external", { addr });
+  return (res?.packages ?? [])
+    .filter((p): p is { path: string } & typeof p => !!p.path)
+    .map((p) => ({
+      path: p.path,
+      drive: p.drive ?? "",
+      name: p.name ?? p.path.split("/").pop() ?? p.path,
+      size: p.size ?? 0,
+      contentId: p.content_id ?? "",
+      titleId: p.title_id ?? "",
+      platform: p.platform ?? "",
+    }));
+}
+
 /** Stable `<img src=...>` URL for an installed title's cover art
  *  (/user/appmeta/<titleId>/icon0.png), streamed back as `image/png` by
  *  the engine. Works identically on desktop and Android (in-process engine

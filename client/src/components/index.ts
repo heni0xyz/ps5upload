@@ -21,6 +21,7 @@ export type {
   PromptOptions,
 } from "./ConfirmDialog";
 export { OverflowMenu, type OverflowMenuItem } from "./OverflowMenu";
+export { GameIcon } from "./GameIcon";
 export { ConsoleChip } from "./ConsoleChip";
 export { RootErrorBoundary } from "./ErrorBoundary";
 export { ProgressBar } from "./ProgressBar";

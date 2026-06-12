@@ -161,6 +161,7 @@ pub fn run() {
             // (localhost:19113). Used by the Upload/Library/Volumes/
             // FileSystem/Hardware surfaces.
             commands::ps5_volumes,
+            commands::pkg_scan_external,
             commands::ps5_list_dir,
             commands::ps5_apps_installed,
             commands::transfer_file,

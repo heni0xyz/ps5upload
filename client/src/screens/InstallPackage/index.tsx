@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import {
@@ -12,9 +12,10 @@ import {
   CheckCircle2,
   XCircle,
   AlertTriangle,
-  Gamepad2,
   Info,
   HardDrive,
+  FolderOpen,
+  Copy,
 } from "lucide-react";
 
 import { isAndroid } from "../../lib/platform";
@@ -26,7 +27,11 @@ import {
   EmptyState,
   WarningCard,
   ConsoleChip,
+  GameIcon,
+  OverflowMenu,
+  type OverflowMenuItem,
 } from "../../components";
+import { openInFileSystem } from "../../state/fsNavigation";
 import { useConfirm } from "../../components/ConfirmDialog";
 import { useConnectionStore } from "../../state/connection";
 import { useTr } from "../../state/lang";
@@ -36,34 +41,21 @@ import {
   type PkgEntry,
 } from "../../state/pkgLibrary";
 import { useInstallSettingsStore } from "../../state/installSettings";
-import { pkgCategoryLabel } from "../../lib/pkgStagingPath";
-import { appsInstalled, appIconUrl } from "../../api/ps5";
+import { pkgCategoryLabel, isAddonCategory } from "../../lib/pkgStagingPath";
+import {
+  appsInstalled,
+  pkgScanExternal,
+  type ExternalPkg,
+} from "../../api/ps5";
 import { transferAddr } from "../../lib/addr";
 import { formatBytes } from "../../lib/format";
 
 /* ─── Cover art ────────────────────────────────────────────────────────
- * Keyed by title id (derived from the ContentID). Falls back to a glyph on
- * 404 — common for homebrew with no icon, or pkgs not yet installed whose
- * appmeta icon doesn't exist. Same render+fallback trick as the Library /
- * Installed Apps screens. */
+ * Thin wrapper over the shared GameIcon (keyed by title id from the
+ * ContentID), kept so the row markup reads `<Cover .../>`. Glyph fallback on
+ * 404 — common for homebrew with no icon, or not-yet-installed pkgs. */
 function Cover({ host, titleId }: { host: string; titleId?: string }) {
-  const [failed, setFailed] = useState(false);
-  const show = !failed && !!titleId && !!host.trim();
-  return (
-    <div className="flex aspect-square w-14 shrink-0 items-center justify-center overflow-hidden rounded-md bg-[var(--color-surface-3)]">
-      {show ? (
-        <img
-          src={appIconUrl(transferAddr(host), titleId!)}
-          alt=""
-          className="h-full w-full object-cover"
-          loading="lazy"
-          onError={() => setFailed(true)}
-        />
-      ) : (
-        <Gamepad2 size={20} className="text-[var(--color-muted)]" />
-      )}
-    </div>
-  );
+  return <GameIcon host={host} titleId={titleId} size={56} />;
 }
 
 /* ─── One package row ─────────────────────────────────────────────────── */
@@ -85,10 +77,30 @@ function PkgRow({
   onDelete: () => void;
 }) {
   const tr = useTr();
+  const navigate = useNavigate();
   const uploading = entry.status === "uploading";
   const installingThis = entry.status === "installing";
   const queued = entry.status === "queued";
   const busy = uploading || installingThis || queued;
+  // Right-click/⋯ context actions for the package (Open Folder, Copy Details).
+  const dir = entry.path.slice(0, entry.path.lastIndexOf("/")) || "/";
+  const menuItems: OverflowMenuItem[] = [
+    {
+      label: tr("pkglib.menu.openFolder", "Open folder"),
+      icon: <FolderOpen size={12} />,
+      onSelect: () => openInFileSystem(navigate, dir),
+    },
+    {
+      label: tr("pkglib.menu.copyDetails", "Copy details"),
+      icon: <Copy size={12} />,
+      onSelect: () =>
+        void navigator.clipboard?.writeText(
+          [entry.title, entry.contentId, entry.titleId, entry.path]
+            .filter(Boolean)
+            .join("\n"),
+        ),
+    },
+  ];
   const pct =
     uploading && entry.totalBytes
       ? Math.min(100, Math.round(((entry.bytes ?? 0) / entry.totalBytes) * 100))
@@ -106,6 +118,26 @@ function PkgRow({
             >
               {entry.title || entry.contentId || entry.name}
             </span>
+            {/* PS4 / PS5 platform badge — derived from the header magic
+                (\x7FFIH = PS5) and the title-id prefix (CUSA = PS4, PPSA =
+                PS5). Helps users tell at a glance which console a pkg targets. */}
+            {(entry.platform === "ps4" || entry.platform === "ps5") && (
+              <span
+                className="inline-flex shrink-0 items-center rounded-full border px-1.5 py-0.5 text-xs font-bold uppercase tracking-wide"
+                style={{
+                  borderColor:
+                    entry.platform === "ps5"
+                      ? "var(--color-ps5)"
+                      : "var(--color-ps4)",
+                  color:
+                    entry.platform === "ps5"
+                      ? "var(--color-ps5)"
+                      : "var(--color-ps4)",
+                }}
+              >
+                {entry.platform === "ps5" ? "PS5" : "PS4"}
+              </span>
+            )}
             {installed && !busy && (
               <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-[var(--color-good)] bg-[var(--color-good-soft)] px-1.5 py-0.5 text-xs font-medium uppercase tracking-wide text-[var(--color-good)]">
                 {tr("pkglib.badge.installed", "installed")}
@@ -163,6 +195,7 @@ function PkgRow({
             >
               {tr("pkglib.delete", "Delete")}
             </Button>
+            <OverflowMenu items={menuItems} />
           </div>
         )}
         {installingThis && (
@@ -380,6 +413,61 @@ export default function InstallPackageScreen() {
     }
   }
 
+  // Install-order guard. A base game (CATEGORY "gd") and its update ("gp") or
+  // DLC ("ac") share a ContentID AND a title_id — they never overwrite each
+  // other (the library stages them to separate sub-dirs; on the PS5 the base
+  // lands in /user/app/<id>/app.pkg and the update in /user/patch/<id>/
+  // patch.pkg). The one thing that goes wrong is ORDER: a patch/DLC needs its
+  // base installed FIRST. Install it without the base and Sony's installer
+  // accepts the request (err_code 0) but nothing actually lands — a confusing
+  // "it said done but the game's missing". So before installing an add-on
+  // whose base isn't on the console, warn (advisory, not blocking).
+  async function handleInstall(entry: PkgEntry) {
+    const baseMissing =
+      isAddonCategory(entry.category) &&
+      !!entry.titleId &&
+      !installedIds.has(entry.titleId);
+    if (baseMissing) {
+      const kind =
+        entry.category === "ac"
+          ? tr("pkglib.addon.dlc", undefined, "DLC")
+          : tr("pkglib.addon.update", undefined, "update");
+      // Is the base game (a "gd"/root-level entry with the same title_id)
+      // already staged in the library? If so, point the user at it.
+      const baseInLib = entries.some(
+        (x) =>
+          x.path !== entry.path &&
+          x.titleId === entry.titleId &&
+          (x.category === "gd" || x.category === undefined),
+      );
+      const ok = await confirm({
+        title: tr(
+          "pkglib.baseMissing.title",
+          undefined,
+          "Base game isn't installed",
+        ),
+        message: baseInLib
+          ? tr(
+              "pkglib.baseMissing.bodyInLib",
+              { kind, id: entry.titleId ?? "" },
+              `This ${kind} is for ${entry.titleId}, whose base game isn't installed on the PS5 yet — but it's here in your library. Install the base game first, then this ${kind}. Installing the ${kind} now will be accepted but won't actually apply.`,
+            )
+          : tr(
+              "pkglib.baseMissing.body",
+              { kind, id: entry.titleId ?? "" },
+              `This ${kind} is for ${entry.titleId}, but its base game isn't installed on the PS5. Sony's installer will accept it, but nothing installs until the base game is on the console — install the base first.`,
+            ),
+        confirmLabel: tr(
+          "pkglib.baseMissing.installAnyway",
+          undefined,
+          "Install anyway",
+        ),
+      });
+      if (!ok) return;
+    }
+    void install(entry.path, host);
+  }
+
   async function handleDelete(entry: PkgEntry) {
     // `||` so a headerless pkg (empty contentId) shows its filename rather
     // than a blank "Delete ?" dialog.
@@ -561,6 +649,8 @@ export default function InstallPackageScreen() {
         </div>
       )}
 
+      {hostReady && <ExternalPackages host={host} />}
+
       {hostReady && entries.length === 0 && !loading ? (
         <EmptyState
           icon={dropActive ? HardDrive : PackageOpen}
@@ -588,7 +678,7 @@ export default function InstallPackageScreen() {
                   installed={installed}
                   installDisabled={installBlocked}
                   deleteDisabled={installing}
-                  onInstall={() => void install(e.path, host)}
+                  onInstall={() => void handleInstall(e)}
                   onDelete={() => void handleDelete(e)}
                 />
               );
@@ -655,6 +745,186 @@ export default function InstallPackageScreen() {
         </>
       )}
       {dialog}
+    </div>
+  );
+}
+
+/** PS4/PS5 platform badge — shared by library rows and external-package rows. */
+function PlatformBadge({ platform }: { platform?: string }) {
+  if (platform !== "ps4" && platform !== "ps5") return null;
+  const c = platform === "ps5" ? "var(--color-ps5)" : "var(--color-ps4)";
+  return (
+    <span
+      className="inline-flex shrink-0 items-center rounded-full border px-1.5 py-0.5 text-xs font-bold uppercase tracking-wide"
+      style={{ borderColor: c, color: c }}
+    >
+      {platform === "ps5" ? "PS5" : "PS4"}
+    </span>
+  );
+}
+
+/**
+ * Packages found on connected USB / external drives (`/mnt/usb*`, `/mnt/ext*`).
+ * Installing one copies it to internal storage on-console first — Sony's
+ * installer can't read the exfat USB mount directly (hardware-confirmed) — then
+ * runs the normal install cascade. This is ADDITIVE to the upload-then-install
+ * flow above; nothing here changes that path.
+ */
+function ExternalPackages({ host }: { host: string }) {
+  const tr = useTr();
+  const installExternal = usePkgLibrary(host, (s) => s.installExternal);
+  const installing = usePkgLibrary(host, (s) => s.installing);
+  const [pkgs, setPkgs] = useState<ExternalPkg[]>([]);
+  const [scanning, setScanning] = useState(false);
+  const [scanned, setScanned] = useState(false);
+  const [installingPath, setInstallingPath] = useState<string | null>(null);
+  const [results, setResults] = useState<
+    Record<string, { ok: boolean; message?: string; mayNotLaunch?: boolean }>
+  >({});
+
+  async function scan() {
+    setScanning(true);
+    try {
+      setPkgs(await pkgScanExternal(transferAddr(host)));
+      setScanned(true);
+    } catch {
+      // Best-effort: no drives / scan failure just shows an empty section.
+      setPkgs([]);
+      setScanned(true);
+    } finally {
+      setScanning(false);
+    }
+  }
+
+  // Scan once when the host becomes ready (and on manual Rescan). The pkg
+  // stays on the drive after install, so the list itself doesn't change; the
+  // per-row result line reflects the outcome.
+  useEffect(() => {
+    void scan();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [host]);
+
+  async function onInstall(pkg: ExternalPkg) {
+    setInstallingPath(pkg.path);
+    try {
+      const r = await installExternal(pkg, host);
+      setResults((prev) => ({ ...prev, [pkg.path]: r }));
+    } finally {
+      setInstallingPath(null);
+    }
+  }
+
+  // Show only when there are external packages, or during a manual rescan of a
+  // section that already had some. This keeps the screen clean for users with
+  // no external drives — no "External Packages" header flashing in and out
+  // during the initial (fast) scan.
+  if (pkgs.length === 0 && !(scanning && scanned)) return null;
+
+  return (
+    <div className="mb-4 rounded-md border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3">
+      <div className="mb-2 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <HardDrive size={14} className="text-[var(--color-accent)]" />
+          <span className="text-sm font-semibold">
+            {tr("pkglib.external.title", "External Packages")}
+          </span>
+          {pkgs.length > 0 && (
+            <span className="text-xs text-[var(--color-muted)]">
+              {tr(
+                "pkglib.external.count",
+                { n: pkgs.length },
+                `${pkgs.length} on connected drives`,
+              )}
+            </span>
+          )}
+        </div>
+        <Button
+          variant="secondary"
+          size="sm"
+          leftIcon={
+            scanning ? (
+              <Loader2 size={13} className="animate-spin" />
+            ) : (
+              <RotateCcw size={13} />
+            )
+          }
+          disabled={scanning || installing}
+          onClick={() => void scan()}
+        >
+          {tr("pkglib.external.rescan", "Rescan")}
+        </Button>
+      </div>
+      <div className="mb-2 text-[11px] text-[var(--color-muted)]">
+        {tr(
+          "pkglib.external.hint",
+          "Packages on USB / external drives. Installing copies the file to the console first (no upload needed), then installs it.",
+        )}
+      </div>
+      <ul className="grid gap-2">
+        {pkgs.map((p) => {
+          const r = results[p.path];
+          return (
+            <li
+              key={p.path}
+              className="flex items-center gap-3 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-2"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <PlatformBadge platform={p.platform} />
+                  <span
+                    className="truncate text-sm font-medium"
+                    title={p.path}
+                  >
+                    {p.titleId || p.name}
+                  </span>
+                </div>
+                <div className="mt-0.5 truncate font-mono text-xs text-[var(--color-muted)]">
+                  {p.drive}
+                  <span className="px-1 opacity-60">·</span>
+                  <span className="tabular-nums">{formatBytes(p.size)}</span>
+                  {r && (
+                    <>
+                      <span className="px-1 opacity-60">·</span>
+                      <span
+                        style={{
+                          color: r.ok
+                            ? r.mayNotLaunch
+                              ? "var(--color-warn)"
+                              : "var(--color-good)"
+                            : "var(--color-bad)",
+                        }}
+                      >
+                        {r.ok
+                          ? r.mayNotLaunch
+                            ? tr("pkglib.external.installedWarn", "installed (may not launch)")
+                            : tr("pkglib.external.installed", "installed")
+                          : r.message || tr("pkglib.external.failed", "install failed")}
+                      </span>
+                    </>
+                  )}
+                </div>
+              </div>
+              <Button
+                variant="primary"
+                size="sm"
+                leftIcon={
+                  installingPath === p.path ? (
+                    <Loader2 size={13} className="animate-spin" />
+                  ) : (
+                    <Download size={13} />
+                  )
+                }
+                disabled={installing}
+                onClick={() => void onInstall(p)}
+              >
+                {installingPath === p.path
+                  ? tr("pkglib.external.installingThis", "Installing…")
+                  : tr("pkglib.external.install", "Install")}
+              </Button>
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }

@@ -14,6 +14,7 @@ vi.mock("../api/ps5", () => ({
 import { fsDelete, fsListDir } from "../api/ps5";
 import {
   titleIdFromContentId,
+  platformFromTitleId,
   pkgLibraryStore,
   evictPkgLibraryStore,
   isFinishedPkg,
@@ -22,6 +23,19 @@ import {
   PKG_MAY_NOT_LAUNCH_MESSAGE,
   type PkgEntry,
 } from "./pkgLibrary";
+
+describe("platformFromTitleId", () => {
+  it("maps CUSA → ps4 and PPSA → ps5", () => {
+    expect(platformFromTitleId("CUSA03474")).toBe("ps4");
+    expect(platformFromTitleId("PPSA01650")).toBe("ps5");
+  });
+  it("returns empty for unknown prefixes / missing ids", () => {
+    expect(platformFromTitleId("NPXS40047")).toBe("");
+    expect(platformFromTitleId(null)).toBe("");
+    expect(platformFromTitleId(undefined)).toBe("");
+    expect(platformFromTitleId("")).toBe("");
+  });
+});
 
 describe("per-console store registry (eviction)", () => {
   it("returns the SAME store instance for a host until evicted", () => {
@@ -101,6 +115,28 @@ describe("pkgInstallMayNotLaunch", () => {
     }
     // Nothing at all (very old engine) → no warning.
     expect(pkgInstallMayNotLaunch({})).toBe(false);
+  });
+
+  it("prefers the engine's definitive app.db launchability verdict", () => {
+    // launchable=true overrides even the unlaunchable register_path: the
+    // engine confirmed the title registered in app.db, so it's a clean
+    // success (this is the elf-arsenal wait_for_install_row payoff).
+    expect(
+      pkgInstallMayNotLaunch({ register_path: "appinst-local", launchable: true }),
+    ).toBe(false);
+    // launchable=false is a definitive warning even on a "launchable" tier —
+    // Sony accepted it but the title never registered.
+    expect(
+      pkgInstallMayNotLaunch({ register_path: "appinst", launchable: false }),
+    ).toBe(true);
+    // launchable wins over a conflicting may_not_launch flag too.
+    expect(
+      pkgInstallMayNotLaunch({ may_not_launch: true, launchable: true }),
+    ).toBe(false);
+    // launchable null/undefined ⇒ verification not applicable ⇒ heuristic.
+    expect(
+      pkgInstallMayNotLaunch({ register_path: "appinst-local", launchable: null }),
+    ).toBe(true);
   });
 });
 

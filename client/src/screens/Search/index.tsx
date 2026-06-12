@@ -8,7 +8,14 @@ import {
 } from "lucide-react";
 
 import { useConnectionStore, PS5_PAYLOAD_PORT } from "../../state/connection";
-import { searchPS5, type SearchHit, type SearchProgress } from "../../api/ps5";
+import {
+  searchPS5,
+  appsInstalled,
+  type SearchHit,
+  type SearchProgress,
+  type InstalledTitle,
+} from "../../api/ps5";
+import { transferAddr } from "../../lib/addr";
 import {
   PageHeader,
   ErrorCard,
@@ -94,6 +101,10 @@ export default function SearchScreen() {
   const host = useConnectionStore((s) => s.host);
   const [pattern, setPattern] = useState("");
   const [minSize, setMinSize] = useState(0);
+  // Game-scoped search: list installed titles and optionally restrict the scan
+  // to one game's directory instead of every volume. "" = all content.
+  const [games, setGames] = useState<InstalledTitle[]>([]);
+  const [scopeTitleId, setScopeTitleId] = useState("");
   const [saved, setSaved] = useState<SavedSearch[]>(() => loadSavedSearches());
   const { prompt: promptDialog, dialog: promptDialogNode } = usePrompt();
   const [loading, setLoading] = useState(false);
@@ -124,6 +135,38 @@ export default function SearchScreen() {
     };
   }, []);
 
+  // Load the installed-title list so the user can scope a search to one game.
+  // Best-effort: a failure just leaves the scope selector at "All content".
+  useEffect(() => {
+    // Switching console invalidates the selected game (it may not exist on the
+    // new one) — reset so the scan doesn't silently widen to "all content"
+    // while the UI still implies a game is picked.
+    setScopeTitleId("");
+    if (!host?.trim()) {
+      setGames([]);
+      return;
+    }
+    let cancelled = false;
+    appsInstalled(transferAddr(host))
+      .then((r) => {
+        if (!cancelled) {
+          setGames(
+            // Exclude NPXS system titles — scoping to one resolves to an
+            // empty/irrelevant /user/app/<NPXS…> and isn't what users want.
+            r.titles
+              .filter((t) => !t.system)
+              .sort((a, b) => a.titleName.localeCompare(b.titleName)),
+          );
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setGames([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [host]);
+
   // Results belong to the console they were searched on. On tab switch,
   // abort any in-flight scan against the previous console and clear its
   // results — otherwise console A's hits render under console B's tab
@@ -152,6 +195,15 @@ export default function SearchScreen() {
     setError(null);
     setResult(null);
     setProgress({ scanned: 0, hits: 0, currentPath: "" });
+    // When a game is selected, restrict the scan to its directory. Prefer the
+    // registered source path; fall back to /user/app/<id> for pkg-installed
+    // titles (whose `source` is empty). Empty scope = search every volume.
+    const scopeGame = scopeTitleId
+      ? games.find((g) => g.titleId === scopeTitleId)
+      : undefined;
+    const scopeRoots = scopeGame
+      ? [scopeGame.source?.trim() || `/user/app/${scopeGame.titleId}`]
+      : undefined;
     try {
       const res = await searchPS5(
         // trim() to match the gate above and every other screen — a stored
@@ -161,7 +213,7 @@ export default function SearchScreen() {
         pattern,
         minSize,
         setProgress,
-        undefined,
+        scopeRoots,
         controller.signal,
       );
       if (useConnectionStore.getState().host !== searchedHost) return;
@@ -250,6 +302,30 @@ export default function SearchScreen() {
                 </option>
               ))}
             </select>
+            {/* Scope to a single game (or all content). Restricts the scan to
+                that title's directory — far faster than sweeping every volume,
+                and the practical way to "find a file inside game X". */}
+            {games.length > 0 && (
+              <select
+                value={scopeTitleId}
+                onChange={(e) => setScopeTitleId(e.target.value)}
+                className="max-w-[14rem] rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm"
+                title={tr(
+                  "search_scope_tooltip",
+                  undefined,
+                  "Limit the search to one game's files",
+                )}
+              >
+                <option value="">
+                  {tr("search_scope_all", undefined, "All content")}
+                </option>
+                {games.map((g) => (
+                  <option key={g.titleId} value={g.titleId}>
+                    {g.titleName} ({g.titleId})
+                  </option>
+                ))}
+              </select>
+            )}
             {loading ? (
               <Button
                 variant="secondary"
