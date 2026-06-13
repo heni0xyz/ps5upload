@@ -21,14 +21,12 @@ import {
   HardDrive,
   Usb,
   PackagePlus,
+  Eye,
+  Hash,
+  BadgeCheck,
 } from "lucide-react";
 import { pickPath } from "../../lib/pickPath";
-import {
-  PageHeader,
-  Button,
-  EmptyState,
-  ConnectionGate,
-} from "../../components";
+import { PageHeader, Button, ConnectionGate } from "../../components";
 // Direct import to avoid the barrel's circular-dep warning at build.
 import {
   useConfirm,
@@ -1995,15 +1993,16 @@ export default function FileSystemScreen() {
           </div>
         )}
 
-        {entries === null && !loading && !error && (
-          <EmptyState
-            fill
-            icon={FolderTree}
-            message={tr(
-              "fs_connect_first",
-              "Connect to your PS5 first — use the Connection tab.",
-            )}
-          />
+        {/* No entries yet and no error → we're connected (this whole block is
+            inside ConnectionGate require="payload") and simply still listing
+            the directory. Show a loading state, not the old "connect first"
+            message — by here the console is already reachable, so that copy
+            was both stale and confusing. */}
+        {entries === null && !error && (
+          <div className="flex items-center justify-center gap-2 py-10 text-xs text-[var(--color-muted)]">
+            <Loader2 size={14} className="animate-spin" />
+            {tr("fs_listing", undefined, "Reading directory…")}
+          </div>
         )}
 
         {entries && entries.length === 0 && (
@@ -2132,42 +2131,45 @@ export default function FileSystemScreen() {
                     <button
                       type="button"
                       onClick={() => runPreview(e)}
+                      aria-label={tr("fs_preview", undefined, "Preview")}
                       title={tr(
                         "fs_preview_tooltip",
                         undefined,
                         "Preview small file inline (text or image)",
                       )}
-                      className="rounded-md border border-[var(--color-border)] p-1 text-xs hover:bg-[var(--color-surface-3)]"
+                      className="rounded-md border border-[var(--color-border)] p-1 hover:bg-[var(--color-surface-3)]"
                     >
-                      👁
+                      <Eye size={12} />
                     </button>
                   )}
                   {!isDir && (
                     <button
                       type="button"
                       onClick={() => runCrc32(e)}
+                      aria-label={tr("fs_crc32", undefined, "CRC32 checksum")}
                       title={tr(
                         "fs_crc32_tooltip",
                         undefined,
                         "Compute CRC32 of this file (cheap integrity check)",
                       )}
-                      className="rounded-md border border-[var(--color-border)] p-1 text-xs font-mono hover:bg-[var(--color-surface-3)]"
+                      className="rounded-md border border-[var(--color-border)] p-1 hover:bg-[var(--color-surface-3)]"
                     >
-                      #
+                      <Hash size={12} />
                     </button>
                   )}
                   {!isDir && (
                     <button
                       type="button"
                       onClick={() => runVerify(e)}
+                      aria-label={tr("fs_verify", undefined, "Verify (BLAKE3)")}
                       title={tr(
                         "fs_verify_tooltip",
                         undefined,
                         "BLAKE3 + CRC32 verification (slower, crypto-strength)",
                       )}
-                      className="rounded-md border border-[var(--color-border)] p-1 text-xs font-mono hover:bg-[var(--color-surface-3)]"
+                      className="rounded-md border border-[var(--color-border)] p-1 hover:bg-[var(--color-surface-3)]"
                     >
-                      ✓
+                      <BadgeCheck size={12} />
                     </button>
                   )}
                   {!isDir && e.name.toLowerCase().endsWith(".pkg") && (

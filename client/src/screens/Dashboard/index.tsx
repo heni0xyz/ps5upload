@@ -175,7 +175,10 @@ export default function DashboardScreen() {
                     Hardware screen removed it for the same reason). */}
               </>
             ) : (
-              <KvRow label="—" value="(loading)" />
+              <div className="flex items-center gap-2 text-xs text-[var(--color-muted)]">
+                <Loader2 size={12} className="animate-spin" />
+                {tr("dashboard_loading_sensors", "Reading sensors…")}
+              </div>
             )}
             {power && (
               <>
@@ -189,7 +192,11 @@ export default function DashboardScreen() {
 
           <DashCard
             icon={<Power size={14} />}
-            title={`Running apps (${runningTitleIds.size})`}
+            title={tr(
+              "dashboard_running_apps",
+              { n: runningTitleIds.size },
+              `Running apps (${runningTitleIds.size})`,
+            )}
           >
             {runningTitleIds.size === 0 ? (
               <div className="text-xs text-[var(--color-muted)]">

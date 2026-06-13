@@ -64,7 +64,7 @@ export default function RosterPicker() {
   }, [open]);
 
   const fwLabel = active?.last_seen_kernel
-    ? parsePS5Firmware(active.last_seen_kernel) ?? "—"
+    ? (parsePS5Firmware(active.last_seen_kernel) ?? "—")
     : null;
 
   return (
@@ -117,7 +117,10 @@ export default function RosterPicker() {
                     }`}
                   >
                     {p.id === active?.id ? (
-                      <Check size={11} className="shrink-0 text-[var(--color-good)]" />
+                      <Check
+                        size={11}
+                        className="shrink-0 text-[var(--color-good)]"
+                      />
                     ) : (
                       <span className="w-[11px] shrink-0" />
                     )}
@@ -146,9 +149,7 @@ export default function RosterPicker() {
         </div>
       )}
 
-      {manageOpen && (
-        <RosterManageModal onClose={() => setManageOpen(false)} />
-      )}
+      {manageOpen && <RosterManageModal onClose={() => setManageOpen(false)} />}
     </div>
   );
 }
@@ -215,6 +216,7 @@ function RosterManageModal({ onClose }: { onClose: () => void }) {
           <button
             type="button"
             onClick={onClose}
+            aria-label={tr("close", undefined, "Close")}
             className="text-[var(--color-muted)] hover:text-[var(--color-text)]"
           >
             <X size={14} />
@@ -294,7 +296,11 @@ function RosterManageModal({ onClose }: { onClose: () => void }) {
                         <div className="mt-0.5 text-xs text-[var(--color-muted)]">
                           {tr(
                             "roster_last_seen",
-                            { when: new Date(p.last_seen_at * 1000).toLocaleString() },
+                            {
+                              when: new Date(
+                                p.last_seen_at * 1000,
+                              ).toLocaleString(),
+                            },
                             `last seen: ${new Date(p.last_seen_at * 1000).toLocaleString()}`,
                           )}
                           {p.last_seen_payload &&
@@ -310,6 +316,8 @@ function RosterManageModal({ onClose }: { onClose: () => void }) {
                     <button
                       type="button"
                       onClick={() => startEdit(p)}
+                      aria-label={tr("roster_edit", undefined, "Edit PS5")}
+                      title={tr("roster_edit", undefined, "Edit PS5")}
                       className="rounded-md p-1 text-[var(--color-muted)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
                     >
                       <Pencil size={12} />
@@ -333,6 +341,12 @@ function RosterManageModal({ onClose }: { onClose: () => void }) {
                         });
                         if (ok) remove(p.id);
                       }}
+                      aria-label={tr(
+                        "roster_remove_aria",
+                        { name: p.name },
+                        `Remove ${p.name}`,
+                      )}
+                      title={tr("remove", undefined, "Remove")}
                       className="rounded-md p-1 text-[var(--color-muted)] hover:bg-[var(--color-bad-soft)] hover:text-[var(--color-bad)]"
                     >
                       <Trash2 size={12} />
@@ -351,7 +365,11 @@ function RosterManageModal({ onClose }: { onClose: () => void }) {
               <input
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
-                placeholder={tr("roster_name_placeholder", undefined, "Living-room PS5")}
+                placeholder={tr(
+                  "roster_name_placeholder",
+                  undefined,
+                  "Living-room PS5",
+                )}
                 className="flex-1 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-xs"
               />
               <input

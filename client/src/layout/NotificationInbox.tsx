@@ -173,6 +173,8 @@ export default function NotificationInbox() {
               <button
                 type="button"
                 onClick={() => setOpen(false)}
+                aria-label={tr("close", undefined, "Close")}
+                title={tr("close", undefined, "Close")}
                 className="rounded p-1 text-[var(--color-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)]"
               >
                 <X size={12} />

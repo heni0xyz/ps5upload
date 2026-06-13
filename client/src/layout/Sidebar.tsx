@@ -86,9 +86,10 @@ interface NavItem {
 // progression — Setup → Files → Browse → System → Diagnostics — plus
 // a clear distinction between primary navigation and utility entries.
 // Dashboard moved from "Overview" (it's neither setup nor first-thing)
-// to System. Activity + Stats grouped under Diagnostics. Send payload
-// + Homebrew catalog (was "Payload library") collocate under System
-// because they're both "manage what's running on the console".
+// to System. Activity + Stats grouped under Diagnostics. Payloads sits
+// in Setup next to Connection — sending the helper is a beginning-phase
+// step (Connection's own step 2), so it belongs with "get started",
+// not buried under System.
 //
 // Total nav items unchanged (no screen removed); only the grouping +
 // "Payload library → Homebrew catalog" rename. The screen merges
@@ -104,6 +105,13 @@ const items: NavItem[] = [
     section: { key: "nav_section_setup", fallback: "Setup" },
   },
   { to: "/connection", key: "connect", fallback: "Connection", icon: Cable },
+  // Payloads sits right after Connection: sending the helper (and other
+  // homebrew payloads) is a beginning-phase step — it's literally step 2
+  // of the Connection screen's own flow. Grouping it here matches how
+  // people actually work (orient → connect → send payload → check
+  // status) instead of burying it under System as a "manage what's
+  // running" tool.
+  { to: "/payloads", key: "payloads", fallback: "Payloads", icon: Boxes },
   // Dashboard lives with Setup, not System: it's the "am I connected,
   // what's running?" morning check — the thing you look at right after
   // (or instead of) the Connection screen, not a hardware tool.
@@ -179,7 +187,6 @@ const items: NavItem[] = [
     fallback: "Profile",
     icon: CircleUserRound,
   },
-  { to: "/payloads", key: "payloads", fallback: "Payloads", icon: Boxes },
   { to: "/nanodns", key: "nanodns", fallback: "nanoDNS", icon: Globe },
   { to: "/shell", key: "shell", fallback: "Shell", icon: TerminalSquare },
 

@@ -8,6 +8,7 @@ import {
   EmptyState,
   ErrorCard,
   Button,
+  ConnectionGate,
 } from "../../components";
 // Direct import to avoid the barrel's circular-dep warning at build.
 import { useConfirm } from "../../components/ConfirmDialog";
@@ -160,85 +161,87 @@ export default function VolumesScreen() {
         }
       />
 
-      {error && (
-        <div className="mb-4">
-          <ErrorCard
-            title={tr("volumes_read_error", undefined, "Couldn't read volumes")}
-            detail={error}
+      {/* Gate the body on a reachable payload, like every other Browse
+          screen — otherwise a disconnected user was stranded on a "waiting…"
+          message with no way to act. The gate offers a Set-up-connection CTA. */}
+      <ConnectionGate require="payload">
+        {error && (
+          <div className="mb-4">
+            <ErrorCard
+              title={tr(
+                "volumes_read_error",
+                undefined,
+                "Couldn't read volumes",
+              )}
+              detail={error}
+            />
+          </div>
+        )}
+
+        {volumes && volumes.length === 0 && (
+          <EmptyState
+            icon={HardDrive}
+            size="hero"
+            title={tr("volumes_empty_title", undefined, "No volumes visible")}
+            message={tr(
+              "volumes_empty_message",
+              undefined,
+              "The payload didn't return any writable drives. Make sure it's loaded and your PS5 has storage attached.",
+            )}
           />
-        </div>
-      )}
+        )}
 
-      {volumes === null && !loading && !error && (
-        <EmptyState
-          fill
-          message={tr(
-            "library_waiting",
-            undefined,
-            "Waiting for the PS5 payload to become reachable…",
-          )}
-        />
-      )}
-
-      {volumes && volumes.length === 0 && (
-        <EmptyState
-          icon={HardDrive}
-          size="hero"
-          title={tr("volumes_empty_title", undefined, "No volumes visible")}
-          message={tr(
-            "volumes_empty_message",
-            undefined,
-            "The payload didn't return any writable drives. Make sure it's loaded and your PS5 has storage attached.",
-          )}
-        />
-      )}
-
-      {/* Mounted images section — deliberately at the top since this
+        {/* Mounted images section — deliberately at the top since this
           is the more actionable / transient set of volumes. Users
           typically open Volumes to unmount something or confirm a
           mount succeeded, not to inspect permanent drives. */}
-      {mountedImages.length > 0 && (
-        <section className="mb-6">
-          <header className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[var(--color-muted)]">
-            <FileArchive size={13} />
-            {tr("volumes_mounted_disk_images", undefined, "Mounted disk images")}
-            <span className="text-xs text-[var(--color-muted)]">
-              · {mountedImages.length}
-            </span>
-          </header>
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {mountedImages.map((v) => (
-              <MountedImageCard
-                key={v.path}
-                volume={v}
-                onUnmount={() => handleUnmount(v.path)}
-                unmounting={unmountingPath === v.path}
-                anyUnmountInFlight={unmountingPath !== null}
-              />
-            ))}
-          </div>
-        </section>
-      )}
+        {mountedImages.length > 0 && (
+          <section className="mb-6">
+            <header className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[var(--color-muted)]">
+              <FileArchive size={13} />
+              {tr(
+                "volumes_mounted_disk_images",
+                undefined,
+                "Mounted disk images",
+              )}
+              <span className="text-xs text-[var(--color-muted)]">
+                · {mountedImages.length}
+              </span>
+            </header>
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {mountedImages.map((v) => (
+                <MountedImageCard
+                  key={v.path}
+                  volume={v}
+                  onUnmount={() => handleUnmount(v.path)}
+                  unmounting={unmountingPath === v.path}
+                  anyUnmountInFlight={unmountingPath !== null}
+                />
+              ))}
+            </div>
+          </section>
+        )}
 
-      {/* Storage drives — the persistent set: internal SSD, M.2,
+        {/* Storage drives — the persistent set: internal SSD, M.2,
           USB. Unmountable only if it's one of ours, which shouldn't
           happen in this section — kept read-only. */}
-      {storageDrives.length > 0 && (
-        <section>
-          <header className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[var(--color-muted)]">
-            <HardDrive size={13} />
-            {tr("volumes_storage_drives", undefined, "Storage drives")}
-            <span className="text-xs text-[var(--color-muted)]">
-              · {storageDrives.length}
-            </span>
-          </header>
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {storageDrives.map((v) => (
-              <StorageCard key={v.path} volume={v} />
-            ))}
-          </div>
-        </section>
-      )}
+        {storageDrives.length > 0 && (
+          <section>
+            <header className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[var(--color-muted)]">
+              <HardDrive size={13} />
+              {tr("volumes_storage_drives", undefined, "Storage drives")}
+              <span className="text-xs text-[var(--color-muted)]">
+                · {storageDrives.length}
+              </span>
+            </header>
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {storageDrives.map((v) => (
+                <StorageCard key={v.path} volume={v} />
+              ))}
+            </div>
+          </section>
+        )}
+      </ConnectionGate>
     </div>
   );
 }

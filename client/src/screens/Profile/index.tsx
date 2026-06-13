@@ -8,6 +8,7 @@ import {
   UserPen,
   Check,
   Info,
+  Loader2,
 } from "lucide-react";
 
 import {
@@ -204,7 +205,10 @@ function AvatarSection({
         tr(
           "profile.avatar.applied",
           { n: r.files_copied },
-          `Avatar applied (${r.files_copied} files written). It may take a moment to refresh on the console.`,
+          // No "may take a moment to refresh" tail — the reboot notice
+          // below is the single source of truth (you must restart to see
+          // it), and the two together read as a contradiction.
+          `Avatar applied (${r.files_copied} files written).`,
         ),
       );
       onApplied();
@@ -414,7 +418,15 @@ function UsernameSection({
         )}
       </p>
 
-      {users.length === 0 ? (
+      {info === null ? (
+        // Still loading the first profile fetch. Showing the "No console
+        // users" empty state here would briefly tell every connected user
+        // they have no profiles — gate it on a completed load instead.
+        <div className="flex items-center gap-2 text-xs text-[var(--color-muted)]">
+          <Loader2 size={12} className="animate-spin" />
+          {tr("profile.username.loading", "Reading console users…")}
+        </div>
+      ) : users.length === 0 ? (
         <EmptyState
           title={tr("profile.username.empty", "No console users")}
           message={tr(
