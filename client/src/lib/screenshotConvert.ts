@@ -24,6 +24,15 @@ export function pngNameForJxr(name: string): string {
   return `${stem}.png`;
 }
 
+/** Whether a screenshot needs JPEG-XR → PNG conversion to be viewable.
+ *  PS5 HDR captures are `.jxr` (including the doubled `.jxr.jxr`
+ *  thumbnail); SDR captures arrive as `.jpg`/`.jpeg`/`.png`, which the
+ *  WebView renders directly — running the jxr decoder on those fails with
+ *  "not a JPEG XR file". Callers should only convert when this is true. */
+export function isJxrScreenshot(name: string): boolean {
+  return /\.jxr$/i.test(name);
+}
+
 /** Join a directory and a filename with a forward slash. Rust's `Path`
  *  (and the Windows APIs underneath it) accept `/` as a separator on
  *  every desktop target, so a single join works cross-platform even when

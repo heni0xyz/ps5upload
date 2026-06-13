@@ -28,7 +28,11 @@ import { useTr } from "../../state/lang";
 import { pickPath } from "../../lib/pickPath";
 import { formatBytes } from "../../lib/format";
 import { basename } from "../../lib/uploadDest";
-import { pngNameForJxr, joinDir } from "../../lib/screenshotConvert";
+import {
+  pngNameForJxr,
+  joinDir,
+  isJxrScreenshot,
+} from "../../lib/screenshotConvert";
 import { isMobile } from "../../lib/platform";
 
 /**
@@ -233,8 +237,12 @@ export default function ScreenshotsScreen() {
         "file",
       );
       await waitForJob(jobId);
-      // deleteSource=true: leave only the viewable .png behind.
-      await convertScreenshot(localJxr, localPng, true);
+      // Only .jxr needs the JPEG-XR decode + HDR→SDR tone-map
+      // (deleteSource=true leaves only the viewable .png behind). An SDR
+      // .jpg/.png download is already viewable as-is, so leave it.
+      if (isJxrScreenshot(name)) {
+        await convertScreenshot(localJxr, localPng, true);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -278,10 +286,18 @@ export default function ScreenshotsScreen() {
       );
       await waitForJob(jobId);
       const name = basename(item.path);
-      const localJxr = joinDir(tempDir, name);
-      const localPng = joinDir(tempDir, pngNameForJxr(name));
-      await convertScreenshot(localJxr, localPng, true);
-      const url = convertFileSrc(localPng);
+      const localFile = joinDir(tempDir, name);
+      // Only HDR .jxr captures need the JPEG-XR decode + tone-map. SDR
+      // .jpg/.png shots are already WebView-renderable — converting them
+      // would fail ("not a JPEG XR file"), which is exactly the error a
+      // user with .jpg screenshots hit on Preview.
+      let displayLocal = localFile;
+      if (isJxrScreenshot(name)) {
+        const localPng = joinDir(tempDir, pngNameForJxr(name));
+        await convertScreenshot(localFile, localPng, true);
+        displayLocal = localPng;
+      }
+      const url = convertFileSrc(displayLocal);
       // Race guard: only commit if this item is still the one showing. If the
       // user switched to a different preview (or closed) mid-convert, our
       // scratch dir is now orphaned — clean it instead of leaking it.

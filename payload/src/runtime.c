@@ -5987,6 +5987,16 @@ static int is_path_lexically_allowed(const char *p) {
      * (/mnt/ps5upload or /mnt/ps5upload/) is deliberately excluded —
      * callers should target a specific mount's subtree. */
     if (strncmp(p, "/mnt/ps5upload/", 15) == 0 && p[15] != '\0') return 1;
+    /* /mnt/shadowmnt[/...] — ShadowMount+ mounts game disc images here
+     * (read-only). The File System browser lists these, so reading/
+     * downloading files inside them (eboot.bin, sce_sys/, the title
+     * JSONs) must be allowed too — otherwise a user can browse a mounted
+     * game but every file download fails with fs_read_path_not_allowed.
+     * Allow the mount root itself (for listing) and any subpath. Writes
+     * to the read-only mount fail at the syscall level regardless. */
+    if (strcmp(p, "/mnt/shadowmnt") == 0 ||
+        strncmp(p, "/mnt/shadowmnt/", 15) == 0)
+        return 1;
     return 0;
 }
 
