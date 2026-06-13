@@ -4,6 +4,43 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 3.2.4
+
+A big polish release built from real-user feedback and a full UI/UX pass.
+
+**Fewer reasons to restart your PS5.** If the helper gets stuck, the app now
+detects and force-clears the previous instance on its own before sending the
+new one — so you usually don't have to reboot the console or kill it by hand
+anymore. Verified on FW 5.10 and 9.60.
+
+**Packages & USB.**
+
+- Install a `.pkg` straight from the **File System** browser — right where the
+  file sits, no detour through the scan.
+- PS4 packages now show up reliably with the correct PS4/PS5 badge, and
+  scanning USB/external drives for packages is much faster.
+- The "copying to your PS5" notice now explains it's a temporary stage that's
+  removed after install, so it won't fill up your SSD.
+
+**Save data & screens.**
+
+- Save data shows the **game's name** next to its ID (e.g. "Saros
+  (PPSA07631)"), and missing save thumbnails now fall back to cover art.
+- Unplugging a USB drive in the File System browser drops you back to `/data`
+  instead of throwing an error.
+- Installed Apps no longer flashes a "needs ShadowMount+" warning on load, and
+  Play is clearly disabled (not just failing) for disc games that need it.
+
+**A clearer, more consistent app.**
+
+- **Payloads** moved next to **Connection** in the sidebar — sending the helper
+  is a setup step, so it now lives with "get started".
+- Added an **automatic update check** (on by default) that notifies you when a
+  new version is out.
+- Tidier loading states, consistent modals, clearer labels and terminology, a
+  redesigned bottom status bar, and accessibility improvements throughout — in
+  all 18 languages.
+
 ## 3.2.3
 
 - **Clearer status bar.** The strip along the bottom used to cram five
