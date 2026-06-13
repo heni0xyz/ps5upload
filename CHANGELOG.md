@@ -4,6 +4,40 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 3.2.5
+
+A stability + bug-fix release from a round of user reports.
+
+**The helper is much better behaved.**
+
+- It no longer risks interfering with your *other* homebrew. A safety bug
+  could, after a reboot, target an unrelated tool you'd autoloaded (a cheat
+  loader, nanoDNS) when clearing a stale instance — it now only ever touches
+  an instance from the current boot session.
+- "Helper keeps dropping randomly" is fixed: the app no longer flips to
+  "Helper isn't running" on a single missed status check, and the helper
+  itself survives transient network hiccups instead of exiting.
+- Spurious "Delete failed" errors after installing a package (when
+  auto-delete is on) are gone — a file that's already gone or still briefly
+  in use is no longer treated as a hard error.
+
+**UI fixes.**
+
+- Deleting a PS5 in Manage PS5s now shows the confirmation dialog on top
+  instead of just dimming the background.
+- Larger Text-size settings no longer break the Payloads send screen
+  layout.
+- The Library no longer flickers a wall of placeholder rows during a scan.
+- Installed Apps gained an **Open folder** button (for homebrew/disc titles)
+  that jumps to the app's folder in the File System browser.
+
+**Payloads.**
+
+- Added **CheatRunner** to the catalog.
+- Added a **search box** to the payload catalog.
+- A payload source that's temporarily unreachable now shows a quiet note
+  instead of a loud error, so it no longer looks broken or removed.
+
 ## 3.2.4
 
 A big polish release built from real-user feedback and a full UI/UX pass.
