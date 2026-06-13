@@ -4,6 +4,14 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 3.2.6
+
+- **Properly fixed the Payloads "Send file" screen at large Text sizes.** The
+  previous attempt only fixed part of it — on some tablets (especially with a
+  bigger Text-size setting) the form still collapsed and the labels wrapped one
+  letter per line. The whole screen now reflows correctly at any text size and
+  window width. Verified across a range of phone, tablet, and desktop sizes.
+
 ## 3.2.5
 
 A stability + bug-fix release from a round of user reports.
