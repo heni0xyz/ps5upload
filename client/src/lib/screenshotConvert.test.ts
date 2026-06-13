@@ -1,5 +1,25 @@
 import { describe, it, expect } from "vitest";
-import { pngNameForJxr, joinDir } from "./screenshotConvert";
+import {
+  pngNameForJxr,
+  joinDir,
+  isJxrScreenshot,
+} from "./screenshotConvert";
+
+describe("isJxrScreenshot", () => {
+  it("true only for .jxr (incl. case + doubled suffix)", () => {
+    expect(isJxrScreenshot("shot.jxr")).toBe(true);
+    expect(isJxrScreenshot("shot.JXR")).toBe(true);
+    expect(isJxrScreenshot("shot.jxr.jxr")).toBe(true);
+  });
+  it("false for SDR formats the WebView renders directly", () => {
+    // Regression: these were jxr-decoded and failed with
+    // "not a JPEG XR file" on Preview.
+    expect(isJxrScreenshot("20260610_220512_00839286.jpg")).toBe(false);
+    expect(isJxrScreenshot("shot.jpeg")).toBe(false);
+    expect(isJxrScreenshot("shot.png")).toBe(false);
+    expect(isJxrScreenshot("noext")).toBe(false);
+  });
+});
 
 describe("pngNameForJxr", () => {
   it("strips a single .jxr", () => {
