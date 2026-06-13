@@ -5779,6 +5779,43 @@ mod helpers_tests {
     }
 
     #[test]
+    fn external_pkg_header_classifies_cnt_and_fih() {
+        // \x7FCNT stock package with a PS4 content id at offset 0x40.
+        let mut head = vec![0u8; 0xA0];
+        head[0..4].copy_from_slice(&[0x7F, b'C', b'N', b'T']);
+        let cid = b"EP4293-CUSA32097_00-ASTNCPS4SIEE0000";
+        head[0x40..0x40 + cid.len()].copy_from_slice(cid);
+        let (content_id, title_id, platform) = external_pkg_header(&head);
+        assert_eq!(content_id, "EP4293-CUSA32097_00-ASTNCPS4SIEE0000");
+        assert_eq!(title_id, "CUSA32097");
+        assert_eq!(platform, "ps4");
+
+        // \x7FFIH PS5-native: platform is ps5 from the magic alone; the
+        // content id isn't parsed for FIH (Sony's installer reads it).
+        let mut fih = vec![0u8; 0xA0];
+        fih[0..4].copy_from_slice(&[0x7F, b'F', b'I', b'H']);
+        let (cid2, _tid2, plat2) = external_pkg_header(&fih);
+        assert_eq!(cid2, "");
+        assert_eq!(plat2, "ps5");
+    }
+
+    #[test]
+    fn external_pkg_header_rejects_short_and_unknown() {
+        // Shorter than the 0xA0 header window → all empty, no panic.
+        assert_eq!(
+            external_pkg_header(&[0u8; 16]),
+            (String::new(), String::new(), String::new())
+        );
+        // Full length but an unrecognized magic → nothing classified.
+        let mut head = vec![0u8; 0xA0];
+        head[0..4].copy_from_slice(&[0xDE, 0xAD, 0xBE, 0xEF]);
+        assert_eq!(
+            external_pkg_header(&head),
+            (String::new(), String::new(), String::new())
+        );
+    }
+
+    #[test]
     fn mgmt_addr_or_default_uses_default_when_none() {
         assert_eq!(
             mgmt_addr_or_default(None, "192.168.0.1:9113"),

@@ -15,6 +15,17 @@ const STORAGE_KEY = "ps5upload.theme";
 
 const VALID_THEMES: Theme[] = ["dark", "light", "oled", "rose"];
 
+/** The cycle order the toggle button steps through. */
+const THEME_CYCLE: Theme[] = ["dark", "light", "oled", "rose"];
+
+/** Next theme in the toggle cycle (wraps around). Pure → unit-tested so the
+ *  4-theme order (Rose was added later; the wrap-around is easy to break)
+ *  stays locked. An unknown current theme restarts the cycle at the front. */
+export function nextTheme(current: Theme): Theme {
+  const idx = THEME_CYCLE.indexOf(current);
+  return THEME_CYCLE[(idx + 1) % THEME_CYCLE.length];
+}
+
 /** Read the persisted theme synchronously so the first paint is correct.
  *  Returning "dark" as the fallback keeps parity with the app's historical
  *  look for users who've never toggled. */
@@ -54,9 +65,7 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
     set({ theme });
   },
   toggleTheme: () => {
-    const order: Theme[] = ["dark", "light", "oled", "rose"];
-    const idx = order.indexOf(get().theme);
-    const next: Theme = order[(idx + 1) % order.length];
+    const next = nextTheme(get().theme);
     window.localStorage.setItem(STORAGE_KEY, next);
     applyTheme(next);
     set({ theme: next });

@@ -58,6 +58,7 @@ import { useFsNavStore } from "../../state/fsNavigation";
 import { useActivityHistoryStore } from "../../state/activityHistory";
 import { pushNotification } from "../../state/notifications";
 import { usePkgLibrary } from "../../state/pkgLibrary";
+import { isRemovableMount } from "../../lib/mountPaths";
 import { useRecentPathsStore } from "../../state/recentPaths";
 import {
   useFsClipboardStore,
@@ -422,7 +423,7 @@ export default function FileSystemScreen() {
       // place — fall back to the always-present internal /data root and
       // tell them why. Guard on `!== FS_DEFAULT_PATH` so a genuine /data
       // failure still surfaces instead of looping.
-      const onRemovable = /^\/mnt\/(usb|ext)/i.test(probedPath);
+      const onRemovable = isRemovableMount(probedPath);
       if (onRemovable && probedPath !== FS_DEFAULT_PATH) {
         setError(null);
         setEntries(null);

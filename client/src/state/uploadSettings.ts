@@ -65,6 +65,15 @@ function loadBandwidthCap(): number {
  *  and let users opt UP to 4 with an in-UI stability warning. */
 const DEFAULT_UPLOAD_STREAMS = 1;
 
+/** Clamp a requested stream count to the supported range. Rounds, floors at
+ *  1 (zero/negative is meaningless), and caps at MAX_UPLOAD_STREAMS — more
+ *  than the payload supports can crash it mid-upload. Pure, so it's unit-
+ *  tested directly. */
+export function clampUploadStreams(n: number): number {
+  if (!Number.isFinite(n)) return DEFAULT_UPLOAD_STREAMS;
+  return Math.min(Math.max(Math.round(n), 1), MAX_UPLOAD_STREAMS);
+}
+
 function loadUploadStreams(): number {
   // The effective count at upload time is min(setting, the payload's advertised
   // max_transfer_streams), so an older payload that predates multi-stream still
@@ -74,7 +83,7 @@ function loadUploadStreams(): number {
   if (!v) return DEFAULT_UPLOAD_STREAMS;
   const n = parseInt(v, 10);
   if (!Number.isFinite(n)) return DEFAULT_UPLOAD_STREAMS;
-  return Math.min(Math.max(n, 1), MAX_UPLOAD_STREAMS);
+  return clampUploadStreams(n);
 }
 
 /** Keep-PS5-awake policy. The app periodically sends a power-tick
@@ -188,7 +197,7 @@ export const useUploadSettingsStore = create<UploadSettingsState>((set) => ({
     set({ bandwidthCapMbps });
   },
   setUploadStreams: (n) => {
-    const clamped = Math.min(Math.max(Math.round(n), 1), MAX_UPLOAD_STREAMS);
+    const clamped = clampUploadStreams(n);
     window.localStorage.setItem(KEY_UPLOAD_STREAMS, clamped.toString());
     set({ uploadStreams: clamped });
   },

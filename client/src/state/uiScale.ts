@@ -32,7 +32,11 @@ export const UI_SCALE_STEPS: UiScale[] = [0.7, 0.8, 0.9, 1.0, 1.1, 1.25, 1.4];
 const MIN_SCALE = UI_SCALE_STEPS[0];
 const MAX_SCALE = UI_SCALE_STEPS[UI_SCALE_STEPS.length - 1];
 
-function clamp(scale: number): UiScale {
+/** Clamp a scale into the designed range; non-finite → 1.0. Keeping the UI
+ *  scale bounded is what prevents an out-of-range value (corrupt storage, a
+ *  future wider control) from making the app illegibly tiny or overflowing
+ *  every layout. Pure → unit-tested directly. */
+export function clampUiScale(scale: number): UiScale {
   if (!Number.isFinite(scale)) return 1.0;
   return Math.min(MAX_SCALE, Math.max(MIN_SCALE, scale));
 }
@@ -43,7 +47,7 @@ function initialScale(): UiScale {
   const raw = window.localStorage.getItem(STORAGE_KEY);
   if (raw == null) return 1.0;
   const n = Number.parseFloat(raw);
-  return Number.isFinite(n) ? clamp(n) : 1.0;
+  return Number.isFinite(n) ? clampUiScale(n) : 1.0;
 }
 
 /** Drive the `--ui-base-size` CSS custom property on <html>. index.css applies
@@ -65,7 +69,7 @@ interface UiScaleState {
 export const useUiScaleStore = create<UiScaleState>((set) => ({
   scale: initialScale(),
   setScale: (scale) => {
-    const next = clamp(scale);
+    const next = clampUiScale(scale);
     window.localStorage.setItem(STORAGE_KEY, String(next));
     applyScale(next);
     set({ scale: next });

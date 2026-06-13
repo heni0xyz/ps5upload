@@ -5,6 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { fsListDir, fsDelete, fsMkdir, fsCopy } from "../api/ps5";
 import type { ExternalPkg } from "../api/ps5";
 import { hostOf, mgmtAddr, transferAddr } from "../lib/addr";
+import { removableMountRoot } from "../lib/mountPaths";
 import { humanizePs5Error } from "../lib/humanizeError";
 import {
   stagingBasename,
@@ -990,7 +991,7 @@ const makePkgLibraryStore = () =>
     // Removable mounts can't be installed off directly (exfat + Sony's
     // installer) — reuse the staged copy-then-install path. Derive the
     // mount root so the staging notice names the right drive.
-    const mountRoot = path.match(/^(\/mnt\/(?:usb|ext)[^/]*)/i)?.[1];
+    const mountRoot = removableMountRoot(path);
     if (mountRoot) {
       return get().installExternal(
         {
