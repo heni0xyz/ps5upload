@@ -7,10 +7,9 @@ import {
   StopCircle,
   Trash2,
   Eye,
-  X,
 } from "lucide-react";
 
-import { PageHeader, Button, EmptyState } from "../../components";
+import { PageHeader, Button, EmptyState, Modal } from "../../components";
 import { useConfirm } from "../../components/ConfirmDialog";
 import { useTr } from "../../state/lang";
 import {
@@ -375,7 +374,11 @@ function ActivityRow({ entry }: { entry: ActivityEntry }) {
             type="button"
             onClick={() => remove(entry.id)}
             className="rounded-md border border-[var(--color-border)] p-1 text-[var(--color-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-bad)]"
-            title={tr("activity_delete_tooltip", undefined, "Delete this entry")}
+            title={tr(
+              "activity_delete_tooltip",
+              undefined,
+              "Delete this entry",
+            )}
           >
             <Trash2 size={13} />
           </button>
@@ -536,7 +539,9 @@ function ActivityDetailModal({
 }) {
   const tr = useTr();
   const profiles = useRosterStore((s) => s.profiles);
-  const consoleName = entry.addr ? profileNameForAddr(entry.addr, profiles) : null;
+  const consoleName = entry.addr
+    ? profileNameForAddr(entry.addr, profiles)
+    : null;
   const phaseLabel =
     entry.outcome === "running" && entry.phase !== "finalizing" && !entry.bytes
       ? tr("activity_phase_preparing", undefined, "Preparing (no transfer yet)")
@@ -585,28 +590,14 @@ function ActivityDetailModal({
     ],
   ];
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--overlay-scrim)] p-4"
-      onClick={onClose}
+    <Modal
+      open
+      onClose={onClose}
+      title={entry.label}
+      titleIcon={<OutcomeIcon outcome={entry.outcome} />}
+      size="md"
     >
-      <div
-        className="max-h-[80vh] w-full max-w-md overflow-y-auto rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="mb-3 flex items-start gap-2">
-          <OutcomeIcon outcome={entry.outcome} />
-          <span className="min-w-0 flex-1 break-words text-sm font-medium">
-            {entry.label}
-          </span>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-md p-1 text-[var(--color-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text)]"
-            title={tr("close", undefined, "Close")}
-          >
-            <X size={16} />
-          </button>
-        </div>
+      <div className="p-4">
         <dl className="space-y-1.5 text-xs">
           {rows
             .filter(([, v]) => v != null && v !== "")
@@ -628,7 +619,7 @@ function ActivityDetailModal({
           </div>
         )}
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -684,6 +675,10 @@ function ActivityTimeline({ entries }: { entries: ActivityEntry[] }) {
   // Roster for tooltip console attribution — two overlapping amber blocks
   // from two consoles are otherwise indistinguishable on hover.
   const profiles = useRosterStore((s) => s.profiles);
+  // Tapped block → open the same detail modal the list rows use. Without
+  // this, the timeline's only info was a hover tooltip — invisible on
+  // touch (the app ships on Android), making the whole view a dead end.
+  const [selected, setSelected] = useState<ActivityEntry | null>(null);
   // Group entries by local-day key (YYYY-MM-DD).
   const byDay = new Map<string, ActivityEntry[]>();
   for (const e of entries) {
@@ -764,22 +759,26 @@ function ActivityTimeline({ entries }: { entries: ActivityEntry[] }) {
                   ((start.getTime() - dayStart.getTime()) / dayMs) * 100;
                 const widthMs = end.getTime() - start.getTime();
                 const widthPct = Math.max(0.4, (widthMs / dayMs) * 100);
+                const label = `${
+                  e.addr && profiles.length > 1
+                    ? `${profileNameForAddr(e.addr, profiles)} · `
+                    : ""
+                }${e.label} · ${e.outcome} · ${start.toLocaleTimeString()}${
+                  e.endedAtMs ? ` → ${end.toLocaleTimeString()}` : ""
+                }`;
                 return (
-                  <div
+                  <button
+                    type="button"
                     key={e.id}
-                    className="absolute top-0.5 h-4 rounded-sm hover:opacity-80"
+                    onClick={() => setSelected(e)}
+                    aria-label={label}
+                    className="absolute top-0.5 h-4 cursor-pointer rounded-sm hover:opacity-80 focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)]"
                     style={{
                       left: `${left.toFixed(2)}%`,
                       width: `${Math.min(100 - left, widthPct).toFixed(2)}%`,
                       backgroundColor: blockColor(e.outcome),
                     }}
-                    title={`${
-                      e.addr && profiles.length > 1
-                        ? `${profileNameForAddr(e.addr, profiles)} · `
-                        : ""
-                    }${e.label} · ${e.outcome} · ${start.toLocaleTimeString()}${
-                      e.endedAtMs ? ` → ${end.toLocaleTimeString()}` : ""
-                    }`}
+                    title={label}
                   />
                 );
               })}
@@ -790,6 +789,23 @@ function ActivityTimeline({ entries }: { entries: ActivityEntry[] }) {
           </div>
         ))}
       </div>
+      {selected && (
+        <ActivityDetailModal
+          entry={selected}
+          // Snapshot values — the live speed/pct only matter for the list
+          // row's progress bar; from the timeline we just want the full
+          // detail (paths, sizes, phase, timings, error).
+          speed={0}
+          pct={selected.outcome === "done" ? 100 : null}
+          // Finished entries get their real duration; a still-running one
+          // shows 0 here (the live ticking elapsed is the list row's job —
+          // and Date.now() in render is a lint-flagged impure call).
+          elapsedMs={
+            selected.endedAtMs ? selected.endedAtMs - selected.startedAtMs : 0
+          }
+          onClose={() => setSelected(null)}
+        />
+      )}
     </section>
   );
 }

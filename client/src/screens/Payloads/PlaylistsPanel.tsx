@@ -18,7 +18,7 @@ import {
   XCircle,
 } from "lucide-react";
 
-import { Button } from "../../components";
+import { Button, Modal } from "../../components";
 import { ConsoleChip } from "../../components/ConsoleChip";
 import { useTr } from "../../state/lang";
 import {
@@ -36,13 +36,7 @@ import { sanitiseSleepMs, type Playlist } from "../../lib/playlistOps";
  * with the configured sleep between steps. The store handles
  * persistence + cancellation; this component is purely the UI.
  */
-export function PlaylistsPanel({
-  host,
-  port,
-}: {
-  host: string;
-  port: number;
-}) {
+export function PlaylistsPanel({ host, port }: { host: string; port: number }) {
   const tr = useTr();
   const playlists = usePayloadPlaylistsStore((s) => s.playlists);
   const loaded = usePayloadPlaylistsStore((s) => s.loaded);
@@ -226,8 +220,7 @@ function RunStatusBanner({ host }: { host: string }) {
 
   if (runStatus.kind === "idle") return null;
   const playlist = playlists.find(
-    (p) =>
-      "playlistId" in runStatus && p.id === runStatus.playlistId,
+    (p) => "playlistId" in runStatus && p.id === runStatus.playlistId,
   );
   const name = playlist?.name ?? "playlist";
 
@@ -235,13 +228,19 @@ function RunStatusBanner({ host }: { host: string }) {
     const step = playlist?.steps[runStatus.stepIndex];
     return (
       <div className="mb-3 flex items-center gap-2 rounded-md border border-[var(--color-accent)] bg-[var(--color-surface)] p-2 text-xs">
-        <Loader2 size={14} className="animate-spin text-[var(--color-accent)]" />
+        <Loader2
+          size={14}
+          className="animate-spin text-[var(--color-accent)]"
+        />
         <span className="font-medium">{name}</span>
         <ConsoleChip addr={runStatus.host} />
         <span className="text-[var(--color-muted)]">
           {tr(
             "playlist_status_running",
-            { index: runStatus.stepIndex + 1, total: playlist?.steps.length ?? 0 },
+            {
+              index: runStatus.stepIndex + 1,
+              total: playlist?.steps.length ?? 0,
+            },
             "Sending step {index} of {total}",
           )}
           {step ? `: ${basename(step.path)}` : ""}
@@ -410,8 +409,7 @@ function PlaylistCard({
     addStep(playlist.id, { path: picked, sleepMs: 0 });
   };
 
-  const canRun =
-    playlist.steps.length > 0 && !!host?.trim() && !anyRunning;
+  const canRun = playlist.steps.length > 0 && !!host?.trim() && !anyRunning;
 
   return (
     <article className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
@@ -515,11 +513,15 @@ function PlaylistCard({
                     "Set a PS5 IP at the top of the screen first",
                   )
                 : playlist.steps.length === 0
-                  ? tr("playlist_need_steps", undefined, "Add at least one step")
+                  ? tr(
+                      "playlist_need_steps",
+                      undefined,
+                      "Add at least one step",
+                    )
                   : tr(
                       "playlist_run_tooltip",
                       { name: playlist.name },
-                      "Run \"{name}\"",
+                      'Run "{name}"',
                     )
             }
           >
@@ -543,29 +545,18 @@ function PlaylistCard({
       </header>
 
       {confirmingDelete && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--overlay-scrim)] p-4"
-          onClick={() => setConfirmingDelete(false)}
-        >
-          <div
-            className="w-full max-w-md rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-5"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 className="mb-2 text-sm font-semibold">
-              {tr(
-                "playlist_delete_title",
-                { name: playlist.name },
-                "Delete \"{name}\"?",
-              )}
-            </h3>
-            <p className="mb-4 text-xs text-[var(--color-muted)]">
-              {tr(
-                "playlist_delete_body",
-                undefined,
-                "This removes the playlist and all its steps. The payload files on disk are not touched.",
-              )}
-            </p>
-            <div className="flex items-center justify-end gap-2">
+        <Modal
+          open
+          onClose={() => setConfirmingDelete(false)}
+          role="alertdialog"
+          size="md"
+          title={tr(
+            "playlist_delete_title",
+            { name: playlist.name },
+            'Delete "{name}"?',
+          )}
+          footer={
+            <>
               <Button
                 variant="ghost"
                 size="sm"
@@ -583,9 +574,17 @@ function PlaylistCard({
               >
                 {tr("delete", undefined, "Delete")}
               </Button>
-            </div>
-          </div>
-        </div>
+            </>
+          }
+        >
+          <p className="p-5 text-xs text-[var(--color-muted)]">
+            {tr(
+              "playlist_delete_body",
+              undefined,
+              "This removes the playlist and all its steps. The payload files on disk are not touched.",
+            )}
+          </p>
+        </Modal>
       )}
 
       {playlist.steps.length === 0 ? (
@@ -626,101 +625,102 @@ function PlaylistCard({
               {/* Per-step ip/port/sleep overrides + reorder/remove. Wraps on
                   narrow viewports; single trailing row on sm+. */}
               <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap sm:justify-end">
-              {/* Per-step IP override. Empty = use the playlist-wide
+                {/* Per-step IP override. Empty = use the playlist-wide
                   IP entered above. Useful for sequences targeting
                   multiple PS5s (push a loader to dev kit, push
                   harness to test kit). */}
-              <label className="flex shrink-0 items-center gap-1 text-xs text-[var(--color-muted)]">
-                {tr("playlist_step_ip", undefined, "ip")}
-                <input
-                  type="text"
-                  value={step.ip ?? ""}
-                  placeholder={tr(
-                    "playlist_step_ip_placeholder",
-                    undefined,
-                    "default",
-                  )}
-                  onChange={(e) =>
-                    updateStep(playlist.id, i, {
-                      ip: e.target.value.trim(),
-                    })
-                  }
-                  disabled={anyRunning}
-                  className="w-28 rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-1 py-0.5 text-xs"
-                />
-              </label>
-              {/* Per-step port override. Empty / 0 = use the
+                <label className="flex shrink-0 items-center gap-1 text-xs text-[var(--color-muted)]">
+                  {tr("playlist_step_ip", undefined, "ip")}
+                  <input
+                    type="text"
+                    value={step.ip ?? ""}
+                    placeholder={tr(
+                      "playlist_step_ip_placeholder",
+                      undefined,
+                      "default",
+                    )}
+                    onChange={(e) =>
+                      updateStep(playlist.id, i, {
+                        ip: e.target.value.trim(),
+                      })
+                    }
+                    disabled={anyRunning}
+                    className="w-28 rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-1 py-0.5 text-xs"
+                  />
+                </label>
+                {/* Per-step port override. Empty / 0 = use the
                   playlist-wide port (default 9021). */}
-              <label className="flex shrink-0 items-center gap-1 text-xs text-[var(--color-muted)]">
-                {tr("playlist_step_port", undefined, "port")}
-                <input
-                  type="number"
-                  min={0}
-                  max={65535}
-                  step={1}
-                  value={step.port ?? ""}
-                  placeholder={tr(
-                    "playlist_step_port_placeholder",
-                    undefined,
-                    "default",
-                  )}
-                  onChange={(e) => {
-                    const raw = e.target.value.trim();
-                    const n = raw === "" ? 0 : Math.max(0, Math.floor(Number(raw)));
-                    updateStep(playlist.id, i, {
-                      port: Number.isFinite(n) && n > 0 ? n : undefined,
-                    });
-                  }}
-                  disabled={anyRunning}
-                  className="w-16 rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-1 py-0.5 text-right text-xs tabular-nums"
-                />
-              </label>
-              <label className="flex shrink-0 items-center gap-1 text-xs text-[var(--color-muted)]">
-                {tr("playlist_step_sleep", undefined, "sleep")}
-                <input
-                  type="number"
-                  min={0}
-                  step={100}
-                  value={step.sleepMs}
-                  onChange={(e) =>
-                    updateStep(playlist.id, i, {
-                      sleepMs: sanitiseSleepMs(e.target.value),
-                    })
-                  }
-                  disabled={anyRunning}
-                  className="w-16 rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-1 py-0.5 text-right text-xs tabular-nums"
-                />
-                <span>ms</span>
-              </label>
-              <div className="flex shrink-0 items-center gap-0.5">
-                <button
-                  type="button"
-                  onClick={() => moveStepUp(playlist.id, i)}
-                  disabled={anyRunning || i === 0}
-                  className="rounded p-1 text-[var(--color-muted)] hover:bg-[var(--color-surface-3)] disabled:opacity-30"
-                  title={tr("playlist_step_up", undefined, "Move up")}
-                >
-                  <ArrowUp size={12} />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => moveStepDown(playlist.id, i)}
-                  disabled={anyRunning || i === playlist.steps.length - 1}
-                  className="rounded p-1 text-[var(--color-muted)] hover:bg-[var(--color-surface-3)] disabled:opacity-30"
-                  title={tr("playlist_step_down", undefined, "Move down")}
-                >
-                  <ArrowDown size={12} />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => removeStep(playlist.id, i)}
-                  disabled={anyRunning}
-                  className="rounded p-1 text-[var(--color-muted)] hover:bg-[var(--color-bad)] hover:text-[var(--color-accent-contrast)] disabled:opacity-30"
-                  title={tr("playlist_step_remove", undefined, "Remove step")}
-                >
-                  <X size={12} />
-                </button>
-              </div>
+                <label className="flex shrink-0 items-center gap-1 text-xs text-[var(--color-muted)]">
+                  {tr("playlist_step_port", undefined, "port")}
+                  <input
+                    type="number"
+                    min={0}
+                    max={65535}
+                    step={1}
+                    value={step.port ?? ""}
+                    placeholder={tr(
+                      "playlist_step_port_placeholder",
+                      undefined,
+                      "default",
+                    )}
+                    onChange={(e) => {
+                      const raw = e.target.value.trim();
+                      const n =
+                        raw === "" ? 0 : Math.max(0, Math.floor(Number(raw)));
+                      updateStep(playlist.id, i, {
+                        port: Number.isFinite(n) && n > 0 ? n : undefined,
+                      });
+                    }}
+                    disabled={anyRunning}
+                    className="w-16 rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-1 py-0.5 text-right text-xs tabular-nums"
+                  />
+                </label>
+                <label className="flex shrink-0 items-center gap-1 text-xs text-[var(--color-muted)]">
+                  {tr("playlist_step_sleep", undefined, "sleep")}
+                  <input
+                    type="number"
+                    min={0}
+                    step={100}
+                    value={step.sleepMs}
+                    onChange={(e) =>
+                      updateStep(playlist.id, i, {
+                        sleepMs: sanitiseSleepMs(e.target.value),
+                      })
+                    }
+                    disabled={anyRunning}
+                    className="w-16 rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-1 py-0.5 text-right text-xs tabular-nums"
+                  />
+                  <span>ms</span>
+                </label>
+                <div className="flex shrink-0 items-center gap-0.5">
+                  <button
+                    type="button"
+                    onClick={() => moveStepUp(playlist.id, i)}
+                    disabled={anyRunning || i === 0}
+                    className="rounded p-1 text-[var(--color-muted)] hover:bg-[var(--color-surface-3)] disabled:opacity-30"
+                    title={tr("playlist_step_up", undefined, "Move up")}
+                  >
+                    <ArrowUp size={12} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => moveStepDown(playlist.id, i)}
+                    disabled={anyRunning || i === playlist.steps.length - 1}
+                    className="rounded p-1 text-[var(--color-muted)] hover:bg-[var(--color-surface-3)] disabled:opacity-30"
+                    title={tr("playlist_step_down", undefined, "Move down")}
+                  >
+                    <ArrowDown size={12} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => removeStep(playlist.id, i)}
+                    disabled={anyRunning}
+                    className="rounded p-1 text-[var(--color-muted)] hover:bg-[var(--color-bad)] hover:text-[var(--color-accent-contrast)] disabled:opacity-30"
+                    title={tr("playlist_step_remove", undefined, "Remove step")}
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
               </div>
             </li>
           ))}
@@ -763,10 +763,15 @@ function StepStatusIcon({
   }
   if (index === activeIndex) {
     return (
-      <Loader2 size={14} className="shrink-0 animate-spin text-[var(--color-accent)]" />
+      <Loader2
+        size={14}
+        className="shrink-0 animate-spin text-[var(--color-accent)]"
+      />
     );
   }
-  return <CircleDashed size={14} className="shrink-0 text-[var(--color-muted)]" />;
+  return (
+    <CircleDashed size={14} className="shrink-0 text-[var(--color-muted)]" />
+  );
 }
 
 function basename(path: string): string {

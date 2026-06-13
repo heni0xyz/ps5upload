@@ -618,13 +618,32 @@ function SchedulesPanel() {
               />
               <span className="font-medium">{s.label}</span>
               <span className="text-[var(--color-muted)]">
-                {s.kind === "daily" && `daily at ${s.hhmm}`}
-                {s.kind === "weekly" && `weekly at ${s.hhmm}`}
+                {s.kind === "daily" &&
+                  tr(
+                    "schedule_daily_at",
+                    { time: s.hhmm ?? "" },
+                    `daily at ${s.hhmm ?? ""}`,
+                  )}
+                {s.kind === "weekly" &&
+                  tr(
+                    "schedule_weekly_at",
+                    { time: s.hhmm ?? "" },
+                    `weekly at ${s.hhmm ?? ""}`,
+                  )}
                 {s.kind === "once" &&
                   s.oneShotMs &&
-                  `once at ${new Date(s.oneShotMs).toLocaleString()}`}
+                  tr(
+                    "schedule_once_at",
+                    { time: new Date(s.oneShotMs).toLocaleString() },
+                    `once at ${new Date(s.oneShotMs).toLocaleString()}`,
+                  )}
                 {" · "}
-                {s.action}
+                {/* Friendly action name — reuse the same labels as the
+                    add-dropdown below, instead of the raw store id
+                    (notif / power_tick) that meant nothing to the user. */}
+                {s.action === "power_tick"
+                  ? tr("settings_ps5_power_tick", "PS5 power tick")
+                  : tr("settings_notify_only", "Notify only")}
                 {s.action === "power_tick" && s.host && ` → ${s.host}`}
               </span>
               <button

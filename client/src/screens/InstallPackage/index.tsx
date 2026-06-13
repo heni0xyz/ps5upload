@@ -29,6 +29,7 @@ import {
   ConsoleChip,
   GameIcon,
   OverflowMenu,
+  PlatformBadge,
   type OverflowMenuItem,
 } from "../../components";
 import { openInFileSystem } from "../../state/fsNavigation";
@@ -121,23 +122,7 @@ function PkgRow({
             {/* PS4 / PS5 platform badge — derived from the header magic
                 (\x7FFIH = PS5) and the title-id prefix (CUSA = PS4, PPSA =
                 PS5). Helps users tell at a glance which console a pkg targets. */}
-            {(entry.platform === "ps4" || entry.platform === "ps5") && (
-              <span
-                className="inline-flex shrink-0 items-center rounded-full border px-1.5 py-0.5 text-xs font-bold uppercase tracking-wide"
-                style={{
-                  borderColor:
-                    entry.platform === "ps5"
-                      ? "var(--color-ps5)"
-                      : "var(--color-ps4)",
-                  color:
-                    entry.platform === "ps5"
-                      ? "var(--color-ps5)"
-                      : "var(--color-ps4)",
-                }}
-              >
-                {entry.platform === "ps5" ? "PS5" : "PS4"}
-              </span>
-            )}
+            <PlatformBadge platform={entry.platform} />
             {installed && !busy && (
               <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-[var(--color-good)] bg-[var(--color-good-soft)] px-1.5 py-0.5 text-xs font-medium uppercase tracking-wide text-[var(--color-good)]">
                 {tr("pkglib.badge.installed", "installed")}
@@ -760,20 +745,6 @@ export default function InstallPackageScreen() {
       )}
       {dialog}
     </div>
-  );
-}
-
-/** PS4/PS5 platform badge — shared by library rows and external-package rows. */
-function PlatformBadge({ platform }: { platform?: string }) {
-  if (platform !== "ps4" && platform !== "ps5") return null;
-  const c = platform === "ps5" ? "var(--color-ps5)" : "var(--color-ps4)";
-  return (
-    <span
-      className="inline-flex shrink-0 items-center rounded-full border px-1.5 py-0.5 text-xs font-bold uppercase tracking-wide"
-      style={{ borderColor: c, color: c }}
-    >
-      {platform === "ps5" ? "PS5" : "PS4"}
-    </span>
   );
 }
 

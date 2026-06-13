@@ -22,6 +22,8 @@ export type {
 } from "./ConfirmDialog";
 export { OverflowMenu, type OverflowMenuItem } from "./OverflowMenu";
 export { GameIcon } from "./GameIcon";
+export { PlatformBadge } from "./PlatformBadge";
+export { Modal } from "./Modal";
 export { ConsoleChip } from "./ConsoleChip";
 export { RootErrorBoundary } from "./ErrorBoundary";
 export { ProgressBar } from "./ProgressBar";

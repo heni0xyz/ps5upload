@@ -32,6 +32,7 @@ import {
   Button,
   ConnectionGate,
   Skeleton,
+  PlatformBadge,
 } from "../../components";
 // Direct import to avoid the barrel's circular-dep warning at build.
 import { useConfirm } from "../../components/ConfirmDialog";
@@ -77,24 +78,6 @@ function kindOf(t: InstalledTitle): Kind {
   }
   // origin "pkg": installed via Sony's installer from a .pkg, no path.
   return "installed";
-}
-
-function PlatformBadge({ title }: { title: InstalledTitle }) {
-  const tr = useTr();
-  const p = platformOf(title);
-  if (p === "ps4")
-    return (
-      <span className="shrink-0 whitespace-nowrap rounded bg-[var(--color-ps4-soft)] px-1.5 py-0.5 text-xs font-semibold text-[var(--color-ps4)]">
-        {tr("installed_badge_ps4", undefined, "PS4")}
-      </span>
-    );
-  if (p === "ps5")
-    return (
-      <span className="shrink-0 whitespace-nowrap rounded bg-[var(--color-ps5-soft)] px-1.5 py-0.5 text-xs font-semibold text-[var(--color-ps5)]">
-        {tr("installed_badge_ps5", undefined, "PS5")}
-      </span>
-    );
-  return null;
 }
 
 function KindBadge({ title }: { title: InstalledTitle }) {
@@ -188,7 +171,7 @@ function AppCard({
       <div className="relative">
         <Cover host={host} title={title} />
         <div className="absolute left-2 top-2 drop-shadow">
-          <PlatformBadge title={title} />
+          <PlatformBadge platform={platformOf(title)} />
         </div>
         {discNeedsSmp ? (
           <span

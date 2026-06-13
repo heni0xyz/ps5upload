@@ -1,13 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import {
-  Cable,
-  ChevronDown,
-  Plus,
-  Trash2,
-  Pencil,
-  Check,
-  X,
-} from "lucide-react";
+import { Cable, ChevronDown, Plus, Trash2, Pencil, Check } from "lucide-react";
 import {
   useRosterStore,
   useActiveProfile,
@@ -19,6 +11,7 @@ import { useTr } from "../state/lang";
 // as a circular dep warning at build time. Direct path keeps the
 // chunk graph clean.
 import { useConfirm } from "../components/ConfirmDialog";
+import { Modal } from "../components/Modal";
 import { parsePS5Firmware } from "../lib/ps5Firmware";
 
 /**
@@ -195,34 +188,17 @@ function RosterManageModal({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--overlay-scrim)] p-4"
-      // Only a direct click on THIS scrim closes the picker. Without the
-      // target guard, a click on the nested delete-confirmation backdrop
-      // bubbles up here and dismisses the whole "Manage PS5s" modal too.
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
+    <>
+      {/* Nested delete-confirmation renders its own top-level scrim, so it
+          sits outside the Modal panel and isn't dismissed by it. */}
       {confirmDialogNode}
-      <div
-        className="w-full max-w-xl overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)]"
-        onClick={(e) => e.stopPropagation()}
+      <Modal
+        open
+        onClose={onClose}
+        title={tr("roster_manage_title", undefined, "Manage PS5s")}
+        size="lg"
       >
-        <header className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-3">
-          <h2 className="text-sm font-semibold">
-            {tr("roster_manage_title", undefined, "Manage PS5s")}
-          </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label={tr("close", undefined, "Close")}
-            className="text-[var(--color-muted)] hover:text-[var(--color-text)]"
-          >
-            <X size={14} />
-          </button>
-        </header>
-        <div className="max-h-[70vh] overflow-y-auto p-4 text-sm">
+        <div className="p-4 text-sm">
           {profiles.length === 0 && (
             <p className="mb-3 text-xs text-[var(--color-muted)]">
               {tr(
@@ -390,7 +366,7 @@ function RosterManageModal({ onClose }: { onClose: () => void }) {
             </div>
           </div>
         </div>
-      </div>
-    </div>
+      </Modal>
+    </>
   );
 }
