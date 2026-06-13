@@ -229,8 +229,9 @@ function PkgRow({
             <span>{tr("pkglib.uploading", "Uploading to PS5…")}</span>
             <span className="tabular-nums">
               {formatBytes(entry.bytes ?? 0)}
-              {entry.totalBytes ? ` / ${formatBytes(entry.totalBytes)}` : ""} ·{" "}
-              {pct}%
+              {entry.totalBytes
+                ? ` / ${formatBytes(entry.totalBytes)}`
+                : ""} · {pct}%
             </span>
           </div>
         </div>
@@ -278,7 +279,10 @@ export default function InstallPackageScreen() {
   const refresh = usePkgLibrary(host, (s) => s.refresh);
   const addAndUpload = usePkgLibrary(host, (s) => s.addAndUpload);
   const install = usePkgLibrary(host, (s) => s.install);
-  const cancelPendingInstall = usePkgLibrary(host, (s) => s.cancelPendingInstall);
+  const cancelPendingInstall = usePkgLibrary(
+    host,
+    (s) => s.cancelPendingInstall,
+  );
   const remove = usePkgLibrary(host, (s) => s.remove);
   const clearFinished = usePkgLibrary(host, (s) => s.clearFinished);
   const clearAll = usePkgLibrary(host, (s) => s.clearAll);
@@ -389,7 +393,10 @@ export default function InstallPackageScreen() {
     setPickError(null);
     if (!hostReady) {
       setPickError(
-        tr("install.error.noHost", "Set a PS5 host on the Connection tab first."),
+        tr(
+          "install.error.noHost",
+          "Set a PS5 host on the Connection tab first.",
+        ),
       );
       return;
     }
@@ -473,11 +480,7 @@ export default function InstallPackageScreen() {
     // than a blank "Delete ?" dialog.
     const name = entry.title || entry.contentId || entry.name;
     const ok = await confirm({
-      title: tr(
-        "pkglib.delete.confirmTitle",
-        { name },
-        `Delete ${name}?`,
-      ),
+      title: tr("pkglib.delete.confirmTitle", { name }, `Delete ${name}?`),
       message: tr(
         "pkglib.delete.confirmBody",
         { size: formatBytes(entry.size) },
@@ -624,7 +627,10 @@ export default function InstallPackageScreen() {
       )}
       {error && (
         <div className="mb-4">
-          <WarningCard title={tr("pkglib.error", "Something went wrong")} detail={error} />
+          <WarningCard
+            title={tr("pkglib.error", "Something went wrong")}
+            detail={error}
+          />
         </div>
       )}
 
@@ -642,7 +648,11 @@ export default function InstallPackageScreen() {
               "screen may go black" notice) cancelling would tear the payload
               out mid-swap, so the button is hidden then. */}
           {installPending && (
-            <Button variant="secondary" size="sm" onClick={cancelPendingInstall}>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={cancelPendingInstall}
+            >
               {tr("cancel", undefined, "Cancel")}
             </Button>
           )}
@@ -724,7 +734,11 @@ export default function InstallPackageScreen() {
                         { n: entries.length },
                         `This permanently deletes all ${entries.length} staged .pkg file(s) from the PS5. Installed games are not affected.`,
                       ),
-                      confirmLabel: tr("pkglib.clearAll", undefined, "Clear all"),
+                      confirmLabel: tr(
+                        "pkglib.clearAll",
+                        undefined,
+                        "Clear all",
+                      ),
                       destructive: true,
                     });
                     if (ok) void clearAll(host);
@@ -871,10 +885,7 @@ function ExternalPackages({ host }: { host: string }) {
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <PlatformBadge platform={p.platform} />
-                  <span
-                    className="truncate text-sm font-medium"
-                    title={p.path}
-                  >
+                  <span className="truncate text-sm font-medium" title={p.path}>
                     {p.titleId || p.name}
                   </span>
                 </div>
@@ -882,27 +893,44 @@ function ExternalPackages({ host }: { host: string }) {
                   {p.drive}
                   <span className="px-1 opacity-60">·</span>
                   <span className="tabular-nums">{formatBytes(p.size)}</span>
-                  {r && (
-                    <>
-                      <span className="px-1 opacity-60">·</span>
-                      <span
-                        style={{
-                          color: r.ok
-                            ? r.mayNotLaunch
-                              ? "var(--color-warn)"
-                              : "var(--color-good)"
-                            : "var(--color-bad)",
-                        }}
-                      >
-                        {r.ok
-                          ? r.mayNotLaunch
-                            ? tr("pkglib.external.installedWarn", "installed (may not launch)")
-                            : tr("pkglib.external.installed", "installed")
-                          : r.message || tr("pkglib.external.failed", "install failed")}
-                      </span>
-                    </>
-                  )}
                 </div>
+                {/* Install result on its own line with an icon — the
+                    "may not launch" FW-12 warning was previously the least
+                    visible thing on the row, tucked into the grey metadata
+                    text. Mirrors the library rows' result treatment. */}
+                {r && (
+                  <div
+                    className="mt-1 flex items-center gap-1.5 text-xs font-medium"
+                    style={{
+                      color: r.ok
+                        ? r.mayNotLaunch
+                          ? "var(--color-warn)"
+                          : "var(--color-good)"
+                        : "var(--color-bad)",
+                    }}
+                  >
+                    {r.ok ? (
+                      r.mayNotLaunch ? (
+                        <AlertTriangle size={13} className="shrink-0" />
+                      ) : (
+                        <CheckCircle2 size={13} className="shrink-0" />
+                      )
+                    ) : (
+                      <XCircle size={13} className="shrink-0" />
+                    )}
+                    <span className="min-w-0">
+                      {r.ok
+                        ? r.mayNotLaunch
+                          ? tr(
+                              "pkglib.external.installedWarn",
+                              "installed (may not launch)",
+                            )
+                          : tr("pkglib.external.installed", "installed")
+                        : r.message ||
+                          tr("pkglib.external.failed", "install failed")}
+                    </span>
+                  </div>
+                )}
               </div>
               <Button
                 variant="primary"

@@ -178,7 +178,9 @@ export default function SettingsScreen() {
           <ThemePicker />
         </Section>
 
-        <Section title={tr("settings_section_text_size", undefined, "Text size")}>
+        <Section
+          title={tr("settings_section_text_size", undefined, "Text size")}
+        >
           <TextSizePicker />
         </Section>
 
@@ -526,10 +528,10 @@ export default function SettingsScreen() {
           {tr("settings_section_diagnostic", undefined, "Diagnostics")}
         </GroupHeading>
 
-        <Section
-          title={tr("settings_section_diagnostic", undefined, "Diagnostics")}
-          full
-        >
+        {/* The band heading already says "Diagnostics"; the single card
+            inside it gets its own specific title so the screen doesn't
+            stack the same word twice. */}
+        <Section title={tr("bug_report", undefined, "Bug report")} full>
           <BugReportLink />
         </Section>
 
@@ -791,7 +793,11 @@ function BackupRestorePanel() {
         filters: [{ name: "JSON", extensions: ["json"] }],
       });
       if (!dest || typeof dest !== "string") return;
-      await writeTextFileToPath(dest, JSON.stringify(bundle, null, 2), fileName);
+      await writeTextFileToPath(
+        dest,
+        JSON.stringify(bundle, null, 2),
+        fileName,
+      );
       setInfo(`Saved to ${dest}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
