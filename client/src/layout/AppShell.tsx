@@ -160,6 +160,20 @@ function useStatusPolling() {
       return;
     }
     let cancelled = false;
+    // Prune per-host bookkeeping for consoles that left the roster, so these
+    // refs don't accumulate dead keys across a long session of adding/removing
+    // PS5s. Keyed the same way as the refs (hostOf-normalized).
+    const liveKeys = new Set(hosts.map((h) => hostOf(h) || "_"));
+    for (const ref of [
+      autoLoaderFiredAtRef,
+      missCountRef,
+      warnedMismatchRef,
+      warnedNoUcredRef,
+    ]) {
+      for (const k of Object.keys(ref.current)) {
+        if (!liveKeys.has(k)) delete ref.current[k];
+      }
+    }
     const isActive = (key: string) =>
       key === (hostOf(useConnectionStore.getState().host) || "_");
     const probeOne = async (probedHost: string) => {

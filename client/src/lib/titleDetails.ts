@@ -251,9 +251,39 @@ function stripTitleIdPrefix(raw: string): string | undefined {
   return m ? m[1] : noSuffix;
 }
 
+/** In-flight fetches keyed by title id, so concurrent identical lookups
+ *  (e.g. a queue or process list with the same game on several rows, on a
+ *  cold cache) share ONE network round-trip instead of each scraping. The
+ *  shared fetch runs to completion (no single caller's abort cancels it) +
+ *  caches; each caller's own abort is honored at the await bridge below. */
+const inFlightTitleFetches = new Map<string, Promise<TitleInfo | null>>();
+
+/** The actual scrape — no signal, so it runs to completion and populates
+ *  the cache even if every caller has since aborted (the result is then
+ *  free for the next opener). */
+async function scrapeTitleInfo(
+  trimmed: string,
+  source: MetaSource,
+): Promise<TitleInfo | null> {
+  try {
+    const html = await titleMetaFetchText(source.url);
+    const parsed = parsePatchesHtml(html, source.coverHostRe);
+    writeTitleCache(trimmed, parsed);
+    return parsed;
+  } catch (e) {
+    // Cache only *definitive* misses — a real HTTP 404 means the title
+    // genuinely isn't there; transient errors (DNS/TLS hiccup, allowlist
+    // violation) must NOT poison the 7-day cache.
+    const msg = e instanceof Error ? e.message : String(e);
+    if (/title-meta http 404/i.test(msg)) writeTitleCache(trimmed, null);
+    return null;
+  }
+}
+
 /** Fetch title metadata for a title id. Hits the cache first, then
  *  scrapes the platform-appropriate upstream. Returns null on miss
- *  (and the result is cached so subsequent calls don't re-fetch). */
+ *  (and the result is cached so subsequent calls don't re-fetch).
+ *  Concurrent identical lookups are coalesced into one fetch. */
 export async function fetchTitleInfo(
   titleId: string,
   signal?: AbortSignal,
@@ -272,27 +302,34 @@ export async function fetchTitleInfo(
   const cached = readTitleCache(trimmed);
   if (cached !== undefined) return cached;
 
-  try {
-    const html = await titleMetaFetchText(source.url, signal);
-    const parsed = parsePatchesHtml(html, source.coverHostRe);
-    writeTitleCache(trimmed, parsed);
-    return parsed;
-  } catch (e) {
-    if (e instanceof DOMException && e.name === "AbortError") return null;
-    // Cache only *definitive* misses — a real HTTP 404 from the
-    // upstream means the title genuinely isn't there, and the next
-    // 7 days of opens shouldn't re-hit the network. Transient
-    // errors (DNS hiccup, TLS handshake fail, body-too-large from
-    // a hostile redirect, allowlist violation, etc.) should NOT
-    // poison the cache: a single network blip when the user opens
-    // Game Details should not silently hide the cover for a week.
-    const msg = e instanceof Error ? e.message : String(e);
-    const definitive404 = /title-meta http 404/i.test(msg);
-    if (definitive404) {
-      writeTitleCache(trimmed, null);
-    }
-    return null;
+  // Coalesce: reuse an in-flight fetch for this id, or start one.
+  let shared = inFlightTitleFetches.get(trimmed);
+  if (!shared) {
+    shared = scrapeTitleInfo(trimmed, source).finally(() =>
+      inFlightTitleFetches.delete(trimmed),
+    );
+    inFlightTitleFetches.set(trimmed, shared);
   }
+
+  // No caller signal → just await the shared fetch.
+  if (!signal) return shared;
+  // Honor THIS caller's abort without cancelling the shared fetch (which
+  // other callers may still want, and which we want to finish + cache).
+  if (signal.aborted) return null;
+  return new Promise<TitleInfo | null>((resolve) => {
+    const onAbort = () => resolve(null);
+    signal.addEventListener("abort", onAbort, { once: true });
+    void shared.then(
+      (r) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(r);
+      },
+      () => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(null);
+      },
+    );
+  });
 }
 
 /** Build the URL the user can click through to view the full title

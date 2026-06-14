@@ -224,13 +224,25 @@ export function PlaylistsPanel({ host, port }: { host: string; port: number }) {
             leftIcon={<FilePlus size={12} />}
             onClick={handleFromFiles}
             disabled={isBusy}
-            title={tr(
-              "playlist_from_files_title",
-              undefined,
-              "Pick one or more payloads to make a playlist",
-            )}
+            title={
+              isAndroid()
+                ? tr(
+                    "playlist_from_file_title_android",
+                    undefined,
+                    "Pick a payload to start a playlist (add more with Add step)",
+                  )
+                : tr(
+                    "playlist_from_files_title",
+                    undefined,
+                    "Pick one or more payloads to make a playlist",
+                  )
+            }
           >
-            {tr("playlist_from_files", undefined, "From files…")}
+            {/* Android's picker is single-select, so 'From files…' (which
+                implies bulk) would over-promise — label it honestly there. */}
+            {isAndroid()
+              ? tr("playlist_from_file_android", undefined, "From a file…")
+              : tr("playlist_from_files", undefined, "From files…")}
           </Button>
           <Button
             variant="primary"

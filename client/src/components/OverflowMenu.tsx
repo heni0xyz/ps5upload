@@ -83,17 +83,20 @@ export function OverflowMenu({
   // on every page (Library can render hundreds of rows).
   useEffect(() => {
     if (!open) return;
-    function handlePointer(e: MouseEvent) {
+    function handlePointer(e: Event) {
       if (!wrapperRef.current) return;
       if (!wrapperRef.current.contains(e.target as Node)) setOpen(false);
     }
     function handleKey(e: KeyboardEvent) {
       if (e.key === "Escape") setOpen(false);
     }
-    document.addEventListener("mousedown", handlePointer);
+    // pointerdown (not mousedown) so touch taps outside dismiss the menu
+    // crisply on Android/touch — mousedown is only synthesized after the
+    // touch sequence, leaving the popover open a beat too long.
+    document.addEventListener("pointerdown", handlePointer);
     document.addEventListener("keydown", handleKey);
     return () => {
-      document.removeEventListener("mousedown", handlePointer);
+      document.removeEventListener("pointerdown", handlePointer);
       document.removeEventListener("keydown", handleKey);
     };
   }, [open]);
