@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
 import {
   LibraryBig,
@@ -274,6 +282,10 @@ export default function LibraryScreen() {
   // Kept transient — closing + reopening the screen clears the
   // query, so a stale filter doesn't surprise the user later.
   const [query, setQuery] = useState("");
+  // The input reflects `query` immediately (responsive typing); the expensive
+  // filter+sort below runs against the DEFERRED value, so a fast typist isn't
+  // blocked by re-filtering a few-hundred-entry library on every keystroke.
+  const deferredQuery = useDeferredValue(query);
 
   // Render cap (see CappedRows): big libraries (200+ entries) used to
   // mount every LibraryRow at once — hundreds of components each with a
@@ -344,14 +356,14 @@ export default function LibraryScreen() {
   }
 
   const split = useMemo(() => {
-    const filtered = filterLibraryEntries(entries ?? [], query);
+    const filtered = filterLibraryEntries(entries ?? [], deferredQuery);
     const games = applySort(filtered.filter((e) => e.kind === "game"));
     const images = applySort(filtered.filter((e) => e.kind === "image"));
     return { games, images, total: filtered.length };
     // applySort closes over sortKey — eslint-deps catches it via the
     // sortKey dep below, no need to memoize the function itself.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entries, query, sortKey]);
+  }, [entries, deferredQuery, sortKey]);
   const totalUnfiltered = entries?.length ?? 0;
   const querying = query.trim() !== "";
 
@@ -624,9 +636,13 @@ function CappedRows({
   const hiddenCount = entries.length - capped.length;
   return (
     <div className="grid gap-2">
-      {capped.map((e, i) => (
+      {capped.map((e) => (
         <LibraryRow
-          key={`${e.path}-${i}`}
+          // Stable key (path only, not index-suffixed): on a sort/filter/refresh
+          // a row that merely moved is RECONCILED in place instead of unmounted
+          // + remounted — which preserves its cached metadata state and stops
+          // the per-row fetchGameMeta from re-firing every refresh.
+          key={e.path}
           entry={e}
           host={host}
           mountMap={mountMap}
@@ -694,7 +710,7 @@ interface DownloadProgress {
   totalBytes: number;
 }
 
-function LibraryRow({
+function LibraryRowImpl({
   entry,
   host,
   mountMap,
@@ -2717,6 +2733,16 @@ function LibraryRow({
   );
 }
 
+/**
+ * Memoized row. The parent re-renders on every search keystroke and sort
+ * change; without this, all ~100-200 rows (each an <img> thumb + overflow
+ * menu + a dozen SVGs + several store subscriptions) re-rendered every time.
+ * Props are stable across those events — `entry` objects survive filtering by
+ * reference, `mountMap`/`volumes`/`onChanged` only change on a real refresh —
+ * so the default shallow compare lets unchanged rows skip the re-render.
+ */
+const LibraryRow = memo(LibraryRowImpl);
+
 /** Game details modal — local sce_sys/param.json fields plus best-
  *  effort PSN store metadata (cover art, description, genre,
  *  publisher, age rating). Pure client-side: PSN fetch via plain
@@ -3615,6 +3641,10 @@ function LibraryThumb({
         <img
           src={gameIconUrl(`${host}:${PS5_PAYLOAD_PORT}`, entry.path)}
           alt=""
+          // lazy: a big library's thumbnails are icon0.png fetched over HTTP
+          // from the single-client PS5 — loading them only as rows scroll into
+          // view avoids a request storm against that one port on screen entry.
+          loading="lazy"
           // `contain` so non-square cover art is shown whole rather than
           // centre-cropped (matches the InstalledApps grid). Square icons
           // still fill the square thumb edge-to-edge.
