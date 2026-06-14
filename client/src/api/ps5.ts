@@ -1595,6 +1595,52 @@ export async function powerShutdown(addr: string): Promise<PowerControlAck> {
   return invoke<PowerControlAck>("power_shutdown", { addr });
 }
 
+/** One row in the process manager. `kind` drives the UI's filter + kill
+ *  guard: "app" (user game/app), "payload" (user .elf homebrew), or
+ *  "system" (Sce* daemons + Sony NPXS apps — hidden by default, killing
+ *  them can crash the console). */
+export interface ProcessInfo {
+  pid: number;
+  /** Thread name (ki_tdname). */
+  name: string;
+  /** Command/executable name (ki_comm), e.g. "eboot.bin". */
+  comm: string;
+  /** Title id for app/game processes; empty otherwise. */
+  title_id: string;
+  app_id: number;
+  /** Resident set size in MiB. */
+  memory_mib: number;
+  threads: number;
+  kind: "app" | "payload" | "system";
+}
+
+export interface ProcessListResult {
+  processes: ProcessInfo[];
+  /** True when the payload truncated the list to fit its buffer. */
+  truncated: boolean;
+}
+
+export interface ProcessKillAck {
+  ok: boolean;
+  pid: number;
+  err?: string | null;
+}
+
+/** Enumerate running processes (detailed). `addr` is the mgmt addr
+ *  (ip:9114). Read-only. */
+export async function processList(addr: string): Promise<ProcessListResult> {
+  return invoke<ProcessListResult>("process_list_get", { addr });
+}
+
+/** SIGKILL a process by pid. The payload guards self/kernel/init; the
+ *  caller must confirm before killing a "system" process. */
+export async function processKill(
+  addr: string,
+  pid: number,
+): Promise<ProcessKillAck> {
+  return invoke<ProcessKillAck>("process_kill_pid", { addr, pid });
+}
+
 /** Enter rest mode (standby). May be unavailable on some firmware
  *  revisions where the symbol moved — ack carries `err:"standby_unavailable"`
  *  in that case. */

@@ -38,6 +38,7 @@ const PayloadsScreen = lazy(() => import("./screens/Payloads"));
 const NanoDnsScreen = lazy(() => import("./screens/NanoDns"));
 const FirstRunScreen = lazy(() => import("./screens/FirstRun"));
 const SavesScreen = lazy(() => import("./screens/Saves"));
+const ProcessesScreen = lazy(() => import("./screens/Processes"));
 const ScreenshotsScreen = lazy(() => import("./screens/Screenshots"));
 const StatsScreen = lazy(() => import("./screens/Stats"));
 const ShellScreen = lazy(() => import("./screens/Shell"));
@@ -192,6 +193,14 @@ export default function App() {
           element={
             <Suspense fallback={<ScreenLoader />}>
               <SavesScreen />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/processes"
+          element={
+            <Suspense fallback={<ScreenLoader />}>
+              <ProcessesScreen />
             </Suspense>
           }
         />

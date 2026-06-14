@@ -12,6 +12,7 @@ import {
   FolderTree,
   Cpu,
   CircleUserRound,
+  Gauge,
   Boxes,
   Globe,
   Save,
@@ -180,6 +181,12 @@ const items: NavItem[] = [
     fallback: "Hardware",
     icon: Cpu,
     section: { key: "nav_section_system", fallback: "System" },
+  },
+  {
+    to: "/processes",
+    key: "processes",
+    fallback: "Processes",
+    icon: Gauge,
   },
   {
     to: "/profile",
