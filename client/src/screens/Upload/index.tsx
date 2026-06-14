@@ -46,6 +46,7 @@ import {
   type UploadStrategy,
 } from "../../state/transfer";
 import { useConnectionStore, PS5_PAYLOAD_PORT } from "../../state/connection";
+import { log } from "../../state/logs";
 import { hostOf } from "../../lib/addr";
 import { pushNotification } from "../../state/notifications";
 import { useRosterStore } from "../../state/roster";
@@ -219,24 +220,40 @@ export default function UploadScreen() {
   }, [pickFile, pickFolder]);
 
   const handleChooseFile = async () => {
-    // Android: the native dialog returns content:// URIs the engine
-    // can't read, so browse the real filesystem in-app instead.
-    const selected = isAndroid()
-      ? await pickLocalPath({ mode: "file" })
-      : await openDialog({ directory: false, multiple: false });
-    if (typeof selected !== "string") return;
-    // .pkg is handled as a first-class "pkg" source by pickFile (it becomes a
-    // queue item that uploads → installs → cleans up). No special redirect.
-    await pickFile(selected);
+    try {
+      // Android: the native dialog returns content:// URIs the engine
+      // can't read, so browse the real filesystem in-app instead.
+      const selected = isAndroid()
+        ? await pickLocalPath({ mode: "file" })
+        : await openDialog({ directory: false, multiple: false });
+      if (typeof selected !== "string") return;
+      // .pkg is handled as a first-class "pkg" source by pickFile (it becomes a
+      // queue item that uploads → installs → cleans up). No special redirect.
+      await pickFile(selected);
+    } catch (e) {
+      // A picker/dialog throw would otherwise surface only as an uncategorized
+      // unhandled rejection — log which gesture failed for the bug bundle.
+      log.warn(
+        "upload",
+        `file picker failed: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
   };
 
   const handleChooseFolder = async () => {
-    // Android: directory:true is a no-op in plugin-dialog; use the
-    // in-app real-path browser so folder upload works.
-    const selected = isAndroid()
-      ? await pickLocalPath({ mode: "folder" })
-      : await openDialog({ directory: true, multiple: false });
-    if (typeof selected === "string") await pickFolder(selected);
+    try {
+      // Android: directory:true is a no-op in plugin-dialog; use the
+      // in-app real-path browser so folder upload works.
+      const selected = isAndroid()
+        ? await pickLocalPath({ mode: "folder" })
+        : await openDialog({ directory: true, multiple: false });
+      if (typeof selected === "string") await pickFolder(selected);
+    } catch (e) {
+      log.warn(
+        "upload",
+        `folder picker failed: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
   };
 
   const host = useConnectionStore((s) => s.host);

@@ -217,6 +217,18 @@ function useStatusPolling() {
                 `auto-loader: running "${auto.name}" on ${probedHost}`,
               );
               void pl.run(auto.id, probedHost, PS5_LOADER_PORT);
+            } else if (cfg.enabled) {
+              // Enabled but didn't fire — record WHY, so "the auto-loader
+              // didn't run" reports have a trace instead of silence.
+              const why = !auto
+                ? "no playlist selected"
+                : auto.steps.length === 0
+                  ? "playlist is empty"
+                  : "within cooldown window";
+              log.info(
+                "connection",
+                `auto-loader skipped on ${probedHost}: ${why}`,
+              );
             }
           }
         }
@@ -416,7 +428,16 @@ function usePkgAutoRoute() {
       const first = e.payload.paths?.[0];
       if (!first) return;
       if (!first.toLowerCase().endsWith(".pkg")) return;
-      if (location.pathname === "/install-package") return;
+      // Screens that own their own drag-drop opt out of the app-wide pkg
+      // auto-route, so a drop meant for them doesn't also yank the user to
+      // Install Package: /install-package itself, and /payloads (the playlist
+      // dropzone). Without this a mixed .elf+.pkg drop on Payloads both built
+      // a playlist AND navigated away.
+      if (
+        location.pathname === "/install-package" ||
+        location.pathname === "/payloads"
+      )
+        return;
       // Pass the picked path via navigation state — InstallPackage
       // can pick it up and pre-fill its source field.
       navigate("/install-package", { state: { droppedPath: first } });

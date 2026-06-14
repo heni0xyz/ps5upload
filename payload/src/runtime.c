@@ -14322,10 +14322,11 @@ static int handle_process_list(runtime_state_t *state, int client_fd,
 static int handle_process_kill(runtime_state_t *state, int client_fd,
                                uint64_t trace_id, const char *body) {
     int pid = (int)extract_json_uint64_field(body ? body : "", "pid");
-    int ok = (pid > 0 && proc_kill(pid) == 0);
-    char ack[96];
+    int rc = proc_kill(pid);
+    int err_no = errno; /* capture immediately — proc_kill set it on failure */
+    char ack[160];
     int n;
-    if (ok) {
+    if (rc == 0) {
         n = snprintf(ack, sizeof(ack), "{\"ok\":true,\"pid\":%d}", pid);
         if (state) {
             pthread_mutex_lock(&state->state_mtx);
@@ -14333,8 +14334,16 @@ static int handle_process_kill(runtime_state_t *state, int client_fd,
             pthread_mutex_unlock(&state->state_mtx);
         }
     } else {
+        /* Report the specific reason (ESRCH = already gone, EPERM = refused /
+         * guarded) so a bug report distinguishes "process vanished" from
+         * "kernel said no" instead of a bare kill_failed. strerror is bounded
+         * and JSON-safe (ASCII), but escape defensively anyway. */
+        char reason_esc[96];
+        json_escape_into(strerror(err_no), reason_esc, sizeof(reason_esc));
         n = snprintf(ack, sizeof(ack),
-                     "{\"ok\":false,\"pid\":%d,\"err\":\"kill_failed\"}", pid);
+                     "{\"ok\":false,\"pid\":%d,\"err\":\"kill_failed\","
+                     "\"errno\":%d,\"reason\":\"%s\"}",
+                     pid, err_no, reason_esc);
     }
     if (n <= 0 || n >= (int)sizeof(ack)) {
         const char *e = "{\"ok\":false,\"err\":\"format\"}";

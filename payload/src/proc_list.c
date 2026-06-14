@@ -25,6 +25,7 @@
 
 #include "proc_list.h"
 
+#include <errno.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -80,9 +81,14 @@ extern int sceKernelGetAppInfo(pid_t pid, app_info_t *info);
  * is Sony's reserved prefix for built-in system applications. */
 static const char *proc_kind(const char *comm, uint32_t app_id,
                              const char *title_id) {
-    if (app_id != 0) {
+    /* A user game/app needs BOTH an app_id AND a real title id. An app_id with
+     * an empty title id (some processes report app_id != 0 but no resolvable
+     * title) is treated as system, not "app": it can't be Restarted (no title
+     * to relaunch) and shouldn't be offered a one-tap kill without the system
+     * confirm. */
+    if (app_id != 0 && title_id && title_id[0]) {
         /* NPXS* = Sony system app → treat as system, not a user app. */
-        if (title_id && strncmp(title_id, "NPXS", 4) == 0) return "system";
+        if (strncmp(title_id, "NPXS", 4) == 0) return "system";
         return "app";
     }
     if (comm && comm[0]) {
@@ -313,9 +319,18 @@ int proc_list_get_json_ex(char *buf, size_t cap, size_t *written_out,
  * the confirmed request but still refuses to kill itself, the kernel/init
  * (pid 0/1), or a negative/process-group target. */
 int proc_kill(int pid) {
-    if (pid <= 1) return -1;        /* 0 = kernel idle, 1 = init, <0 = pgrp */
-    if (pid == (int)getpid()) return -1;  /* never kill the helper itself */
-    return kill(pid, SIGKILL) == 0 ? 0 : -1;
+    /* Set errno on guard trips too, so the caller (runtime.c) can report a
+     * meaningful reason for EVERY failure — guard, ESRCH (already gone), or
+     * EPERM (kernel refused) — instead of a bare "kill_failed". */
+    if (pid <= 1) {                 /* 0 = kernel idle, 1 = init, <0 = pgrp */
+        errno = EPERM;
+        return -1;
+    }
+    if (pid == (int)getpid()) {     /* never kill the helper itself */
+        errno = EPERM;
+        return -1;
+    }
+    return kill(pid, SIGKILL) == 0 ? 0 : -1;  /* errno set by kill() on failure */
 }
 
 int proc_name_by_pid(int pid, char *out, size_t cap) {

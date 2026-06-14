@@ -35,6 +35,7 @@ import {
 } from "../../lib/playlistOps";
 import { isAndroid } from "../../lib/platform";
 import { isTauriEnv, safeUnlisten } from "../../lib/tauriEnv";
+import { log } from "../../state/logs";
 
 /**
  * Playlist editor + runner panel for the SendPayload screen.
@@ -66,7 +67,17 @@ export function PlaylistsPanel({ host, port }: { host: string; port: number }) {
   // Returns the number of steps added (0 = nothing usable was supplied).
   const createFromPaths = useCallback((paths: string[]): number => {
     const payloads = paths.filter(isPayloadPath);
-    if (payloads.length === 0) return 0;
+    if (payloads.length === 0) {
+      // Leave a trace when a drop/pick produced nothing usable, so a user who
+      // dropped (say) a .pkg and saw "nothing happen" shows up in a bug report.
+      if (paths.length > 0) {
+        log.warn(
+          "playlist",
+          `drop/pick ignored — no payload files among ${paths.length} path(s)`,
+        );
+      }
+      return 0;
+    }
     const st = usePayloadPlaylistsStore.getState();
     const base =
       basename(payloads[0]).replace(/\.[^.]+$/, "") || "New playlist";
@@ -76,29 +87,60 @@ export function PlaylistsPanel({ host, port }: { host: string; port: number }) {
     while (existing.has(name)) name = `${base} ${n++}`;
     const id = st.createPlaylist(name);
     for (const p of payloads) st.addStep(id, { path: p, sleepMs: 0 });
+    log.info(
+      "playlist",
+      `created "${name}" with ${payloads.length} step(s) from drop/pick`,
+    );
     return payloads.length;
   }, []);
 
-  // Drag one or more payload files onto the panel to spin up a playlist in
+  // Drag one or more payload files onto the DROPZONE to spin up a playlist in
   // one gesture. Desktop only — Android has no webview drag-drop, so the
-  // "From files…" multi-picker below covers it there. .pkg and other
-  // non-payloads are filtered out by isPayloadPath in createFromPaths.
+  // "From files…" multi-picker below covers it there.
   const [dropActive, setDropActive] = useState(false);
+  // Tauri's drag-drop is a single window-global event with no element
+  // targeting, so we hit-test the drop position against the dropzone's rect.
+  // Without this, dropping a payload file ANYWHERE on the Payloads screen
+  // (sidebar, a card, the send form) would silently fabricate a playlist.
+  const dropZoneRef = useRef<HTMLDivElement | null>(null);
+  const dragHasPayloadRef = useRef(false);
   useEffect(() => {
     if (!isTauriEnv() || isAndroid()) return;
     let unlisten: (() => void) | null = null;
     let cancelled = false;
+    // Tauri reports drop position in PHYSICAL pixels; getBoundingClientRect is
+    // CSS pixels — divide by devicePixelRatio to compare in the same space.
+    const inZone = (pos: { x: number; y: number }): boolean => {
+      const zone = dropZoneRef.current;
+      if (!zone) return false;
+      const r = zone.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      const x = pos.x / dpr;
+      const y = pos.y / dpr;
+      return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+    };
     const p = getCurrentWebview().onDragDropEvent((e) => {
       if (cancelled) return;
-      // Only "enter" and "drop" carry paths ("over" doesn't). Light up on an
-      // enter that includes a payload file; build the playlist on drop.
       if (e.payload.type === "enter") {
-        if (e.payload.paths.some(isPayloadPath)) setDropActive(true);
+        dragHasPayloadRef.current = e.payload.paths.some(isPayloadPath);
+        setDropActive(
+          dragHasPayloadRef.current && inZone(e.payload.position),
+        );
+      } else if (e.payload.type === "over") {
+        // "over" has no paths; reuse the flag captured on enter. Highlight only
+        // while actually hovering the zone with a payload-bearing drag.
+        setDropActive(
+          dragHasPayloadRef.current && inZone(e.payload.position),
+        );
       } else if (e.payload.type === "leave") {
+        dragHasPayloadRef.current = false;
         setDropActive(false);
       } else if (e.payload.type === "drop") {
         setDropActive(false);
-        createFromPaths(e.payload.paths);
+        dragHasPayloadRef.current = false;
+        // Only OUR zone's drops build a playlist — a drop elsewhere on the
+        // window is someone else's concern (or nobody's).
+        if (inZone(e.payload.position)) createFromPaths(e.payload.paths);
       }
     });
     p.then((fn) => {
@@ -207,6 +249,7 @@ export function PlaylistsPanel({ host, port }: { host: string; port: number }) {
           in the selection is simply ignored. */}
       {!isAndroid() && (
         <div
+          ref={dropZoneRef}
           className={`mb-4 rounded-md border-2 border-dashed p-3 text-center text-xs transition-colors ${
             dropActive
               ? "border-[var(--color-accent)] bg-[var(--color-surface-3)]"

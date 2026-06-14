@@ -2,6 +2,7 @@ import { create } from "zustand";
 
 import { hostOf } from "../lib/addr";
 import { payloadPlaylistsLoad, payloadPlaylistsSave, sendPayload } from "../api/ps5";
+import { log } from "./logs";
 import {
   appendStep,
   DEFAULT_AUTO_LOADER,
@@ -152,7 +153,7 @@ export const usePayloadPlaylistsStore = create<PlaylistState>((set, get) => {
         // Same rationale as upload-queue: log so it lands in the
         // dev console + Windows engine.log; a UI toast is future
         // work but would need throttling.
-        console.error("[payload-playlists] save failed:", e);
+        log.error("playlist", `save failed: ${e instanceof Error ? e.message : String(e)}`);
       });
     }, SAVE_DEBOUNCE_MS);
   };
@@ -185,7 +186,7 @@ export const usePayloadPlaylistsStore = create<PlaylistState>((set, get) => {
         // empty state so the user can rebuild — the alternative
         // (blocking the screen with an error) hides every other
         // payload feature behind a recoverable issue.
-        console.error("[payload-playlists] hydrate failed:", e);
+        log.error("playlist", `hydrate failed: ${e instanceof Error ? e.message : String(e)}`);
         set({ loaded: true });
       }
     },
@@ -325,6 +326,15 @@ export const usePayloadPlaylistsStore = create<PlaylistState>((set, get) => {
           const errMsg = e instanceof Error ? e.message : String(e);
           failureCount++;
           failures.push({ stepIndex: i, error: errMsg });
+          // Log every step failure: the run-status banner is transient (gone by
+          // the time a user files a bug report), so this is the only durable
+          // trace of "my playlist / auto-loader didn't run". Includes the step
+          // file + target so a maintainer can see exactly what failed where.
+          const stepName = step.path.split(/[\\/]/).pop() ?? step.path;
+          log.warn(
+            "playlist",
+            `step ${i + 1} (${stepName}) failed on ${stepHost}:${stepPort} — ${errMsg}`,
+          );
           if (!playlist.continueOnFailure) {
             if (isLive()) {
               setRunStatus(key, {

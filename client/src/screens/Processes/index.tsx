@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Cpu,
   RefreshCw,
@@ -9,6 +9,7 @@ import {
 
 import { useConnectionStore } from "../../state/connection";
 import { mgmtAddr, transferAddr } from "../../lib/addr";
+import { useDocumentVisible } from "../../lib/visibility";
 import {
   PageHeader,
   Button,
@@ -41,7 +42,11 @@ import { log } from "../../state/logs";
  * existing app-launch path, so there's one launch code path.
  */
 
-const REFRESH_MS = 2000;
+// 3s, not 2s: a process list rarely changes faster than the eye cares about,
+// and this poll shares the single-client PS5 mgmt port with status polling +
+// uploads/installs. Combined with the visibility gate + in-flight guard below,
+// it keeps idle mgmt traffic modest.
+const REFRESH_MS = 3000;
 /** Delay between kill and relaunch on a Restart, so the OS has settled the
  *  old process before the launcher fires. */
 const RESTART_RELAUNCH_DELAY_MS = 1200;
@@ -54,6 +59,9 @@ export default function ProcessesScreen() {
   const payloadStatus = useConnectionStore((s) => s.payloadStatus);
   const addr = mgmtAddr(host);
   const online = payloadStatus === "up";
+  // Pause polling when the window is hidden/minimized — no point hammering the
+  // mgmt port for a view nobody is looking at (matches AppShell's pollers).
+  const windowVisible = useDocumentVisible();
 
   const [procs, setProcs] = useState<ProcessInfo[]>([]);
   const [truncated, setTruncated] = useState(false);
@@ -70,9 +78,26 @@ export default function ProcessesScreen() {
   // Guard against a slow refresh landing after the user navigated away or a
   // newer refresh already resolved (last-write-wins by generation).
   const genRef = useRef(0);
+  // At most one process-list probe in flight at a time: on a busy mgmt port a
+  // round-trip can exceed the poll interval, and without this the 3s timer
+  // would stack probes on the single-client socket.
+  const inFlightRef = useRef(false);
+  // Last fetch-error string we logged, so a persistent failure logs once (on
+  // the transition) rather than every poll — keeps the bug bundle clean.
+  const lastLoggedErrRef = useRef<string | null>(null);
+  // Track mount so a relaunch scheduled by Restart doesn't touch state after
+  // the user navigated away.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const refresh = useCallback(async () => {
-    if (!online) return;
+    if (!online || inFlightRef.current) return;
+    inFlightRef.current = true;
     const gen = ++genRef.current;
     try {
       const res = await processList(addr);
@@ -81,22 +106,33 @@ export default function ProcessesScreen() {
       setTruncated(res.truncated);
       setError(null);
       setLoadedOnce(true);
+      lastLoggedErrRef.current = null;
     } catch (e) {
       if (gen !== genRef.current) return;
-      setError(e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(msg);
       setLoadedOnce(true);
+      // Log once per distinct error (not every 3s) so a dropped helper leaves
+      // a trace in bug reports without spamming the log.
+      if (lastLoggedErrRef.current !== msg) {
+        lastLoggedErrRef.current = msg;
+        log.warn("process", `process list fetch failed: ${msg}`);
+      }
+    } finally {
+      inFlightRef.current = false;
     }
   }, [addr, online]);
 
-  // Initial load + auto-refresh poll. Pausing auto-refresh keeps the last
-  // snapshot; the manual button still works.
+  // Initial load + auto-refresh poll. Gated on window visibility (don't poll a
+  // hidden window) and the auto-refresh toggle. Pausing keeps the last
+  // snapshot; the manual button still works regardless.
   useEffect(() => {
-    if (!online) return;
+    if (!online || !windowVisible) return;
     void refresh();
     if (!autoRefresh) return;
     const id = window.setInterval(() => void refresh(), REFRESH_MS);
     return () => window.clearInterval(id);
-  }, [refresh, autoRefresh, online]);
+  }, [refresh, autoRefresh, online, windowVisible]);
 
   const doKill = useCallback(
     async (p: ProcessInfo) => {
@@ -106,7 +142,14 @@ export default function ProcessesScreen() {
         log.info("process", `killed ${p.comm || p.name} (pid ${p.pid})`);
         await refresh();
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        const msg = e instanceof Error ? e.message : String(e);
+        setError(msg);
+        // Log the failure too — success is logged above, so without this a bug
+        // report would show "killed X" but never "kill X failed".
+        log.warn(
+          "process",
+          `kill pid ${p.pid} (${p.comm || p.name}) failed: ${msg}`,
+        );
       } finally {
         setBusyPid(null);
       }
@@ -114,12 +157,13 @@ export default function ProcessesScreen() {
     [addr, refresh],
   );
 
-  // Kill request: a "system" process detours through the confirm modal;
-  // user processes are killed immediately (they're safe + the action is
-  // visible in the live list).
+  // Kill request: "system" AND "app" (game) kills detour through the confirm
+  // modal — system because it can crash the console, app because killing a
+  // running game loses unsaved progress. "payload" homebrew is cheap +
+  // restartable, so it's killed immediately.
   const requestKill = useCallback(
     (p: ProcessInfo) => {
-      if (p.kind === "system") setConfirmKill(p);
+      if (p.kind === "system" || p.kind === "app") setConfirmKill(p);
       else void doKill(p);
     },
     [doKill],
@@ -135,18 +179,30 @@ export default function ProcessesScreen() {
           "process",
           `restart: killed ${p.comm || p.name} (pid ${p.pid}), relaunching ${p.title_id}`,
         );
-        // Relaunch by title id after a short settle. appLaunch takes the
-        // transfer addr and converts to mgmt internally.
-        window.setTimeout(() => {
-          void appLaunch(transferAddr(host), p.title_id).catch((e) => {
-            log.warn("process", `relaunch ${p.title_id} failed: ${e}`);
-          });
-          void refresh();
-        }, RESTART_RELAUNCH_DELAY_MS);
+        // Relaunch by title id after a short settle. Hold busyPid across the
+        // whole kill→settle→relaunch so the row can't be re-actioned mid-flight,
+        // and bail if the screen unmounted during the settle.
+        await new Promise((r) =>
+          window.setTimeout(r, RESTART_RELAUNCH_DELAY_MS),
+        );
+        if (!mountedRef.current) return;
+        try {
+          await appLaunch(transferAddr(host), p.title_id);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          log.warn("process", `relaunch ${p.title_id} failed: ${msg}`);
+          if (mountedRef.current) setError(msg);
+        }
+        await refresh();
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        const msg = e instanceof Error ? e.message : String(e);
+        setError(msg);
+        log.warn(
+          "process",
+          `restart pid ${p.pid} (${p.title_id}) failed at kill: ${msg}`,
+        );
       } finally {
-        setBusyPid(null);
+        if (mountedRef.current) setBusyPid(null);
       }
     },
     [addr, host, refresh],
@@ -305,8 +361,8 @@ export default function ProcessesScreen() {
               proc={p}
               host={host}
               busy={busyPid === p.pid}
-              onKill={() => requestKill(p)}
-              onRestart={() => void doRestart(p)}
+              onKill={requestKill}
+              onRestart={doRestart}
             />
           ))}
         </ul>
@@ -318,11 +374,19 @@ export default function ProcessesScreen() {
           onClose={() => setConfirmKill(null)}
           role="alertdialog"
           size="md"
-          title={tr(
-            "processes_kill_system_title",
-            { name: confirmKill.comm || confirmKill.name },
-            'Kill system process "{name}"?',
-          )}
+          title={
+            confirmKill.kind === "app"
+              ? tr(
+                  "processes_kill_app_title",
+                  { name: confirmKill.comm || confirmKill.name },
+                  'Close "{name}"?',
+                )
+              : tr(
+                  "processes_kill_system_title",
+                  { name: confirmKill.comm || confirmKill.name },
+                  'Kill system process "{name}"?',
+                )
+          }
           footer={
             <>
               <Button
@@ -348,11 +412,17 @@ export default function ProcessesScreen() {
           }
         >
           <p className="p-5 text-xs text-[var(--color-muted)]">
-            {tr(
-              "processes_kill_system_body",
-              { name: confirmKill.comm || confirmKill.name },
-              'This is a PS5 system process. Killing "{name}" may freeze or crash the console, forcing a reboot. Only continue if you know what you are doing.',
-            )}
+            {confirmKill.kind === "app"
+              ? tr(
+                  "processes_kill_app_body",
+                  { name: confirmKill.comm || confirmKill.name },
+                  'This force-closes the running game "{name}". Any unsaved progress will be lost. Use Restart instead to relaunch it.',
+                )
+              : tr(
+                  "processes_kill_system_body",
+                  { name: confirmKill.comm || confirmKill.name },
+                  'This is a PS5 system process. Killing "{name}" may freeze or crash the console, forcing a reboot. Only continue if you know what you are doing.',
+                )}
           </p>
         </Modal>
       )}
@@ -360,7 +430,26 @@ export default function ProcessesScreen() {
   );
 }
 
-function ProcessRow({
+/** Memoized so the 3s poll's fresh array doesn't re-render every row — only
+ *  rows whose meaningful data (memory/threads/kind/title/busy) actually
+ *  changed. Callbacks are stable (useCallback in the parent) and take the
+ *  proc, so identity holds across polls. */
+const ProcessRow = memo(
+  ProcessRowImpl,
+  (a, b) =>
+    a.busy === b.busy &&
+    a.host === b.host &&
+    a.onKill === b.onKill &&
+    a.onRestart === b.onRestart &&
+    a.proc.pid === b.proc.pid &&
+    a.proc.kind === b.proc.kind &&
+    a.proc.title_id === b.proc.title_id &&
+    a.proc.threads === b.proc.threads &&
+    a.proc.memory_mib === b.proc.memory_mib &&
+    (a.proc.comm || a.proc.name) === (b.proc.comm || b.proc.name),
+);
+
+function ProcessRowImpl({
   proc,
   host,
   busy,
@@ -370,8 +459,8 @@ function ProcessRow({
   proc: ProcessInfo;
   host: string;
   busy: boolean;
-  onKill: () => void;
-  onRestart: () => void;
+  onKill: (p: ProcessInfo) => void;
+  onRestart: (p: ProcessInfo) => void;
 }) {
   const tr = useTr();
   const platform = platformForTitleId(proc.title_id);
@@ -379,7 +468,10 @@ function ProcessRow({
   const label = proc.comm || proc.name;
 
   return (
-    <li className="flex items-center gap-3 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-2 text-sm">
+    // flex-wrap + a floored identity block: at large OS text size or a narrow
+    // width the Restart/Kill buttons drop to their own line instead of crushing
+    // the process name to zero. The icon + identity stay together on line 1.
+    <li className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-2 text-sm">
       {isApp ? (
         <GameIcon host={host} size={36} titleId={proc.title_id || null} />
       ) : (
@@ -387,7 +479,7 @@ function ProcessRow({
           <Cpu size={16} className="text-[var(--color-muted)]" />
         </div>
       )}
-      <div className="min-w-0 flex-1">
+      <div className="min-w-[min(100%,11rem)] flex-1">
         <div className="flex min-w-0 items-center gap-2">
           <span className="truncate font-medium">{label}</span>
           <KindBadge kind={proc.kind} />
@@ -404,13 +496,13 @@ function ProcessRow({
           {proc.title_id && <span>{proc.title_id}</span>}
         </div>
       </div>
-      <div className="flex shrink-0 items-center gap-1.5">
+      <div className="ml-auto flex shrink-0 items-center gap-1.5">
         {isApp && proc.title_id && (
           <Button
             variant="secondary"
             size="sm"
             leftIcon={<RotateCw size={12} />}
-            onClick={onRestart}
+            onClick={() => onRestart(proc)}
             disabled={busy}
             title={tr("processes_restart_tooltip", undefined, "Kill and relaunch")}
           >
@@ -421,7 +513,7 @@ function ProcessRow({
           variant="ghost"
           size="sm"
           leftIcon={<Skull size={12} />}
-          onClick={onKill}
+          onClick={() => onKill(proc)}
           disabled={busy}
           title={tr("processes_kill_tooltip", undefined, "Send SIGKILL")}
         >

@@ -72,6 +72,12 @@ pub struct ProcessKillAck {
     pub pid: i32,
     #[serde(default)]
     pub err: Option<String>,
+    /// Numeric errno from the failed kill (ESRCH/EPERM/…), 0 on success.
+    #[serde(default)]
+    pub errno: i32,
+    /// Human-readable errno string (strerror) — e.g. "No such process".
+    #[serde(default)]
+    pub reason: Option<String>,
 }
 
 /// Enumerate running processes (detailed). Read-only.
@@ -118,10 +124,14 @@ pub fn process_kill(addr: &str, pid: i32) -> Result<ProcessKillAck> {
     }
     let ack: ProcessKillAck = serde_json::from_slice(&resp)?;
     if !ack.ok {
-        bail!(
-            "PROCESS_KILL failed for pid {pid}: {}",
-            ack.err.as_deref().unwrap_or("payload returned ok=false")
-        );
+        // Prefer the specific reason (strerror) over the generic err code so
+        // the user/bug-report sees "No such process" not bare "kill_failed".
+        let why = ack
+            .reason
+            .as_deref()
+            .or(ack.err.as_deref())
+            .unwrap_or("payload returned ok=false");
+        bail!("PROCESS_KILL failed for pid {pid}: {why}");
     }
     Ok(ack)
 }

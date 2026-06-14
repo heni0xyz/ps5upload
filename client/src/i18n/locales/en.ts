@@ -162,6 +162,9 @@ processes_kind_system: "System",
 processes_kill_system_title: 'Kill system process "{name}"?',
 processes_kill_system_body:
   'This is a PS5 system process. Killing "{name}" may freeze or crash the console, forcing a reboot. Only continue if you know what you are doing.',
+processes_kill_app_title: 'Close "{name}"?',
+processes_kill_app_body:
+  'This force-closes the running game "{name}". Any unsaved progress will be lost. Use Restart instead to relaunch it.',
 activity: "Activity",
 about: "About",
 activity_title: "Activity",
