@@ -9568,7 +9568,26 @@ static int handle_system_control(runtime_state_t *state, int client_fd,
         const char *ack = "{\"ok\":true,\"action\":\"shutdown\"}";
         rc = send_frame(client_fd, FTX2_FRAME_SYSTEM_CONTROL_ACK, 0,
                         trace_id, ack, strlen(ack));
-        sceSystemServiceRequestPowerOff();
+        /* sceSystemServiceRequestPowerOff() goes through the system's normal
+         * power-button flow, which on PS5 RESPECTS the rest-mode setting — so
+         * "Shutdown" commonly dropped the console into REST MODE instead of a
+         * full power-off (user report). sceSystemStateMgrTurnOff() is the
+         * direct turn-the-power-off call (same SystemStateMgr family as the
+         * standby path's sceSystemStateMgrEnterStandby), which actually powers
+         * the console off. dlsym it so a firmware that lacks the symbol
+         * degrades to the old request-based behavior rather than failing.
+         *
+         * Called through an `(int)` pointer with arg 0: if the real symbol is
+         * niladic the extra register is ignored; if it takes a mode/reason,
+         * 0 is the safe "normal shutdown" default. Avoids passing a garbage
+         * register the way a `(void)` cast would if the arity is non-zero. */
+        void *h = dlsym(RTLD_DEFAULT, "sceSystemStateMgrTurnOff");
+        if (h) {
+            int (*turn_off)(int) = (int (*)(int))h;
+            turn_off(0);
+        } else {
+            sceSystemServiceRequestPowerOff();
+        }
         return rc;
     }
     case SC_ACTION_STANDBY: {
