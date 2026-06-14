@@ -489,7 +489,9 @@ fn usage() -> ! {
     eprintln!("  launch       TITLE_ID      sceLncUtilLaunchApp");
     eprintln!("  power        tick|standby|reboot|shutdown  (mgmt port; tick = keep-awake)");
     eprintln!("  apps                       list titles present in app.db");
-    eprintln!("  processes                  detailed process list (pid/comm/title/mem/threads/kind)");
+    eprintln!(
+        "  processes                  detailed process list (pid/comm/title/mem/threads/kind)"
+    );
     eprintln!("  process-kill <pid>         SIGKILL a process by pid");
     eprintln!("  saves                      list save-data folders + sizes (:9114)");
     eprintln!("  profile-info                       foreground user + account name slots (:9114)");
@@ -561,14 +563,25 @@ fn do_processes(addr: &str) -> Result<()> {
             p.pid,
             p.kind,
             p.comm,
-            if p.title_id.is_empty() { "-" } else { &p.title_id },
+            if p.title_id.is_empty() {
+                "-"
+            } else {
+                &p.title_id
+            },
             p.memory_mib,
             p.threads,
             p.name,
         );
     }
-    println!("\n{} process(es){}", res.processes.len(),
-        if res.truncated { " (list truncated)" } else { "" });
+    println!(
+        "\n{} process(es){}",
+        res.processes.len(),
+        if res.truncated {
+            " (list truncated)"
+        } else {
+            ""
+        }
+    );
     Ok(())
 }
 
