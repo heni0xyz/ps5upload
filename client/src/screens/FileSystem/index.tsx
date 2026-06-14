@@ -1655,12 +1655,19 @@ export default function FileSystemScreen() {
                   type="button"
                   onClick={() => setPath(v.path)}
                   title={`${v.path} · ${formatBytes(v.free_bytes)} ${tr("fs_free", "free")}`}
-                  className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 font-mono ${
+                  // Every drive's path text is equally readable; ONLY the
+                  // border (+ the USB icon for external) signals which is
+                  // which. Previously internal /data used muted text while
+                  // external drives used full-colour text, so /data looked
+                  // dimmer/demoted than /mnt/ext1 — the inconsistent "highlight"
+                  // the user noticed. Active = accent border + filled bg;
+                  // external = ps4 border; internal = plain border.
+                  className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 font-mono text-[var(--color-text)] ${
                     active
-                      ? "border-[var(--color-accent)] bg-[var(--color-surface)] text-[var(--color-text)]"
+                      ? "border-[var(--color-accent)] bg-[var(--color-surface)]"
                       : external
-                        ? "border-[var(--color-ps4)] text-[var(--color-text)] hover:bg-[var(--color-surface)]"
-                        : "border-[var(--color-border)] text-[var(--color-muted)] hover:bg-[var(--color-surface)]"
+                        ? "border-[var(--color-ps4)] hover:bg-[var(--color-surface)]"
+                        : "border-[var(--color-border)] hover:bg-[var(--color-surface)]"
                   }`}
                 >
                   <Icon

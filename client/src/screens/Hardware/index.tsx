@@ -151,7 +151,11 @@ function formatUptime(sec: number): string {
 
 function formatTemp(c: number): string {
   if (c <= 0) return "—";
-  return `${c}°C`;
+  // Show both scales — the sensors read Celsius; Fahrenheit is for users who
+  // think in °F. Rounded to a whole degree (sensor precision doesn't warrant
+  // decimals). e.g. "62°C / 144°F".
+  const f = Math.round(c * 1.8 + 32);
+  return `${c}°C / ${f}°F`;
 }
 
 function formatFreq(mhz: number): string {

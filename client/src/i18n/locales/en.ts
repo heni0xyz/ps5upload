@@ -1573,6 +1573,11 @@ os_notify_hint: "Mirror in-app notifications (transfer done, errors, etc.) to yo
 // Installed Apps screen
 installed_apps: "Installed Apps",
 installed_apps_title: "Installed Apps",
+installed_open_folder: "Open folder",
+search_scope_all: "All content",
+search_scope_tooltip: "Limit the search to one game's files",
+saves_open_folder: "Open folder",
+saves_open_folder_hint: "Open this save's folder in the File System browser",
 installed_apps_subtitle:
   "Everything installed on the PS5, grouped by how it got there. Uninstall removes a title (and, for mounted titles, unmounts it).",
 installed_error_title: "Couldn't read installed apps",
