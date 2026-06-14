@@ -4,6 +4,19 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 3.3.2
+
+A data-loss fix.
+
+- **"Auto Delete after installation" is now actually respected.** With it OFF,
+  an uploaded PKG was still being deleted after install — because the engine
+  always cleaned up the staged file regardless of the setting. It now keeps the
+  PKG when you ask it to. The same fix stops the File System → Install action
+  from deleting a PKG you point it at in place.
+- **Better install logging.** Bug reports now capture your Auto Install / Auto
+  Delete settings and log the exact install/delete decision for each PKG, so
+  issues like this are diagnosable without a repro.
+
 ## 3.3.1
 
 A polish + fixes release.
