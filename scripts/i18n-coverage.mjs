@@ -108,6 +108,27 @@ function loadTranslations() {
       startIdx,
       startIdx + endMatch.index + "\n}".length,
     );
+    // Duplicate-key guard. A repeated key in a locale literal is valid JS
+    // (the later one silently wins), so the vm eval below — and the coverage
+    // diff that follows — can't see it: it just quietly overrides a
+    // translation. Scan the raw literal source (one key per line in the
+    // generated files) for repeats before evaluating.
+    {
+      const keyRe = /^\s*"?([A-Za-z][A-Za-z0-9_.-]*)"?\s*:/gm;
+      const seen = new Set();
+      const dups = new Set();
+      let km;
+      while ((km = keyRe.exec(literalSrc))) {
+        if (seen.has(km[1])) dups.add(km[1]);
+        seen.add(km[1]);
+      }
+      if (dups.size > 0) {
+        throw new Error(
+          `${fp}: duplicate locale key(s) — a dup silently overrides a ` +
+            `translation: ${[...dups].sort().join(", ")}`,
+        );
+      }
+    }
     const dict = vm.runInNewContext(`(${literalSrc})`, Object.create(null), {
       timeout: 1000,
     });

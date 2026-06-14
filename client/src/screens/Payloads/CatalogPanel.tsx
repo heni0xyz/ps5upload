@@ -383,8 +383,15 @@ function PayloadCard({
   return (
     <section className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4">
       <div className="flex flex-wrap items-start gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
+        {/* Floor the text column's min-width to min(100%,16rem). With `flex-1`
+            (basis 0%) + `min-w-0`, the name column shrank to nothing at large
+            Text size while the version-select + Download button held the row
+            on one line — wrapping the name "k/l/o/g/s/r/v" one letter per
+            line. A real min-width makes flex-wrap push the controls onto a
+            new line instead; min(100%,…) keeps a lone column from overflowing
+            a narrow viewport. */}
+        <div className="min-w-[min(100%,16rem)] flex-1">
+          <div className="flex flex-wrap items-center gap-2">
             <h3 className="text-sm font-semibold">{info.display_name}</h3>
             <button
               type="button"
