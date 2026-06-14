@@ -4,6 +4,13 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 3.2.9
+
+- **Shutdown now fully powers off the PS5.** The Shutdown button was putting the
+  console into rest mode instead of turning it off, because the API it used
+  respects the system's rest-mode setting. It now does a true power-off (use the
+  separate **Rest mode** button if you want standby). Hardware-verified.
+
 ## 3.2.8
 
 - **More large-Text-size layout fixes on the Payloads screen.** 3.2.6 fixed the
