@@ -26,6 +26,29 @@ int proc_list_get_json(char *buf, size_t cap, size_t *written_out,
                        const char **err_out);
 
 /*
+ * Detailed variant for the in-app process manager. Same envelope as
+ * proc_list_get_json, but each process object also carries:
+ *
+ *   {"pid":123,"name":"SceShellUI","comm":"SceShellUI","title_id":"",
+ *    "app_id":0,"memory_mib":12.3,"threads":7,"kind":"system"}
+ *
+ * `kind` is one of "app" (registered game/app, has title_id), "payload"
+ * (user .elf homebrew), or "system" (everything else — the UI hides and
+ * guards these). Memory is resident set size in MiB; threads is the
+ * process thread count. Reads only — no kernel write.
+ */
+int proc_list_get_json_ex(char *buf, size_t cap, size_t *written_out,
+                          const char **err_out);
+
+/*
+ * SIGKILL a process by pid. Returns 0 on success, -1 on a guard trip
+ * (pid <= 1, or the helper's own pid) or a failed kill. The caller (UI)
+ * must confirm before killing a process classified as "system" — this
+ * function trusts the request but still refuses self/kernel/init.
+ */
+int proc_kill(int pid);
+
+/*
  * Look up the command/thread name of a single process by pid via
  * sysctl(KERN_PROC_PID) — same FreeBSD kinfo_proc offsets as the JSON walk.
  * Fills `out` (NUL-terminated) and returns 0 on success; returns non-zero if

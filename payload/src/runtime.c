@@ -340,6 +340,15 @@ extern int posix_fallocate(int fd, off_t offset, off_t len);
  * Distinct from PROFILE_SET_USERNAME, which renames an offline-account slot. */
 #define FTX2_FRAME_PROFILE_SET_LOCAL_USERNAME     160u
 #define FTX2_FRAME_PROFILE_SET_LOCAL_USERNAME_ACK 161u
+/* In-app process manager. PROCESS_LIST is the DETAILED enumerate
+ * (proc_list_get_json_ex: pid/name/comm/title_id/app_id/memory/threads/kind)
+ * — distinct from the older PROC_LIST (74) which feeds the `ps` diagnostic
+ * with just pid+name. PROCESS_KILL SIGKILLs a pid: req {"pid":N} → ack
+ * {"ok":bool,...}. Restart is the client composing KILL + APP_LAUNCH. */
+#define FTX2_FRAME_PROCESS_LIST      162u
+#define FTX2_FRAME_PROCESS_LIST_ACK  163u
+#define FTX2_FRAME_PROCESS_KILL      164u
+#define FTX2_FRAME_PROCESS_KILL_ACK  165u
 /* Where we place mount points. Scoped under /mnt/ps5upload/ so it
  * never collides with mount paths owned by other utilities. */
 #define FS_MOUNT_BASE "/mnt/ps5upload"
@@ -14272,6 +14281,70 @@ static int handle_proc_list(runtime_state_t *state, int client_fd,
     return rc;
 }
 
+/* PROCESS_LIST: the detailed process enumerate for the in-app process
+ * manager — pid/name/comm/title_id/app_id/memory/threads/kind per process.
+ * Same sysctl walk as PROC_LIST but the richer proc_list_get_json_ex body.
+ * Read-only; no kernel write, no elevation needed for the enumerate. */
+static int handle_process_list(runtime_state_t *state, int client_fd,
+                               uint64_t trace_id) {
+    /* Detailed entries are ~5x the compact ones; 256 KiB holds the busiest
+     * real PS5 (~120 procs) with wide headroom. */
+    const size_t cap = 256u * 1024u;
+    char *buf = NULL;
+    size_t written = 0;
+    const char *err = NULL;
+    int rc;
+    if (!state) return -1;
+    buf = (char *)malloc(cap);
+    if (!buf) {
+        return send_frame(client_fd, FTX2_FRAME_ERROR, 0, trace_id,
+                          "process_list_oom", 16);
+    }
+    if (proc_list_get_json_ex(buf, cap, &written, &err) != 0) {
+        const char *reason = err ? err : "process_list_failed";
+        rc = send_frame(client_fd, FTX2_FRAME_ERROR, 0, trace_id,
+                        reason, (uint64_t)strlen(reason));
+        free(buf);
+        return rc;
+    }
+    pthread_mutex_lock(&state->state_mtx);
+    state->command_count += 1;
+    pthread_mutex_unlock(&state->state_mtx);
+    rc = send_frame(client_fd, FTX2_FRAME_PROCESS_LIST_ACK, 0, trace_id,
+                    buf, (uint64_t)written);
+    free(buf);
+    return rc;
+}
+
+/* PROCESS_KILL: SIGKILL the pid in the request body ({"pid":N}). proc_kill
+ * guards self/kernel/init; the UI is responsible for warning before a
+ * "system" kill. Ack {"ok":bool,"pid":N[,"err":"..."]}. */
+static int handle_process_kill(runtime_state_t *state, int client_fd,
+                               uint64_t trace_id, const char *body) {
+    int pid = (int)extract_json_uint64_field(body ? body : "", "pid");
+    int ok = (pid > 0 && proc_kill(pid) == 0);
+    char ack[96];
+    int n;
+    if (ok) {
+        n = snprintf(ack, sizeof(ack), "{\"ok\":true,\"pid\":%d}", pid);
+        if (state) {
+            pthread_mutex_lock(&state->state_mtx);
+            state->command_count += 1;
+            pthread_mutex_unlock(&state->state_mtx);
+        }
+    } else {
+        n = snprintf(ack, sizeof(ack),
+                     "{\"ok\":false,\"pid\":%d,\"err\":\"kill_failed\"}", pid);
+    }
+    if (n <= 0 || n >= (int)sizeof(ack)) {
+        const char *e = "{\"ok\":false,\"err\":\"format\"}";
+        return send_frame(client_fd, FTX2_FRAME_PROCESS_KILL_ACK, 0,
+                          trace_id, e, strlen(e));
+    }
+    return send_frame(client_fd, FTX2_FRAME_PROCESS_KILL_ACK, 0,
+                      trace_id, ack, (size_t)n);
+}
+
 /* SYSLOG_TAIL: return the PS5 kernel-log circular buffer (dmesg
  * equivalent). Read via `sysctl kern.msgbuf` — the kernel's in-memory
  * printk/printf history. Used by the desktop's "PS5 system log" panel to
@@ -16461,6 +16534,13 @@ abort_done:
     if (hdr.frame_type == FTX2_FRAME_PROC_LIST) {
         return handle_proc_list(state, client_fd, hdr.trace_id,
                                 request_body, hdr.body_len);
+    }
+    if (hdr.frame_type == FTX2_FRAME_PROCESS_LIST) {
+        return handle_process_list(state, client_fd, hdr.trace_id);
+    }
+    if (hdr.frame_type == FTX2_FRAME_PROCESS_KILL) {
+        return handle_process_kill(state, client_fd, hdr.trace_id,
+                                   request_body);
     }
     if (hdr.frame_type == FTX2_FRAME_SYSLOG_TAIL) {
         return handle_syslog_tail(state, client_fd, hdr.trace_id);

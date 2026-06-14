@@ -278,6 +278,8 @@ pub fn run() {
             commands::power_tick,
             commands::power_telemetry_get,
             commands::user_list_get,
+            commands::process_list_get,
+            commands::process_kill_pid,
             // ── Save data + screenshot listing ──────────────────────
             commands::saves_list,
             commands::screenshots_list,

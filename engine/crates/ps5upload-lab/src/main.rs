@@ -489,6 +489,8 @@ fn usage() -> ! {
     eprintln!("  launch       TITLE_ID      sceLncUtilLaunchApp");
     eprintln!("  power        tick|standby|reboot|shutdown  (mgmt port; tick = keep-awake)");
     eprintln!("  apps                       list titles present in app.db");
+    eprintln!("  processes                  detailed process list (pid/comm/title/mem/threads/kind)");
+    eprintln!("  process-kill <pid>         SIGKILL a process by pid");
     eprintln!("  saves                      list save-data folders + sizes (:9114)");
     eprintln!("  profile-info                       foreground user + account name slots (:9114)");
     eprintln!("  profile-set-username SLOT NAME     rename an account-name slot");
@@ -540,6 +542,39 @@ fn do_apps(addr: &str) -> Result<()> {
             if a.image_backed { "yes" } else { "no" }
         );
     }
+    Ok(())
+}
+
+fn do_processes(addr: &str) -> Result<()> {
+    let res = ps5upload_core::process_mgr::process_list(addr)?;
+    if res.processes.is_empty() {
+        println!("(no processes)");
+        return Ok(());
+    }
+    println!(
+        "{:>6} {:<6} {:<20} {:<14} {:>8} {:>4}  NAME",
+        "PID", "KIND", "COMM", "TITLE_ID", "MEM_MB", "THR"
+    );
+    for p in &res.processes {
+        println!(
+            "{:>6} {:<6} {:<20.20} {:<14} {:>8.1} {:>4}  {}",
+            p.pid,
+            p.kind,
+            p.comm,
+            if p.title_id.is_empty() { "-" } else { &p.title_id },
+            p.memory_mib,
+            p.threads,
+            p.name,
+        );
+    }
+    println!("\n{} process(es){}", res.processes.len(),
+        if res.truncated { " (list truncated)" } else { "" });
+    Ok(())
+}
+
+fn do_process_kill(addr: &str, pid: i32) -> Result<()> {
+    let ack = ps5upload_core::process_mgr::process_kill(addr, pid)?;
+    println!("kill ack: ok={} pid={}", ack.ok, ack.pid);
     Ok(())
 }
 
@@ -642,6 +677,17 @@ fn main() -> Result<()> {
             do_launch(addr, title_id)
         }
         "apps" => do_apps(addr),
+        // processes: detailed process manager enumerate (pid/comm/title/mem/
+        // threads/kind). process-kill <pid>: SIGKILL one pid (guarded payload-
+        // side). Hardware-verifies the in-app process manager.
+        "processes" => do_processes(addr),
+        "process-kill" => {
+            let pid: i32 = rest
+                .get(1)
+                .and_then(|s| s.parse::<i32>().ok())
+                .unwrap_or_else(|| usage());
+            do_process_kill(addr, pid)
+        }
         // hw-info: mgmt-port hardware read. hw-temps / hw-temps-x: live
         // CPU/SoC sensor read — hw-temps-x (extended) drives the ShellUI
         // ptrace path (sys_ptrace authid swap under kernel_rw_lock), the exact

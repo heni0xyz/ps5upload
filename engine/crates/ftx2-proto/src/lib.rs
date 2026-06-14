@@ -500,6 +500,16 @@ pub enum FrameType {
     /// (which renames an offline-account registry slot).
     ProfileSetLocalUsername = 160,
     ProfileSetLocalUsernameAck = 161,
+    /// Process manager. List enumerates running processes via
+    /// sysctl(KERN_PROC) — ack `{"processes":[{pid,name,title_id,app_id,
+    /// memory_mib,threads,kind}]}` where kind ∈ app|payload|system. Kill
+    /// sends SIGKILL to a pid: req `{"pid":N}` → ack `{"ok":bool,...}`.
+    /// Read-only enumerate needs no elevation; kill runs as the payload's
+    /// (elevated) ucred. Restart is the client composing Kill + AppLaunch.
+    ProcessList = 162,
+    ProcessListAck = 163,
+    ProcessKill = 164,
+    ProcessKillAck = 165,
 }
 
 impl FrameType {
@@ -651,6 +661,10 @@ impl FrameType {
             159 => Ok(Self::ProfileClearSlotAck),
             160 => Ok(Self::ProfileSetLocalUsername),
             161 => Ok(Self::ProfileSetLocalUsernameAck),
+            162 => Ok(Self::ProcessList),
+            163 => Ok(Self::ProcessListAck),
+            164 => Ok(Self::ProcessKill),
+            165 => Ok(Self::ProcessKillAck),
             _ => Err(DecodeError::UnknownFrameType(v)),
         }
     }
