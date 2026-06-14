@@ -1680,6 +1680,11 @@ err_payload_rejected: "PS5 ปฏิเสธคำขอ: {reason}",
   autoloader_enable: "เปิดใช้งาน",
   autoloader_warn_none: "เลือกเพลย์ลิสต์เพื่อให้ตัวโหลดอัตโนมัติเรียกใช้",
   autoloader_warn_empty: "เพลย์ลิสต์ที่เลือกยังไม่มีขั้นตอน",
+  upload_browse: "เรียกดู",
+  upload_browse_title: "เลือกไฟล์หรือโฟลเดอร์",
+  playlist_from_files: "จากไฟล์…",
+  playlist_from_files_title: "เลือกเพย์โหลดหนึ่งรายการขึ้นไปเพื่อสร้างเพลย์ลิสต์",
+  playlist_drop_hint: "ลากเพย์โหลดหนึ่งรายการขึ้นไปมาที่นี่เพื่อสร้างเพลย์ลิสต์",
 };
 
 export default th;

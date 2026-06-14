@@ -1655,6 +1655,11 @@ err_payload_rejected: "PS5 đã từ chối yêu cầu: {reason}",
   autoloader_enable: "Bật",
   autoloader_warn_none: "Chọn một danh sách phát để trình tự động tải chạy.",
   autoloader_warn_empty: "Danh sách phát đã chọn chưa có bước nào.",
+  upload_browse: "Duyệt",
+  upload_browse_title: "Chọn tệp hoặc thư mục",
+  playlist_from_files: "Từ tệp…",
+  playlist_from_files_title: "Chọn một hoặc nhiều payload để tạo danh sách phát",
+  playlist_drop_hint: "Kéo một hoặc nhiều payload vào đây để tạo danh sách phát",
 };
 
 export default vi;

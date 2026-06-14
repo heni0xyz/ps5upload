@@ -1600,6 +1600,11 @@ upload_done_open_library: "Открыть Библиотеку",
   autoloader_enable: "Включить",
   autoloader_warn_none: "Выберите плейлист для запуска автозагрузчиком.",
   autoloader_warn_empty: "В выбранном плейлисте пока нет шагов.",
+  upload_browse: "Обзор",
+  upload_browse_title: "Выберите файл или папку",
+  playlist_from_files: "Из файлов…",
+  playlist_from_files_title: "Выберите один или несколько пейлоадов для плейлиста",
+  playlist_drop_hint: "Перетащите сюда один или несколько пейлоадов, чтобы создать плейлист",
 };
 
 export default ru;

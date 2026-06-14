@@ -1695,6 +1695,11 @@ err_payload_rejected: "PS5 がリクエストを拒否しました: {reason}",
   autoloader_enable: "有効化",
   autoloader_warn_none: "オートローダーで実行するプレイリストを選択してください。",
   autoloader_warn_empty: "選択したプレイリストにはまだステップがありません。",
+  upload_browse: "参照",
+  upload_browse_title: "ファイルまたはフォルダーを選択",
+  playlist_from_files: "ファイルから…",
+  playlist_from_files_title: "プレイリストを作成するペイロードを1つ以上選択",
+  playlist_drop_hint: "ペイロードを1つ以上ここにドラッグしてプレイリストを作成",
 };
 
 export default ja;

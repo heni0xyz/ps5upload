@@ -1688,6 +1688,11 @@ upload_done_open_library: "Abrir Biblioteca",
   autoloader_enable: "Ativar",
   autoloader_warn_none: "Escolha uma playlist para o carregador automático executar.",
   autoloader_warn_empty: "A playlist escolhida ainda não tem etapas.",
+  upload_browse: "Procurar",
+  upload_browse_title: "Escolher um arquivo ou pasta",
+  playlist_from_files: "De arquivos…",
+  playlist_from_files_title: "Escolha um ou mais payloads para criar uma playlist",
+  playlist_drop_hint: "Arraste um ou mais payloads aqui para criar uma playlist",
 };
 
 export default pt_BR;

@@ -1601,6 +1601,11 @@ err_payload_rejected: "PS5 拒絕了此請求:{reason}",
   autoloader_enable: "啟用",
   autoloader_warn_none: "請選擇一個供自動載入器執行的播放清單。",
   autoloader_warn_empty: "所選播放清單還沒有任何步驟。",
+  upload_browse: "瀏覽",
+  upload_browse_title: "選擇檔案或資料夾",
+  playlist_from_files: "從檔案…",
+  playlist_from_files_title: "選擇一個或多個有效負載以建立播放清單",
+  playlist_drop_hint: "將一個或多個有效負載拖曳到此處以建立播放清單",
 };
 
 export default zh_TW;

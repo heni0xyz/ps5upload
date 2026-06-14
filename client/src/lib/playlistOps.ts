@@ -71,6 +71,25 @@ export const DEFAULT_AUTO_LOADER: AutoLoaderConfig = {
   playlistId: null,
 };
 
+/** Payload file extensions the loaders accept: .elf/.bin are the common
+ *  ELF loaders (port 9021); .js/.lua/.jar target the scripting loaders on
+ *  their own ports. Used to filter dropped/multi-selected files when
+ *  building a playlist so non-payloads — and .pkg installs, which go
+ *  through a different flow — are ignored. */
+export const PAYLOAD_EXTENSIONS = ["elf", "bin", "js", "lua", "jar"] as const;
+
+/** True if `path` ends in a known payload extension (case-insensitive).
+ *  Pure + extension-only: it never touches the filesystem, so a path that
+ *  doesn't exist still classifies by name (the send call surfaces a real
+ *  read error later if the file is missing). */
+export function isPayloadPath(path: string): boolean {
+  const m = /\.([a-z0-9]+)$/i.exec(path.trim());
+  if (!m) return false;
+  return (PAYLOAD_EXTENSIONS as readonly string[]).includes(
+    m[1].toLowerCase(),
+  );
+}
+
 export type PlaylistRunStatus =
   | { kind: "idle" }
   | { kind: "running"; playlistId: string; stepIndex: number; host: string }

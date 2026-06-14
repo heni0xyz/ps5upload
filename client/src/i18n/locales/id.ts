@@ -1662,6 +1662,11 @@ upload_done_open_library: "Buka Pustaka",
   autoloader_enable: "Aktifkan",
   autoloader_warn_none: "Pilih playlist untuk dijalankan oleh pemuat otomatis.",
   autoloader_warn_empty: "Playlist yang dipilih belum memiliki langkah.",
+  upload_browse: "Telusuri",
+  upload_browse_title: "Pilih file atau folder",
+  playlist_from_files: "Dari file…",
+  playlist_from_files_title: "Pilih satu atau beberapa payload untuk membuat playlist",
+  playlist_drop_hint: "Seret satu atau beberapa payload ke sini untuk membuat playlist",
 };
 
 export default id;

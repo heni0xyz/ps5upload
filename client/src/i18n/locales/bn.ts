@@ -1653,6 +1653,11 @@ upload_done_open_library: "লাইব্রেরি খুলুন",
   autoloader_enable: "সক্রিয় করুন",
   autoloader_warn_none: "অটো-লোডার চালানোর জন্য একটি প্লেলিস্ট বেছে নিন।",
   autoloader_warn_empty: "নির্বাচিত প্লেলিস্টে এখনও কোনো ধাপ নেই।",
+  upload_browse: "ব্রাউজ করুন",
+  upload_browse_title: "একটি ফাইল বা ফোল্ডার নির্বাচন করুন",
+  playlist_from_files: "ফাইল থেকে…",
+  playlist_from_files_title: "একটি প্লেলিস্ট তৈরি করতে এক বা একাধিক পেলোড নির্বাচন করুন",
+  playlist_drop_hint: "একটি প্লেলিস্ট তৈরি করতে এক বা একাধিক পেলোড এখানে টেনে আনুন",
 };
 
 export default bn;

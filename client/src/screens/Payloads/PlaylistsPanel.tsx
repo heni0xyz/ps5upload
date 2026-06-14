@@ -1,11 +1,12 @@
-import { useEffect, useRef, useState } from "react";
-import { pickPath } from "../../lib/pickPath";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { pickPaths } from "../../lib/pickPath";
 import {
   ArrowDown,
   ArrowUp,
   CheckCircle2,
   CircleDashed,
   Clock,
+  FilePlus,
   FolderOpen,
   Loader2,
   ListPlus,
@@ -18,6 +19,7 @@ import {
   XCircle,
   Zap,
 } from "lucide-react";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 
 import { Button, Modal } from "../../components";
 import { ConsoleChip } from "../../components/ConsoleChip";
@@ -26,7 +28,13 @@ import {
   runStatusForHost,
   usePayloadPlaylistsStore,
 } from "../../state/payloadPlaylists";
-import { sanitiseSleepMs, type Playlist } from "../../lib/playlistOps";
+import {
+  isPayloadPath,
+  sanitiseSleepMs,
+  type Playlist,
+} from "../../lib/playlistOps";
+import { isAndroid } from "../../lib/platform";
+import { isTauriEnv, safeUnlisten } from "../../lib/tauriEnv";
 
 /**
  * Playlist editor + runner panel for the SendPayload screen.
@@ -50,6 +58,68 @@ export function PlaylistsPanel({ host, port }: { host: string; port: number }) {
   useEffect(() => {
     if (!loaded) void hydrate();
   }, [loaded, hydrate]);
+
+  // Create a playlist from a set of paths (dropped or multi-selected),
+  // keeping only real payload files. Reads the store via getState() rather
+  // than closing over the reactive `playlists` value, so the drag-drop
+  // effect below can depend on a STABLE callback (no re-subscribe churn).
+  // Returns the number of steps added (0 = nothing usable was supplied).
+  const createFromPaths = useCallback((paths: string[]): number => {
+    const payloads = paths.filter(isPayloadPath);
+    if (payloads.length === 0) return 0;
+    const st = usePayloadPlaylistsStore.getState();
+    const base =
+      basename(payloads[0]).replace(/\.[^.]+$/, "") || "New playlist";
+    const existing = new Set(st.playlists.map((p) => p.name));
+    let name = base;
+    let n = 2;
+    while (existing.has(name)) name = `${base} ${n++}`;
+    const id = st.createPlaylist(name);
+    for (const p of payloads) st.addStep(id, { path: p, sleepMs: 0 });
+    return payloads.length;
+  }, []);
+
+  // Drag one or more payload files onto the panel to spin up a playlist in
+  // one gesture. Desktop only — Android has no webview drag-drop, so the
+  // "From files…" multi-picker below covers it there. .pkg and other
+  // non-payloads are filtered out by isPayloadPath in createFromPaths.
+  const [dropActive, setDropActive] = useState(false);
+  useEffect(() => {
+    if (!isTauriEnv() || isAndroid()) return;
+    let unlisten: (() => void) | null = null;
+    let cancelled = false;
+    const p = getCurrentWebview().onDragDropEvent((e) => {
+      if (cancelled) return;
+      // Only "enter" and "drop" carry paths ("over" doesn't). Light up on an
+      // enter that includes a payload file; build the playlist on drop.
+      if (e.payload.type === "enter") {
+        if (e.payload.paths.some(isPayloadPath)) setDropActive(true);
+      } else if (e.payload.type === "leave") {
+        setDropActive(false);
+      } else if (e.payload.type === "drop") {
+        setDropActive(false);
+        createFromPaths(e.payload.paths);
+      }
+    });
+    p.then((fn) => {
+      if (cancelled) safeUnlisten(fn);
+      else unlisten = fn;
+    }).catch(() => {});
+    return () => {
+      cancelled = true;
+      if (unlisten) safeUnlisten(unlisten);
+    };
+  }, [createFromPaths]);
+
+  const handleFromFiles = async () => {
+    const picked = await pickPaths({
+      filters: [
+        { name: "Payload", extensions: ["elf", "bin", "js", "lua", "jar"] },
+        { name: "All files", extensions: ["*"] },
+      ],
+    });
+    createFromPaths(picked);
+  };
 
   const handleNew = () => {
     // window.prompt doesn't work in Tauri webview by default — clicking
@@ -107,6 +177,20 @@ export function PlaylistsPanel({ host, port }: { host: string; port: number }) {
             </Button>
           )}
           <Button
+            variant="secondary"
+            size="sm"
+            leftIcon={<FilePlus size={12} />}
+            onClick={handleFromFiles}
+            disabled={isBusy}
+            title={tr(
+              "playlist_from_files_title",
+              undefined,
+              "Pick one or more payloads to make a playlist",
+            )}
+          >
+            {tr("playlist_from_files", undefined, "From files…")}
+          </Button>
+          <Button
             variant="primary"
             size="sm"
             leftIcon={<Plus size={12} />}
@@ -117,6 +201,25 @@ export function PlaylistsPanel({ host, port }: { host: string; port: number }) {
           </Button>
         </div>
       </header>
+
+      {/* Drag-to-create zone (desktop). Drop one or more payloads to spin up
+          a playlist; auto-detected by extension, so a stray .pkg or folder
+          in the selection is simply ignored. */}
+      {!isAndroid() && (
+        <div
+          className={`mb-4 rounded-md border-2 border-dashed p-3 text-center text-xs transition-colors ${
+            dropActive
+              ? "border-[var(--color-accent)] bg-[var(--color-surface-3)]"
+              : "border-[var(--color-border)] text-[var(--color-muted)]"
+          }`}
+        >
+          {tr(
+            "playlist_drop_hint",
+            undefined,
+            "Drag one or more payloads here to create a playlist",
+          )}
+        </div>
+      )}
 
       <RunStatusBanner host={host} />
 
@@ -492,15 +595,15 @@ function PlaylistCard({
   };
 
   const handleAddStep = async () => {
-    const picked = await pickPath({
-      mode: "file",
+    // Multi-select: pick several payloads at once and append them all as
+    // steps (each with no post-send sleep — the user tunes timing after).
+    const picked = await pickPaths({
       filters: [
         { name: "Payload", extensions: ["elf", "bin", "js", "lua", "jar"] },
         { name: "All files", extensions: ["*"] },
       ],
     });
-    if (typeof picked !== "string") return;
-    addStep(playlist.id, { path: picked, sleepMs: 0 });
+    for (const path of picked) addStep(playlist.id, { path, sleepMs: 0 });
   };
 
   const canRun = playlist.steps.length > 0 && !!host?.trim() && !anyRunning;

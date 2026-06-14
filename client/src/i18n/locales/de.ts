@@ -1661,6 +1661,11 @@ err_payload_rejected: "Die PS5 hat die Anfrage abgelehnt: {reason}",
   autoloader_enable: "Aktivieren",
   autoloader_warn_none: "Wähle eine Playlist, die der Auto-Loader ausführen soll.",
   autoloader_warn_empty: "Die gewählte Playlist hat noch keine Schritte.",
+  upload_browse: "Durchsuchen",
+  upload_browse_title: "Datei oder Ordner auswählen",
+  playlist_from_files: "Aus Dateien…",
+  playlist_from_files_title: "Wähle eine oder mehrere Payloads für eine Playlist",
+  playlist_drop_hint: "Ziehe eine oder mehrere Payloads hierher, um eine Playlist zu erstellen",
 };
 
 export default de;

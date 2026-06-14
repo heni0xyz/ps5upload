@@ -32,3 +32,30 @@ export async function pickPath(opts: PickPathOptions): Promise<string | null> {
   });
   return typeof sel === "string" ? sel : null;
 }
+
+/**
+ * Pick one OR MORE real file paths (desktop multi-select). Lets a user
+ * build a list in one gesture — e.g. select several payloads to seed a
+ * playlist. Android's in-app browser is single-select, so it yields at
+ * most one path (drag-drop, the other multi-add route, is desktop-only
+ * too). Returns [] if cancelled. Files only — multi-folder select isn't
+ * a use case here.
+ */
+export async function pickPaths(
+  opts: Omit<PickPathOptions, "mode"> = {},
+): Promise<string[]> {
+  if (isAndroid()) {
+    const one = await pickLocalPath({ mode: "file", title: opts.title });
+    return typeof one === "string" ? [one] : [];
+  }
+  const sel = await openDialog({
+    directory: false,
+    multiple: true,
+    title: opts.title,
+    filters: opts.filters,
+  });
+  if (Array.isArray(sel)) {
+    return sel.filter((s): s is string => typeof s === "string");
+  }
+  return typeof sel === "string" ? [sel] : [];
+}

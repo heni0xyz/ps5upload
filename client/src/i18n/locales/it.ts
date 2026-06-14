@@ -1600,6 +1600,11 @@ err_payload_rejected: "La PS5 ha rifiutato la richiesta: {reason}",
   autoloader_enable: "Attiva",
   autoloader_warn_none: "Scegli una playlist da eseguire con il caricatore automatico.",
   autoloader_warn_empty: "La playlist scelta non ha ancora passaggi.",
+  upload_browse: "Sfoglia",
+  upload_browse_title: "Scegli un file o una cartella",
+  playlist_from_files: "Da file…",
+  playlist_from_files_title: "Scegli uno o più payload per creare una playlist",
+  playlist_drop_hint: "Trascina uno o più payload qui per creare una playlist",
 };
 
 export default it;

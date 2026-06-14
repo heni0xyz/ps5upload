@@ -1653,6 +1653,11 @@ upload_done_open_library: "افتح المكتبة",
   autoloader_enable: "تفعيل",
   autoloader_warn_none: "اختر قائمة تشغيل ليقوم التحميل التلقائي بتشغيلها.",
   autoloader_warn_empty: "قائمة التشغيل المختارة لا تحتوي على أي خطوات بعد.",
+  upload_browse: "تصفّح",
+  upload_browse_title: "اختر ملفًا أو مجلدًا",
+  playlist_from_files: "من الملفات…",
+  playlist_from_files_title: "اختر حمولة واحدة أو أكثر لإنشاء قائمة تشغيل",
+  playlist_drop_hint: "اسحب حمولة واحدة أو أكثر هنا لإنشاء قائمة تشغيل",
 };
 
 export default ar;

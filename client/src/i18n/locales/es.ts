@@ -1600,6 +1600,11 @@ upload_done_open_library: "Abrir Biblioteca",
   autoloader_enable: "Activar",
   autoloader_warn_none: "Elige una lista para que la ejecute el cargador automático.",
   autoloader_warn_empty: "La lista elegida aún no tiene pasos.",
+  upload_browse: "Examinar",
+  upload_browse_title: "Elegir un archivo o carpeta",
+  playlist_from_files: "Desde archivos…",
+  playlist_from_files_title: "Elige una o más payloads para crear una lista",
+  playlist_drop_hint: "Arrastra una o más payloads aquí para crear una lista",
 };
 
 export default es;

@@ -1660,6 +1660,11 @@ err_payload_rejected: "PS5 isteği reddetti: {reason}",
   autoloader_enable: "Etkinleştir",
   autoloader_warn_none: "Otomatik yükleyicinin çalıştıracağı bir oynatma listesi seçin.",
   autoloader_warn_empty: "Seçilen oynatma listesinde henüz adım yok.",
+  upload_browse: "Gözat",
+  upload_browse_title: "Bir dosya veya klasör seç",
+  playlist_from_files: "Dosyalardan…",
+  playlist_from_files_title: "Bir oynatma listesi oluşturmak için bir veya daha fazla yük seçin",
+  playlist_drop_hint: "Oynatma listesi oluşturmak için bir veya daha fazla yükü buraya sürükleyin",
 };
 
 export default tr;

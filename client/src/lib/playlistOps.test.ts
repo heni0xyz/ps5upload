@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   appendStep,
+  DEFAULT_AUTO_LOADER,
+  isPayloadPath,
   movePlaylistDown,
   movePlaylistUp,
   moveStepDown,
@@ -141,5 +143,36 @@ describe("sanitiseSleepMs", () => {
     expect(sanitiseSleepMs(-1)).toBe(0);
     expect(sanitiseSleepMs("oops")).toBe(0);
     expect(sanitiseSleepMs(Number.POSITIVE_INFINITY)).toBe(0);
+  });
+});
+
+describe("isPayloadPath", () => {
+  it("accepts known payload extensions, case-insensitively", () => {
+    for (const p of [
+      "/a/b/loader.elf",
+      "C:\\dev\\x.BIN",
+      "hen.js",
+      "cheats.lua",
+      "tool.JAR",
+    ]) {
+      expect(isPayloadPath(p)).toBe(true);
+    }
+  });
+  it("rejects non-payloads — notably .pkg (different install flow)", () => {
+    for (const p of [
+      "/games/base.pkg",
+      "/some/folder",
+      "readme.txt",
+      "noext",
+      "archive.zip",
+    ]) {
+      expect(isPayloadPath(p)).toBe(false);
+    }
+  });
+});
+
+describe("DEFAULT_AUTO_LOADER", () => {
+  it("is opt-in (disabled, no playlist) so it never auto-sends unasked", () => {
+    expect(DEFAULT_AUTO_LOADER).toEqual({ enabled: false, playlistId: null });
   });
 });
