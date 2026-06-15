@@ -190,7 +190,8 @@ jobs:
             libclang-dev \
             curl \
             wget \
-            file
+            file \
+            xdg-utils
 
       - name: Ensure libclang for bindgen (Windows)
         if: matrix.platform == 'windows'
