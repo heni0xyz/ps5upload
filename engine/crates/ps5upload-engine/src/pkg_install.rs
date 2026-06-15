@@ -883,10 +883,19 @@ fn install_verdict(obs: &TrackerObs) -> InstallVerdict {
     } else {
         0.0
     };
-    // Unverifiable firmware: byte-accounting is all we have. If essentially all
-    // expected bytes landed AND writing has settled, the install is done — safe
-    // to delete. (On verifiable FW we never reach here; `registered` is Some.)
-    if obs.registered.is_none()
+    // Byte-accounting completion — the authoritative fallback when the on-disk
+    // launch check did NOT confirm `Registered`. This covers two real cases:
+    //   • Unverifiable firmware (registered == None): app.db + /user/app both
+    //     unreadable, byte-accounting is all we have.
+    //   • EXTENDED-STORAGE installs (registered == Some(false)/Absent): the
+    //     title's app.pkg lands on `/mnt/ext*`, which the payload's FS_LIST_DIR
+    //     sees only through a stale/namespaced mount — so the filesystem check
+    //     false-reports Absent for a perfectly good install (HW-confirmed: a
+    //     game that plays, with app.pkg on /mnt/ext1, probes as Absent).
+    // In BOTH, "essentially all expected bytes landed AND writing settled" means
+    // the content really copied — which also cleanly rejects a "dead tile" (it
+    // registers appmeta but writes ~no content, so it never settles near 100%).
+    if obs.registered != Some(true)
         && fraction >= INSTALL_SETTLE_FRACTION
         && obs.idle_sec >= obs.settle_sec
     {
@@ -928,35 +937,71 @@ fn observe_consumed(addr: &str, title_id: &str, baseline_free: Option<u64>) -> u
     free_drop.max(dir_size)
 }
 
-/// Free bytes on the volume that hosts `/user/app` (the install target).
-/// `None` if volumes can't be listed or no volume covers the path.
+/// Free bytes across the possible install-target volumes: the volume hosting
+/// `/user/app` (internal) PLUS every extended-storage drive (`/mnt/ext*`). A
+/// title installs to whichever the console's storage setting selects, so we sum
+/// them — the free-space drop then shows up wherever the content actually lands
+/// (HW-confirmed: a Pro installs to `/mnt/ext1`, where an internal-only baseline
+/// would never move and the tracker would false-stall a large install).
+/// `None` if volumes can't be listed.
 fn current_free_bytes(addr: &str) -> Option<u64> {
     let vols = ps5upload_core::volumes::list_volumes(addr).ok()?;
-    vols.find_for_path("/user/app")
+    let mut total = 0u64;
+    let mut found = false;
+    if let Some(v) = vols
+        .find_for_path("/user/app")
         .or_else(|| vols.find_for_path("/user"))
-        .map(|v| v.free_bytes)
+    {
+        total = total.saturating_add(v.free_bytes);
+        found = true;
+    }
+    for v in &vols.volumes {
+        if v.path.starts_with("/mnt/ext") {
+            total = total.saturating_add(v.free_bytes);
+            found = true;
+        }
+    }
+    if found {
+        Some(total)
+    } else {
+        None
+    }
 }
 
-/// Sum of immediate file sizes under `/user/app/<title_id>/` (the dominant
-/// being `app.pkg`). 0 if the dir doesn't exist yet or can't be read.
+/// Sum of immediate file sizes under `…/user/app/<title_id>/` (the dominant
+/// being `app.pkg`), across internal `/user/app` AND every extended-storage
+/// mount (`/mnt/ext*/user/app`) — the install lands on whichever drive the
+/// console targets. 0 if the dir doesn't exist yet or can't be read.
 fn title_dir_size(addr: &str, title_id: &str) -> u64 {
     if title_id.is_empty() {
         return 0;
     }
-    let path = format!("/user/app/{title_id}");
-    match ps5upload_core::fs_ops::list_dir(
-        addr,
-        &path,
-        ps5upload_core::fs_ops::ListDirOptions::default(),
-    ) {
-        Ok(listing) => listing
-            .entries
-            .iter()
-            .filter(|e| e.kind == "file")
-            .map(|e| e.size)
-            .sum(),
-        Err(_) => 0,
+    let mut dirs = vec![format!("/user/app/{title_id}")];
+    if let Ok(vols) = ps5upload_core::volumes::list_volumes(addr) {
+        for v in &vols.volumes {
+            if v.path.starts_with("/mnt/ext") {
+                dirs.push(format!("{}/user/app/{title_id}", v.path));
+            }
+        }
     }
+    let mut total = 0u64;
+    for dir in dirs {
+        if let Ok(listing) = ps5upload_core::fs_ops::list_dir(
+            addr,
+            &dir,
+            ps5upload_core::fs_ops::ListDirOptions::default(),
+        ) {
+            total = total.saturating_add(
+                listing
+                    .entries
+                    .iter()
+                    .filter(|e| e.kind == "file")
+                    .map(|e| e.size)
+                    .sum(),
+            );
+        }
+    }
+    total
 }
 
 /// Drop sessions older than the configured GC threshold. Called as a
@@ -2043,6 +2088,24 @@ mod tests {
         assert_eq!(v, InstallVerdict::Stalled);
         // ~all bytes but not yet settled ⇒ still Installing (let it settle).
         let v = install_verdict(&obs(None, 24_800_000_000, 25_000_000_000, 30));
+        assert_eq!(v, InstallVerdict::Installing);
+    }
+
+    #[test]
+    fn verdict_ext_storage_install_completes_on_byte_settle() {
+        // EXTENDED-STORAGE install: the title's app.pkg lands on /mnt/ext*,
+        // which the payload's FS_LIST_DIR sees only through a stale mount, so the
+        // launch check FALSE-reports Absent (Some(false)). Byte-accounting must
+        // still confirm Complete — else a game that installed and PLAYS gets
+        // reported as failed (the real bug this fixes). HW-confirmed on a Pro.
+        let v = install_verdict(&obs(Some(false), 24_500_000_000, 25_000_000_000, 60));
+        assert_eq!(v, InstallVerdict::Complete);
+        // A "dead tile" (registers appmeta but writes ~no content) has Absent +
+        // ~zero bytes ⇒ must NOT complete — byte-accounting cleanly rejects it.
+        let v = install_verdict(&obs(Some(false), 80_000_000, 25_000_000_000, 300));
+        assert_eq!(v, InstallVerdict::Stalled);
+        // Absent + still writing (not settled) ⇒ keep installing, don't claim done.
+        let v = install_verdict(&obs(Some(false), 24_900_000_000, 25_000_000_000, 20));
         assert_eq!(v, InstallVerdict::Installing);
     }
 

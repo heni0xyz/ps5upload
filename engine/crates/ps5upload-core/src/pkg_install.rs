@@ -384,8 +384,56 @@ enum PkgProbe {
 /// can leave an empty dir) — that case is exactly the false-positive the
 /// older title-record scan produced.
 fn probe_installed_pkg(addr: &str, title_id: &str) -> PkgProbe {
-    let path = format!("/user/app/{title_id}");
-    match crate::fs_ops::list_dir(addr, &path, crate::fs_ops::ListDirOptions::default()) {
+    // Internal storage first (the common case).
+    let internal = probe_app_pkg_at(addr, &format!("/user/app/{title_id}"));
+    if matches!(internal, PkgProbe::Present) {
+        return PkgProbe::Present;
+    }
+    // Extended storage: when the console's install location is set to an
+    // extended/M.2 drive, the title's `app.pkg` lands at
+    // `<mount>/user/app/<id>/app.pkg`, NOT internal `/user/app`. An
+    // internal-only probe then FALSE-NEGATIVES a perfectly good install — the
+    // title appears, the game plays, but we report it never registered (and the
+    // install tracker keeps the pkg / shows a failure). HW-confirmed on a PS5
+    // Pro whose games install to `/mnt/ext1`. Scan every extended mount the
+    // payload reports.
+    // NOTE: the payload's FS_LIST_DIR sees a stale/namespaced view of extended
+    // mounts and can MISS a freshly-installed ext title (HW-observed: a title
+    // the spawned shell lists is ENOENT to FS_LIST_DIR). So a Present here is
+    // trustworthy, but an Absent is NOT conclusive for ext storage — the engine
+    // tracker's byte-accounting (free-space drop) is the authoritative fallback.
+    if let Ok(vols) = crate::volumes::list_volumes(addr) {
+        for v in &vols.volumes {
+            if !is_extended_app_mount(&v.path) {
+                continue;
+            }
+            if matches!(
+                probe_app_pkg_at(addr, &format!("{}/user/app/{title_id}", v.path)),
+                PkgProbe::Present
+            ) {
+                return PkgProbe::Present;
+            }
+        }
+    }
+    // Not found on any drive. Preserve "unreadable" if internal couldn't be read
+    // (defers to the app.db supplement upstream) rather than a false Absent.
+    internal
+}
+
+/// Whether `path` is an extended-storage mount PS5 installs apps to
+/// (`/mnt/ext*` — the M.2 / extended SSD). Deliberately NOT `/mnt/usb*`
+/// (exfat media drives — games don't install there) nor our own
+/// `/mnt/ps5upload/*` image mounts.
+fn is_extended_app_mount(path: &str) -> bool {
+    path.starts_with("/mnt/ext")
+}
+
+/// The single-directory `app.pkg` discriminator: a non-zero `app.pkg` under
+/// `app_dir` means Sony's installer wrote real content there. ENOENT ⇒ Absent
+/// (definitively not here); any other read error ⇒ Unreadable (verdict
+/// deferred). Shared by the internal + extended-storage probes.
+fn probe_app_pkg_at(addr: &str, app_dir: &str) -> PkgProbe {
+    match crate::fs_ops::list_dir(addr, app_dir, crate::fs_ops::ListDirOptions::default()) {
         Ok(listing) => {
             if listing
                 .entries
@@ -400,10 +448,10 @@ fn probe_installed_pkg(addr: &str, title_id: &str) -> PkgProbe {
         Err(e) => {
             // The payload reports a missing directory as
             // `fs_list_dir_opendir_errno_2` (ENOENT) — that's a definitive
-            // "title not installed", not an inability to check. Anchor with
-            // `ends_with` so we don't also match errno 20/23/24/2xx (the
-            // payload formats `..._errno_<n>`), which would mis-tag a real
-            // read failure (ENOTDIR/EMFILE) as "absent".
+            // "title not installed here", not an inability to check. Anchor with
+            // `ends_with` so we don't also match errno 20/23/24/2xx (the payload
+            // formats `..._errno_<n>`), which would mis-tag a real read failure
+            // (ENOTDIR/EMFILE) as "absent".
             if e.to_string().ends_with("errno_2") {
                 PkgProbe::Absent
             } else {
