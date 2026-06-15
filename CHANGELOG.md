@@ -17,6 +17,8 @@ A data-loss fix: installing a game's update can no longer delete the game.
   intact** — never replaced or removed. Base games and DLC are unaffected.
   *(If an update won't install through the app on your firmware, install it from
   the PS5's own Package Installer — your game is safe either way.)*
+- **Installed Apps cards line up evenly.** Tiles with a longer two-line name no
+  longer knocked their neighbours out of alignment.
 
 ## 3.3.5
 

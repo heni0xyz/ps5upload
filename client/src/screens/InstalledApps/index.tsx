@@ -202,9 +202,12 @@ function AppCard({
           {/* line-clamp-2 (not truncate): a 1-line clamp turned readable
               names like "Payload Manager" into "Payload Mana…". Two lines fit
               the vast majority of titles in full; the title attr still covers
-              the rare overflow on hover. */}
+              the rare overflow on hover. min-h reserves the full two-line box
+              so a 1-line name and a 2-line name keep the badge/id row (and the
+              whole card body) at the same height across a grid row — otherwise
+              neighbouring cards looked vertically misaligned ("overlapping"). */}
           <div
-            className="line-clamp-2 text-sm font-semibold"
+            className="line-clamp-2 min-h-[2.5rem] text-sm font-semibold"
             title={title.titleName}
           >
             {title.titleName}
