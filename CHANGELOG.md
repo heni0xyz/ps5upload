@@ -6,26 +6,27 @@ What's new in ps5upload, written for humans.
 
 ## 3.3.4
 
-Firmware-aware installs + install-from-USB no longer copies the whole game first.
+Install verification + extended-storage fixes.
 
-- **Installs now use the right system authority for your firmware (FW 11+).**
-  On newer firmware (11.xx/12.xx), an install could register the game's tile but
-  copy *no actual content* — a "hollow" install that looks done but leaves an
-  unplayable tile. The installer now runs under the correct SYSTEM authority on
-  FW 11+ (matching how elf-arsenal does it), so the content actually lands. On
-  FW 9.60 and below the proven path is unchanged.
-
+- **Installs to an extended / M.2 SSD are recognized correctly.** If your PS5
+  installs games to an extended drive (not internal storage), the app used to
+  report the install as *failed* — even though the game installed perfectly and
+  plays — because it only looked for the game in internal storage. It now
+  confirms an install by the actual data written to **any** drive, so
+  extended-storage installs are no longer wrongly flagged as failures. (If you
+  hit this before: the game was fine all along — just launch it.)
+- **A "hollow" install still can't masquerade as success.** The app confirms a
+  title's content actually landed before reporting success, and tells you
+  honestly if it didn't — now measured by what was really written, so it's
+  accurate on every drive *and* still catches a genuinely empty "dead tile."
+- **Firmware-aware installs.** On newer firmware (11.xx/12.xx) the installer runs
+  under the correct system authority so content lands properly; on FW 9.60 and
+  below the proven path is unchanged.
 - **Big games install from USB without the slow copy.** Installing a PKG from a
   USB drive used to copy the entire file to internal storage first — a single
-  blocking step that, for a 25 GB game, ran for hours and then failed, installing
-  nothing. The tool now installs **directly from the USB path** (the way
-  elf-arsenal does), and only falls back to copying if the direct install
-  genuinely doesn't take. A live install **percentage** shows throughout.
-- **A "hollow" install can't masquerade as success anymore.** When installing off
-  an exFAT USB mount, Sony's installer can report "done" while writing nothing.
-  The tool now **confirms the title actually landed on disk** before believing it
-  — and if it didn't, falls through to the copy path instead of silently
-  "succeeding."
+  blocking step that, for a 25 GB game, could run for hours and then fail. The
+  app now installs **directly from the USB path** when it can, falling back to a
+  copy only if needed, with a live install **percentage** throughout.
 
 ## 3.3.3
 

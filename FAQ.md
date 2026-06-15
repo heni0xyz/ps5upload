@@ -956,6 +956,15 @@ that lacks the kernel patches fakepkg installs need), it tells you honestly
 instead of a false "installed." If a title genuinely won't start, reinstall from
 the console: **Settings → Debug Settings → Game → Package Installer**.
 
+**Q: The app said the install failed, but the game is on my PS5 and plays fine. (3.3.4)**
+This was a verification bug — fixed in 3.3.4. If your PS5's install location is set
+to an **extended / M.2 SSD**, games install to that drive (`/mnt/ext…`) instead of
+internal storage, and the app used to look only in the internal location — so it
+wrongly reported "install failed" even though the game installed perfectly. 3.3.4
+confirms the install by the actual data written to *any* drive, so extended-storage
+installs are recognized correctly. If you saw this on an older version, the game was
+fine all along — just launch it.
+
 **Q: A system (NPXS) pkg won't install. What do I do?**
 System app pkgs (NPXS-prefix content_id — Store updates, Settings
 patches, built-in apps) aren't what the DPI installer is built for and
