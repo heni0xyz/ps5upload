@@ -60,6 +60,9 @@ ANDROID_JAVA_HOME  ?= $(shell /usr/libexec/java_home -v 17 2>/dev/null || echo "
 ANDROID_NDK_HOME   ?= $(shell ls -d "$(ANDROID_HOME)"/ndk/* 2>/dev/null | sort -V | tail -1)
 ANDROID_GEN_DIR    := $(CLIENT_DIR)/src-tauri/gen/android
 ANDROID_APK        := $(ANDROID_GEN_DIR)/app/build/outputs/apk/universal/debug/app-universal-debug.apk
+# Package id (matches tauri.conf.json `identifier`). Used to recover from a
+# signature-mismatched prior install during the convenience deploy step.
+ANDROID_APP_ID     := com.phantomptr.ps5upload
 # App-icon source (relative to CLIENT_DIR). `tauri android init` seeds
 # placeholder launcher icons; we re-apply ours so the Android icon matches
 # the desktop app icon. gen/ is gitignored, so this runs at init time.
@@ -296,7 +299,21 @@ _android-install-if-device:
 	else \
 		for d in $$devs; do \
 			echo "Updating the app on device $$d (adb install -r)..."; \
-			"$$adb" -s "$$d" install -r "$$apk" && echo "✓ App updated on $$d"; \
+			out=$$("$$adb" -s "$$d" install -r "$$apk" 2>&1); \
+			if [ $$? -eq 0 ] && ! printf '%s' "$$out" | grep -qi 'Failure'; then \
+				echo "✓ App updated on $$d"; \
+			elif printf '%s' "$$out" | grep -qi 'UPDATE_INCOMPATIBLE\|signatures do not match'; then \
+				echo "⚠ Existing install on $$d was signed with a different key — reinstalling fresh (its app data is cleared)..."; \
+				"$$adb" -s "$$d" uninstall "$(ANDROID_APP_ID)" >/dev/null 2>&1 || true; \
+				if "$$adb" -s "$$d" install "$$apk" >/dev/null 2>&1; then \
+					echo "✓ App reinstalled on $$d"; \
+				else \
+					echo "⚠ Could not install on $$d — APK is at $$apk (install manually: $$adb -s $$d install -r \"$$apk\")."; \
+				fi; \
+			else \
+				echo "⚠ adb install failed on $$d (build is fine — APK is at $$apk):"; \
+				printf '%s\n' "$$out" | sed 's/^/    /'; \
+			fi; \
 		done; \
 	fi
 

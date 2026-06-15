@@ -36,13 +36,11 @@ fn spawn_file_server(port: u16, file: PathBuf) {
     let listener = TcpListener::bind(("0.0.0.0", port)).expect("bind http host");
     let data = Arc::new(std::fs::read(&file).expect("read pkg into memory"));
     thread::spawn(move || {
-        for stream in listener.incoming() {
-            if let Ok(mut s) = stream {
-                let data = Arc::clone(&data);
-                thread::spawn(move || {
-                    let _ = serve_one(&mut s, &data);
-                });
-            }
+        for mut s in listener.incoming().flatten() {
+            let data = Arc::clone(&data);
+            thread::spawn(move || {
+                let _ = serve_one(&mut s, &data);
+            });
         }
     });
 }
