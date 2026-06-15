@@ -218,7 +218,11 @@ static int parse_firmware_major_from_kern_version(const char *kv) {
     return 0;
 }
 
-static int detect_firmware_major(void) {
+/* Non-static: also consumed by bgft.c's install-authid firmware gate (the
+ * FW-11 "authority cliff" — InstallByPackage runs under ShellCore authid
+ * below it, SYSTEM authid at/above it, matching elf-arsenal). Safe sysctl
+ * read — NOT the faulting kernel_get_fw_version offset read. */
+int detect_firmware_major(void) {
     char buf[256];
     size_t sz = sizeof(buf);
     if (sysctlbyname("kern.version", buf, &sz, NULL, 0) != 0) return 0;

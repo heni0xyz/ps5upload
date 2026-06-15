@@ -6,7 +6,14 @@ What's new in ps5upload, written for humans.
 
 ## 3.3.4
 
-Install-from-USB no longer copies the whole game first.
+Firmware-aware installs + install-from-USB no longer copies the whole game first.
+
+- **Installs now use the right system authority for your firmware (FW 11+).**
+  On newer firmware (11.xx/12.xx), an install could register the game's tile but
+  copy *no actual content* — a "hollow" install that looks done but leaves an
+  unplayable tile. The installer now runs under the correct SYSTEM authority on
+  FW 11+ (matching how elf-arsenal does it), so the content actually lands. On
+  FW 9.60 and below the proven path is unchanged.
 
 - **Big games install from USB without the slow copy.** Installing a PKG from a
   USB drive used to copy the entire file to internal storage first — a single
