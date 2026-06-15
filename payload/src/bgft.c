@@ -1389,6 +1389,32 @@ int bgft_install_start(const char *url,
             "[bgft] in-process InstallByPackage failed (rc=0x%08X)\n",
             (unsigned)app_err);
 
+    /* ─── PATCH guard: never fall past InstallByPackage for a patch ───────
+     * A patch (…DP) carries the SAME content_id as its base game, so the
+     * fallback tiers below — shellui-rpc and legacy BGFT — re-install that
+     * content_id and WIPE the installed base instead of applying the patch on
+     * top (HW-proven on FW 9.60: a Bloodborne patch deleted the 26 GB base via
+     * shellui-rpc). Only the in-process InstallByPackage above can apply a patch
+     * non-destructively; if it couldn't, FAIL CLEANLY here with that error and
+     * leave the base intact, rather than letting a fallback destroy the game.
+     * (DLC …AC carries its OWN content_id, so it doesn't collide with the base
+     * and may still use the fallbacks — only the title-id-keyed appinst-local
+     * last resort is gated for it, below.) */
+    {
+        size_t pt_len = package_type ? strlen(package_type) : 0;
+        const char *pt_suffix = pt_len >= 2 ? package_type + pt_len - 2 : "";
+        if (strcmp(pt_suffix, "DP") == 0) {
+            fprintf(stderr,
+                    "[bgft] patch (package_type=%s) failed InstallByPackage — "
+                    "NOT trying shellui-rpc/BGFT (they share the base content_id "
+                    "and would WIPE the base game); failing cleanly, base intact "
+                    "(install patches from the PS5 Package Installer if needed)\n",
+                    package_type);
+            *out_err_code = app_err ? app_err : BGFT_ERR_REGISTER_FAILED;
+            return -1;
+        }
+    }
+
     /* ─── 2.27.x reorder — FW-12 "installs but won't launch" fix ─────────
      * The dedicated local-disk installer (sceAppInstUtilAppInstallPkg) USED
      * to run HERE, immediately after InstallByPackage(local) failed. It
