@@ -10,6 +10,7 @@ vi.mock("../api/ps5", () => ({
   fsDelete: vi.fn(async () => {}),
   fsMkdir: vi.fn(async () => {}),
   fsCopy: vi.fn(async () => {}),
+  fsOpStatus: vi.fn(async () => ({ total_bytes: 0, bytes_copied: 0 })),
 }));
 // No active transfer in tests → installs proceed immediately.
 vi.mock("../lib/ps5Transfers", () => ({ transferScreenBusy: () => false }));
@@ -358,6 +359,7 @@ describe("installExternal — copies USB→internal, then installs", () => {
       expect.any(String),
       usbPkg.path,
       expect.stringContaining("/pkg_temp/"),
+      expect.any(Number), // trackable op_id for the drop-tolerant copy
     );
     // The install targeted the internal copy, NOT the /mnt/usb path.
     expect(startPaths.every((p) => p.includes("/pkg_temp/"))).toBe(true);

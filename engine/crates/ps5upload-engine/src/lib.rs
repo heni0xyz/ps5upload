@@ -54,7 +54,7 @@ use ps5upload_core::{
         download_to_local_multistream, enumerate_download_set, DownloadKind, MAX_DOWNLOAD_STREAMS,
     },
     fs_ops::{
-        app_launch, app_list_registered, app_register, app_unregister, fs_copy_with_op_id,
+        app_launch, app_list_registered, app_register, app_unregister, fs_copy_robust,
         fs_delete_with_op_id, fs_mkdir, fs_mount, fs_move_with_timeout, fs_op_cancel, fs_op_status,
         fs_read, fs_unmount, list_dir, reconcile, walk_local_inventory, DirListing, ListDirOptions,
         MountResult, ReconcileFile, ReconcileMode, ReconcilePlan, RegisterResult,
@@ -1297,6 +1297,15 @@ async fn ps5_fs_move(
     }
 }
 
+/// Monotonic op-id source for an fs op the caller didn't tag with its own id,
+/// so the robust copy is always trackable. Starts high (and steps by 1) to keep
+/// clear of client-generated ids (random 64-bit) within a session.
+fn next_fs_op_id() -> u64 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0xE000_0000_0000_0001);
+    COUNTER.fetch_add(1, Ordering::Relaxed)
+}
+
 async fn ps5_fs_copy(
     State(state): State<AppState>,
     Json(req): Json<FsMoveReq>,
@@ -1308,22 +1317,25 @@ async fn ps5_fs_copy(
     crate::log_info!("fs_copy: addr={addr} from={from} to={to}");
     let from_for_log = from.clone();
     let to_for_log = to.clone();
-    // 1-hour deadline: fs_copy is a single-shot RPC where the payload
-    // performs the entire recursive copy and only sends FS_COPY_ACK
-    // at the end. A 35 GiB game image on PS5 UFS takes minutes to
-    // copy; the previous 30 s socket timeout fired mid-copy and
-    // surfaced as "read frame header" 502 with no progress visible.
-    // Real progress reporting would require a payload protocol
-    // change (per-shard progress events); for now the long deadline
-    // at least lets the operation complete.
-    let io_timeout = std::time::Duration::from_secs(60 * 60);
-    let op_id = req.op_id;
-    match tokio::task::spawn_blocking(move || {
-        fs_copy_with_op_id(&addr, &from, &to, op_id, Some(io_timeout))
-    })
-    .await
-    .map_err(anyhow::Error::from)
-    .and_then(|r| r)
+    // Robust, drop-tolerant copy: a 25 GB USB→internal copy over flaky Wi-Fi
+    // used to die "read frame header" minutes in, because the bare copy holds
+    // ONE connection for the whole operation while the console keeps copying
+    // fine. fs_copy_robust fires the copy with an op_id and tracks completion by
+    // polling fs_op_status on fresh connections, so a connection blip no longer
+    // aborts a healthy copy. A non-zero op_id is required for tracking; generate
+    // one when the caller didn't supply theirs (they just won't get a % bar).
+    let op_id = if req.op_id != 0 {
+        req.op_id
+    } else {
+        next_fs_op_id()
+    };
+    // 3 min with zero bytes written ⇒ genuinely stuck (a live USB copy advances
+    // steadily; this only trips on a wedged console / pulled drive).
+    let stall = std::time::Duration::from_secs(180);
+    match tokio::task::spawn_blocking(move || fs_copy_robust(&addr, &from, &to, op_id, stall))
+        .await
+        .map_err(anyhow::Error::from)
+        .and_then(|r| r)
     {
         Ok(()) => {
             crate::log_info!(

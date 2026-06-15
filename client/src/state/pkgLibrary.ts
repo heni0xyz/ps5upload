@@ -2,7 +2,7 @@ import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
 import { invoke } from "@tauri-apps/api/core";
 
-import { fsListDir, fsDelete, fsMkdir, fsCopy } from "../api/ps5";
+import { fsListDir, fsDelete, fsMkdir, fsCopy, fsOpStatus } from "../api/ps5";
 import type { ExternalPkg } from "../api/ps5";
 import { hostOf, mgmtAddr, transferAddr } from "../lib/addr";
 import { removableMountRoot } from "../lib/mountPaths";
@@ -1117,15 +1117,46 @@ const makePkgLibraryStore = () =>
         busyNotice: `Staging ${label} from ${pkg.drive} to internal storage — removed automatically after install…`,
       });
       await fsMkdir(transferAddr(host), PKG_TEMP_DIR).catch(() => {});
-      try {
-        await fsCopy(mgmtAddr(host), pkg.path, internalPath);
-      } catch (e) {
-        if (/fs_copy_dest_exists/.test(String(e))) {
-          await fsDelete(mgmtAddr(host), internalPath).catch(() => {});
-          await fsCopy(mgmtAddr(host), pkg.path, internalPath);
-        } else {
-          throw e;
+      // Trackable op_id → the (drop-tolerant) copy drives a live % bar, and a
+      // dropped connection no longer aborts a healthy 25 GB copy.
+      const copyOpId = Math.floor(Math.random() * 0xff_ffff_ffff) + 1;
+      let copying = true;
+      const pollCopy = (async () => {
+        while (copying) {
+          await sleep(1500);
+          try {
+            const s = await fsOpStatus(mgmtAddr(host), copyOpId);
+            if (s.total_bytes > 0) {
+              const pct = Math.min(
+                99,
+                Math.floor((s.bytes_copied / s.total_bytes) * 100),
+              );
+              set({
+                busyNotice: `Staging ${label} from ${pkg.drive} to internal storage… ${pct}% (removed after install)`,
+              });
+            }
+          } catch {
+            /* op not yet registered or already finished — ignore */
+          }
         }
+      })();
+      try {
+        try {
+          await fsCopy(mgmtAddr(host), pkg.path, internalPath, copyOpId);
+        } catch (e) {
+          if (/fs_copy_dest_exists/.test(String(e))) {
+            await fsDelete(mgmtAddr(host), internalPath).catch(() => {});
+            await fsCopy(mgmtAddr(host), pkg.path, internalPath, copyOpId);
+          } else {
+            throw e;
+          }
+        }
+      } finally {
+        // Signal the progress poller to stop; it exits on its next tick. Don't
+        // await it (it may be mid-sleep) — it's a harmless detached no-op once
+        // `copying` is false.
+        copying = false;
+        void pollCopy;
       }
       set({ busyNotice: null });
 

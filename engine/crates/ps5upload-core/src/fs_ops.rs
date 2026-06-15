@@ -487,6 +487,218 @@ pub fn fs_op_cancel(addr: &str, op_id: u64) -> Result<bool> {
     Ok(parsed.found)
 }
 
+// ─── robust (drop-tolerant) copy ───────────────────────────────────────────
+//
+// A bare `fs_copy_with_op_id` holds ONE connection for the entire copy and
+// fails the moment that connection blips — but the payload's `cp_rf` keeps
+// copying even after the connection drops (it doesn't read the socket during
+// the byte loop). On a 25 GB USB→internal copy over flaky Wi-Fi this surfaced
+// as "read frame header" 9 min in, with a half-copied file and a perfectly
+// healthy copy still running on the console (HW: Bloodborne).
+//
+// `fs_copy_robust` fires the copy with an op_id, then tracks COMPLETION by
+// polling `fs_op_status` on fresh short-lived connections. A dropped copy
+// connection or a dropped poll is irrelevant — we resync on the next tick. The
+// copy is done when the op reports all bytes written; it failed only if the op
+// vanished short of the total (and the worker thread confirms a hard error), or
+// if byte progress flatlines past the stall deadline.
+
+/// One poll's decision in the robust-copy loop. Pure + unit-tested.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CopyPollVerdict {
+    /// Every expected byte landed — the copy is complete.
+    Done,
+    /// Still progressing (or the op hasn't appeared yet) — keep polling.
+    Continue,
+    /// The op vanished before completion — defer to the worker thread's result
+    /// (it holds the real success/error verdict).
+    OpEnded,
+    /// No byte progress past the stall deadline — give up.
+    Stalled,
+}
+
+/// Decide from one poll. `found`/`ever_found` = op presence now / ever;
+/// `max_copied` = running max bytes observed; `total` = op total_bytes (0 =
+/// not known yet); `idle_secs` = seconds since `max_copied` last advanced.
+pub(crate) fn copy_progress_verdict(
+    found: bool,
+    ever_found: bool,
+    max_copied: u64,
+    total: u64,
+    idle_secs: u64,
+    stall_secs: u64,
+) -> CopyPollVerdict {
+    // All bytes written → done, regardless of connection state.
+    if total > 0 && max_copied >= total {
+        return CopyPollVerdict::Done;
+    }
+    if !found {
+        // Op gone. If we'd ever seen it, the copy ended short of total — the
+        // worker thread has the real verdict (clean ACK that raced our poll, or
+        // a hard error). If we never saw it, the poll raced the op registering;
+        // keep going until the stall deadline.
+        if ever_found {
+            return CopyPollVerdict::OpEnded;
+        }
+        return if idle_secs >= stall_secs {
+            CopyPollVerdict::OpEnded
+        } else {
+            CopyPollVerdict::Continue
+        };
+    }
+    if idle_secs >= stall_secs {
+        CopyPollVerdict::Stalled
+    } else {
+        CopyPollVerdict::Continue
+    }
+}
+
+/// Best-effort size of a single file (lists the parent dir, finds the entry).
+/// None for a directory / missing / unreadable. Used to verify a copy actually
+/// landed when the connection dropped at the finish line.
+fn file_size(addr: &str, path: &str) -> Option<u64> {
+    let (parent, name) = path.rsplit_once('/')?;
+    let parent = if parent.is_empty() { "/" } else { parent };
+    let listing = list_dir(addr, parent, ListDirOptions::default()).ok()?;
+    listing
+        .entries
+        .iter()
+        .find(|e| e.name == name && e.kind == "file")
+        .map(|e| e.size)
+}
+
+/// Drop-tolerant copy. `op_id` must be non-zero so the copy is trackable; the
+/// caller can poll `fs_op_status(op_id)` independently for a progress bar.
+/// `stall` is the no-byte-progress deadline before we declare it stuck.
+pub fn fs_copy_robust(
+    addr: &str,
+    from: &str,
+    to: &str,
+    op_id: u64,
+    stall: std::time::Duration,
+) -> Result<()> {
+    let (a, f, t) = (addr.to_string(), from.to_string(), to.to_string());
+    // Fire the copy on a worker thread. A generous 4h cap covers a huge image
+    // on slow USB; the thread returns Ok on the ACK, or Err if its connection
+    // drops (tolerated — the console keeps copying) or the payload rejects it
+    // pre-flight (e.g. dest_exists — that we DO surface fast).
+    let mut worker: Option<std::thread::JoinHandle<Result<()>>> =
+        Some(std::thread::spawn(move || {
+            fs_copy_with_op_id(
+                &a,
+                &f,
+                &t,
+                op_id,
+                Some(std::time::Duration::from_secs(4 * 3600)),
+            )
+        }));
+
+    let mut max_copied: u64 = 0;
+    let mut total: u64 = 0;
+    let mut ever_found = false;
+    let mut last_advance = std::time::Instant::now();
+
+    // True once we know the copy actually landed (all bytes written), so a
+    // late connection-drop error from the worker can't override success.
+    let complete = |max: u64, tot: u64| tot > 0 && max >= tot;
+
+    loop {
+        // Reap the worker if it finished. A clean ACK = done. A pre-flight
+        // rejection (op never registered) = surface it FAST. A connection-drop
+        // error WHILE copying is ignored — the console keeps going; we track it
+        // via fs_op_status below.
+        if worker.as_ref().is_some_and(|h| h.is_finished()) {
+            let r = worker
+                .take()
+                .unwrap()
+                .join()
+                .map_err(|_| anyhow::anyhow!("copy worker panicked"))?;
+            match r {
+                Ok(()) => return Ok(()),
+                Err(e) => {
+                    if complete(max_copied, total) {
+                        return Ok(());
+                    }
+                    if !ever_found {
+                        return Err(e); // never started → real pre-flight reject
+                    }
+                    // else: dropped mid-copy — fall through and keep polling.
+                }
+            }
+        }
+
+        std::thread::sleep(std::time::Duration::from_secs(2));
+
+        match fs_op_status(addr, op_id) {
+            Ok(s) => {
+                if s.found {
+                    ever_found = true;
+                    if s.total_bytes > 0 {
+                        total = s.total_bytes;
+                    }
+                    if s.bytes_copied > max_copied {
+                        max_copied = s.bytes_copied;
+                        last_advance = std::time::Instant::now();
+                    }
+                }
+                let idle = last_advance.elapsed().as_secs();
+                match copy_progress_verdict(
+                    s.found,
+                    ever_found,
+                    max_copied,
+                    total,
+                    idle,
+                    stall.as_secs(),
+                ) {
+                    CopyPollVerdict::Done => return Ok(()),
+                    CopyPollVerdict::Continue => {}
+                    CopyPollVerdict::Stalled => {
+                        return Err(anyhow::anyhow!(
+                            "copy stalled: no progress for {}s ({} of {} bytes)",
+                            stall.as_secs(),
+                            max_copied,
+                            total
+                        ));
+                    }
+                    CopyPollVerdict::OpEnded => {
+                        // Op gone short of total. If the worker already returned
+                        // a clean ACK we'd have returned above; this is either a
+                        // genuine failure OR the op released in the gap after a
+                        // dropped connection but the bytes really all landed.
+                        // Verify the file on disk before declaring failure.
+                        if let Some(sz) = file_size(addr, to) {
+                            if total == 0 || sz >= total {
+                                return Ok(());
+                            }
+                        }
+                        if let Some(h) = worker.take() {
+                            return h
+                                .join()
+                                .map_err(|_| anyhow::anyhow!("copy worker panicked"))?;
+                        }
+                        return Err(anyhow::anyhow!(
+                            "copy ended before completion ({} of {} bytes)",
+                            max_copied,
+                            total
+                        ));
+                    }
+                }
+            }
+            Err(_) => {
+                // Poll-connection blip — must not kill a copy that's still
+                // running. The worker reap at the top handles a finished worker;
+                // here we only guard against a total flatline.
+                if last_advance.elapsed() >= stall {
+                    return Err(anyhow::anyhow!(
+                        "copy stalled: status unreachable + no progress for {}s",
+                        stall.as_secs()
+                    ));
+                }
+            }
+        }
+    }
+}
+
 // ─── FS_MOUNT / FS_UNMOUNT ─────────────────────────────────────────────────
 
 /// Return shape from FS_MOUNT_ACK.
@@ -1349,6 +1561,60 @@ fn blake3_file(path: &std::path::Path) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── robust-copy poll verdict (the 25 GB USB copy stability fix) ──
+    #[test]
+    fn copy_verdict_done_when_all_bytes_landed() {
+        // All bytes written → Done regardless of connection / op presence.
+        assert_eq!(
+            copy_progress_verdict(true, true, 25_000, 25_000, 0, 180),
+            CopyPollVerdict::Done
+        );
+        // Even if the op already vanished (released right at completion).
+        assert_eq!(
+            copy_progress_verdict(false, true, 25_000, 25_000, 0, 180),
+            CopyPollVerdict::Done
+        );
+    }
+
+    #[test]
+    fn copy_verdict_continue_while_progressing() {
+        // Mid-copy, bytes advancing (idle below stall) → keep polling — a
+        // dropped copy connection must NOT abort this.
+        assert_eq!(
+            copy_progress_verdict(true, true, 10_000, 25_000, 4, 180),
+            CopyPollVerdict::Continue
+        );
+        // Op not seen yet (poll raced the register) → keep waiting.
+        assert_eq!(
+            copy_progress_verdict(false, false, 0, 0, 2, 180),
+            CopyPollVerdict::Continue
+        );
+    }
+
+    #[test]
+    fn copy_verdict_stalled_on_flatline() {
+        // Op present but zero progress past the deadline → genuinely stuck.
+        assert_eq!(
+            copy_progress_verdict(true, true, 10_000, 25_000, 181, 180),
+            CopyPollVerdict::Stalled
+        );
+    }
+
+    #[test]
+    fn copy_verdict_op_ended_defers_to_worker() {
+        // Op vanished short of total after being seen → the worker thread holds
+        // the real verdict (clean ACK that raced our poll, or a hard error).
+        assert_eq!(
+            copy_progress_verdict(false, true, 10_000, 25_000, 4, 180),
+            CopyPollVerdict::OpEnded
+        );
+        // Never-seen op past the stall deadline → also defer (it never started).
+        assert_eq!(
+            copy_progress_verdict(false, false, 0, 0, 181, 180),
+            CopyPollVerdict::OpEnded
+        );
+    }
 
     /// All gate tests below manipulate the process-global RECONCILE_KEYS set.
     /// cargo runs tests in parallel by default, so without forcing them
