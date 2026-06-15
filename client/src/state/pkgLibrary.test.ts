@@ -9,10 +9,13 @@ vi.mock("../api/ps5", () => ({
   fsListDir: vi.fn(async () => []),
   fsDelete: vi.fn(async () => {}),
   fsMkdir: vi.fn(async () => {}),
+  fsCopy: vi.fn(async () => {}),
 }));
+// No active transfer in tests → installs proceed immediately.
+vi.mock("../lib/ps5Transfers", () => ({ transferScreenBusy: () => false }));
 
 import { invoke } from "@tauri-apps/api/core";
-import { fsDelete, fsListDir } from "../api/ps5";
+import { fsDelete, fsListDir, fsCopy } from "../api/ps5";
 import {
   titleIdFromContentId,
   platformFromTitleId,
@@ -293,6 +296,93 @@ describe("runPkgInstall — tracks the install to genuine completion", () => {
     await vi.advanceTimersByTimeAsync(2600 * 4);
     const r = await promise;
     expect(r.installed).toBe(true);
+  });
+});
+
+// ── install-from-USB: direct-first, copy-only-as-fallback (elf-arsenal) ──────
+//
+// The 25 GB Bloodborne failure was the unconditional USB→internal copy timing
+// out. The fix installs DIRECTLY from the USB path (no copy) and only copies if
+// BOTH direct paths fail to CONFIRM. These pin that the copy is skipped on the
+// happy path and is reached on the fallback path.
+describe("installExternal — installs direct from USB, copy only as fallback", () => {
+  const mockedInvoke = vi.mocked(invoke);
+  const mockedCopy = vi.mocked(fsCopy);
+  const mockedList = vi.mocked(fsListDir);
+  const USBHOST = "192.168.9.9";
+  const usbPkg = {
+    path: "/mnt/usb0/Bloodborne.pkg",
+    drive: "/mnt/usb0",
+    name: "Bloodborne",
+    size: 25_000_000_000,
+    contentId: "UP9000-CUSA00900_00-BLOODBORNE000000",
+    titleId: "CUSA00900",
+    platform: "ps4",
+  };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    mockedInvoke.mockReset();
+    mockedCopy.mockClear();
+    mockedList.mockReset();
+    mockedList.mockResolvedValue([]);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    evictPkgLibraryStore(USBHOST);
+  });
+
+  it("confirmed DIRECT install from USB never calls the 25 GB copy", async () => {
+    mockedInvoke.mockImplementation(async (cmd: unknown) => {
+      if (cmd === "pkg_install_start")
+        return { err_code: 0, register_path: "shellui-rpc", session_id: "s1" };
+      if (cmd === "pkg_install_status")
+        return { phase: "done", launchable: true, installed_bytes: 1, total: 1 };
+      return {};
+    });
+    const p = pkgLibraryStore(USBHOST)
+      .getState()
+      .installExternal(usbPkg, USBHOST);
+    await vi.advanceTimersByTimeAsync(2600 * 2);
+    const r = await p;
+    expect(r.ok).toBe(true);
+    expect(mockedCopy).not.toHaveBeenCalled(); // ← the whole point: no copy
+  });
+
+  it("falls back to the copy only when BOTH direct paths fail to confirm", async () => {
+    // Direct cascade (s1) stalls; DPI returns ok but the title never registers
+    // on disk (hollow); copy install (s2) then succeeds.
+    mockedInvoke.mockImplementation(async (cmd: unknown, args: unknown) => {
+      if (cmd === "pkg_install_start") {
+        const path = (args as { localPs5Path?: string })?.localPs5Path ?? "";
+        return path.startsWith("/mnt/usb")
+          ? { err_code: 0, register_path: "shellui-rpc", session_id: "s1" }
+          : { err_code: 0, register_path: "shellui-rpc", session_id: "s2" };
+      }
+      if (cmd === "pkg_install_status") {
+        const s = (args as { session?: string })?.session;
+        if (s === "s1") return { phase: "error", stalled: true }; // direct hollow
+        return { phase: "done", launchable: true }; // copy install lands
+      }
+      if (cmd === "dpi_ensure") return { ok: true };
+      if (cmd === "pkg_dpi_install") return { ok: true }; // rc ok but…
+      if (cmd === "payload_bundled_path") return { ok: false };
+      return {};
+    });
+    // titleRegisteredOnDisk → not present ⇒ DPI was hollow.
+    mockedList.mockResolvedValue([]);
+    const p = pkgLibraryStore(USBHOST)
+      .getState()
+      .installExternal(usbPkg, USBHOST);
+    await vi.advanceTimersByTimeAsync(2600 * 4);
+    const r = await p;
+    expect(r.ok).toBe(true);
+    expect(mockedCopy).toHaveBeenCalledTimes(1); // fell back to the copy
+    expect(mockedCopy).toHaveBeenCalledWith(
+      expect.any(String),
+      usbPkg.path,
+      expect.stringContaining("/pkg_temp/"),
+    );
   });
 });
 

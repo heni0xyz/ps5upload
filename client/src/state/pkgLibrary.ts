@@ -461,6 +461,90 @@ async function verifyInstallCompleted(
 }
 
 /**
+ * Client-side "did the title actually land on disk?" check — the same
+ * discriminator the engine's `verify_launchable` uses (`/user/app/<title_id>/
+ * app.pkg` at non-zero size). We need it because the **DPI** install path
+ * doesn't create a tracker session to poll, yet its `rc==0` is NOT trustworthy
+ * (the "hollow install" trap — Sony returns success but writes nothing,
+ * especially off an exFAT USB mount). So after a DPI install we confirm the
+ * title really registered before believing it.
+ */
+async function titleRegisteredOnDisk(
+  host: string,
+  contentId: string | null,
+): Promise<boolean> {
+  const titleId = contentId ? titleIdFromContentId(contentId) : null;
+  if (!titleId) return false;
+  try {
+    const entries = await fsListDir(mgmtAddr(host), `/user/app/${titleId}`);
+    return entries.some(
+      (e) => e.name === "app.pkg" && e.kind === "file" && e.size > 0,
+    );
+  } catch {
+    // ENOENT (title dir absent) or any read error ⇒ not registered.
+    return false;
+  }
+}
+
+/**
+ * Install a staged/-on-disk `.pkg` via the standalone DPI daemon (:9040): bring
+ * the daemon up (it replaces our payload on the single-payload loader), install,
+ * then restore our payload. This is the path elf-arsenal uses to install
+ * directly from a USB/exFAT path. Returns `daemonFailed:true` distinctly so a
+ * caller that needs the cascade semantics (runPkgInstall) can still throw on a
+ * genuine "daemon never came up" dead-end. The `rc==0`/`ok` here is NOT proof
+ * of a real install — callers should confirm with `titleRegisteredOnDisk`.
+ */
+async function runDpiInstall(
+  host: string,
+  localPs5Path: string,
+): Promise<{ ok: boolean; errMessage: string; daemonFailed: boolean }> {
+  const ip = hostOf(host);
+  const ens = (await invoke("dpi_ensure", { ip })) as {
+    ok?: boolean;
+    error?: string;
+  };
+  if (!ens.ok) {
+    return {
+      ok: false,
+      daemonFailed: true,
+      errMessage: ens.error || "the DPI daemon didn't come up on :9040",
+    };
+  }
+  let resp: { ok?: boolean; rc?: number; err_message?: string } = {};
+  try {
+    resp = (await invoke("pkg_dpi_install", {
+      ps5Addr: mgmtAddr(host),
+      localPs5Path,
+    })) as typeof resp;
+  } catch (e) {
+    resp = { ok: false, rc: 0, err_message: pkgError(e) };
+  }
+  // Restore our main payload — the daemon replaced it. Best-effort.
+  try {
+    const bp = (await invoke("payload_bundled_path")) as {
+      ok?: boolean;
+      path?: string;
+    };
+    if (bp?.ok && bp.path) {
+      await invoke("payload_send", { ip, path: bp.path, port: null });
+    }
+  } catch {
+    /* best-effort restore */
+  }
+  const ok = !!resp.ok;
+  const rc = (resp.rc ?? 0) >>> 0;
+  return {
+    ok,
+    daemonFailed: false,
+    errMessage: ok
+      ? ""
+      : resp.err_message ||
+        `Install was rejected (0x${rc.toString(16).padStart(8, "0")}).`,
+  };
+}
+
+/**
  * The bare `.pkg` install mechanism, with NO store/UI side effects — shared by
  * the Install Package screen's manual install (`install()`) and the upload
  * queue's pkg finisher (`uploadQueue.runOne`). The `.pkg` must already be
@@ -489,8 +573,12 @@ export async function runPkgInstall(
   // can render a real % for large titles (Sony's BGFT progress isn't
   // meaningful on the file:// staging path). Optional — no-op if omitted.
   onProgress?: (installedBytes: number, total: number) => void,
+  // When `skipDpiFallback` is set, a main-payload reject does NOT trigger the
+  // inline DPI daemon fallback. The USB direct-install flow uses this so it can
+  // run DPI itself, separately and VERIFIED (DPI's rc==0 isn't trustworthy off
+  // an exFAT mount), instead of this path trusting DPI's bare rc.
+  opts?: { skipDpiFallback?: boolean },
 ): Promise<PkgInstallOutcome> {
-  const ip = hostOf(host);
   let installed = false;
   // True when the install accepted but stalled (flatlined) before completing —
   // the pkg is KEPT and the caller shows a retry message, not a hard failure.
@@ -553,48 +641,19 @@ export async function runPkgInstall(
     mainErr = pkgError(e);
   }
 
-  if (!installed && startRejected) {
+  if (!installed && startRejected && !opts?.skipDpiFallback) {
     // FALLBACK: the jailbroken-context install was rejected. Try the
     // standalone DPI daemon (replaces our payload on the single-payload
     // loader, installs, then we restore the payload).
-    const ens = (await invoke("dpi_ensure", { ip })) as {
-      ok?: boolean;
-      error?: string;
-    };
-    if (!ens.ok) {
+    const dpi = await runDpiInstall(host, localPs5Path);
+    if (dpi.daemonFailed) {
       throw new Error(
-        ens.error ||
-          `Main-payload install failed (${mainErr}) and the DPI daemon didn't come up on :9040`,
+        `Main-payload install failed (${mainErr}) and ${dpi.errMessage}`,
       );
     }
-    let resp: { ok?: boolean; rc?: number; err_message?: string } = {};
-    try {
-      resp = (await invoke("pkg_dpi_install", {
-        ps5Addr: mgmtAddr(host),
-        localPs5Path,
-      })) as typeof resp;
-    } catch (e) {
-      resp = { ok: false, rc: 0, err_message: pkgError(e) };
-    }
-    // Restore our main payload — the daemon replaced it. Best-effort.
-    try {
-      const bp = (await invoke("payload_bundled_path")) as {
-        ok?: boolean;
-        path?: string;
-      };
-      if (bp?.ok && bp.path) {
-        await invoke("payload_send", { ip, path: bp.path, port: null });
-      }
-    } catch {
-      /* best-effort restore */
-    }
-    installed = !!resp.ok;
+    installed = dpi.ok;
     if (!installed) {
-      const rc = (resp.rc ?? 0) >>> 0;
-      mainErr =
-        resp.err_message ||
-        mainErr ||
-        `Install was rejected (0x${rc.toString(16).padStart(8, "0")}).`;
+      mainErr = dpi.errMessage || mainErr;
     }
   }
   return { installed, mayNotLaunch, errMessage: mainErr, stalled };
@@ -1051,6 +1110,14 @@ const makePkgLibraryStore = () =>
       Date.now(),
     );
     const internalPath = `${PKG_TEMP_DIR}/${basename}`;
+    const label = pkg.name || pkg.contentId || "package";
+    // Live install %, shared by the direct-from-USB and the copy-fallback paths.
+    const onProgress = (installedBytes: number, total: number) => {
+      if (total > 0) {
+        const pct = Math.min(99, Math.floor((installedBytes / total) * 100));
+        set({ busyNotice: `Installing ${label} from ${pkg.drive}… ${pct}%` });
+      }
+    };
     try {
       // Wait for any active transfer (the :9113 port is single-client and an
       // install swaps the payload).
@@ -1065,18 +1132,68 @@ const makePkgLibraryStore = () =>
         }
         set({ busyNotice: null });
       }
-      // 1. On-console copy USB → internal staging (Sony can't install off the
-      //    exfat USB mount directly). `fsCopy` refuses to overwrite; rather
-      //    than speculatively delete (which logs an ENOENT warning on the
-      //    common fresh-install path), only clear + retry when the copy
-      //    actually reports the dest already exists.
+
+      // ── 1. ELF-ARSENAL WAY: install DIRECTLY from the USB path — NO 25 GB ──
+      //    copy. The blocking USB→internal copy used to be unconditional and is
+      //    what times out / dies on a 25 GB game (the reported hours-long
+      //    "staging" that then installed nothing). elf-arsenal never copies: it
+      //    hands the USB path straight to Sony's installer. We try that first,
+      //    VERIFIED — our memory's "hollow exfat install" trap is exactly what
+      //    the install tracker / on-disk check now CATCH, so trying direct is
+      //    safe: if it doesn't really land, we fall through to the copy.
+      //
+      //  1a. The main-payload cascade from the USB path (tracker-verified: a
+      //      hollow install never confirms, so `installed` stays false).
+      log.info(
+        "install",
+        `install-from-usb: trying DIRECT install (no copy) from ${pkg.path}`,
+      );
+      set({ busyNotice: `Installing ${label} directly from ${pkg.drive}…` });
+      const direct = await runPkgInstall(
+        host,
+        pkg.path,
+        pkg.contentId || null,
+        false, // never delete the user's USB original
+        onProgress,
+        { skipDpiFallback: true }, // 1b runs DPI itself, verified
+      );
+      if (direct.installed) {
+        log.info(
+          "install",
+          `install-from-usb: DIRECT install confirmed — no copy needed: ${pkg.path}`,
+        );
+        return { ok: true, mayNotLaunch: direct.mayNotLaunch };
+      }
+
+      //  1b. The DPI daemon directly from the USB path (the exact path
+      //      elf-arsenal uses), then CONFIRM the title actually registered on
+      //      disk — DPI's rc==0 alone is the classic hollow-install lie.
+      log.info(
+        "install",
+        `install-from-usb: cascade didn't confirm (${
+          direct.errMessage || "hollow/stalled"
+        }); trying DPI directly from USB`,
+      );
+      set({ busyNotice: `Installing ${label} from ${pkg.drive} (DPI)…` });
+      const dpi = await runDpiInstall(host, pkg.path);
+      if (dpi.ok && (await titleRegisteredOnDisk(host, pkg.contentId || null))) {
+        log.info(
+          "install",
+          `install-from-usb: DPI-from-USB confirmed registered — no copy needed: ${pkg.path}`,
+        );
+        return { ok: true, mayNotLaunch: false };
+      }
+
+      // ── 2. FALLBACK: the proven copy→internal→install path. Reached only when
+      //    BOTH direct attempts failed to confirm (e.g. a firmware where Sony
+      //    genuinely can't install off the exfat mount). The internal copy is a
+      //    TRANSIENT staging file (the USB original is untouched) → clean it.
+      log.info(
+        "install",
+        `install-from-usb: direct paths didn't land (dpi.ok=${dpi.ok}); falling back to copy→internal for ${pkg.path}`,
+      );
       set({
-        // Spell out the why: Sony's installer can't read the exfat USB
-        // directly, so we stage to internal storage first — and it's removed
-        // again right after the install, so it doesn't permanently eat SSD
-        // space. (Answers the common "why is it copying / will this fill my
-        // drive" question.)
-        busyNotice: `Staging ${pkg.name || pkg.contentId} from ${pkg.drive} to internal storage — removed automatically after install…`,
+        busyNotice: `Staging ${label} from ${pkg.drive} to internal storage — removed automatically after install…`,
       });
       await fsMkdir(transferAddr(host), PKG_TEMP_DIR).catch(() => {});
       try {
@@ -1091,22 +1208,20 @@ const makePkgLibraryStore = () =>
       }
       set({ busyNotice: null });
 
-      // 2. Install from the internal copy via the shared cascade. The internal
-      //    copy is a TRANSIENT staging file (the user's USB/external original is
-      //    untouched), so always clean it — deleteStaging: true.
-      const { installed, mayNotLaunch, errMessage } = await runPkgInstall(
+      const viaCopy = await runPkgInstall(
         host,
         internalPath,
         pkg.contentId || null,
-        true,
+        true, // the internal copy is transient — always clean it
+        onProgress,
       );
 
-      // 3. Clean up the transient copy regardless of outcome.
+      // Clean up the transient copy regardless of outcome.
       await fsDelete(mgmtAddr(host), internalPath).catch(() => {});
 
-      return installed
-        ? { ok: true, mayNotLaunch }
-        : { ok: false, message: errMessage || "Install was rejected." };
+      return viaCopy.installed
+        ? { ok: true, mayNotLaunch: viaCopy.mayNotLaunch }
+        : { ok: false, message: viaCopy.errMessage || "Install was rejected." };
     } catch (e) {
       await fsDelete(mgmtAddr(host), internalPath).catch(() => {});
       return { ok: false, message: pkgError(e) };

@@ -4,6 +4,22 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 3.3.4
+
+Install-from-USB no longer copies the whole game first.
+
+- **Big games install from USB without the slow copy.** Installing a PKG from a
+  USB drive used to copy the entire file to internal storage first — a single
+  blocking step that, for a 25 GB game, ran for hours and then failed, installing
+  nothing. The tool now installs **directly from the USB path** (the way
+  elf-arsenal does), and only falls back to copying if the direct install
+  genuinely doesn't take. A live install **percentage** shows throughout.
+- **A "hollow" install can't masquerade as success anymore.** When installing off
+  an exFAT USB mount, Sony's installer can report "done" while writing nothing.
+  The tool now **confirms the title actually landed on disk** before believing it
+  — and if it didn't, falls through to the copy path instead of silently
+  "succeeding."
+
 ## 3.3.3
 
 A big-install data-loss fix, plus the in-app updater.
