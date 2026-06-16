@@ -193,6 +193,7 @@ pub fn run() {
             commands::transfer_dir_reconcile,
             commands::transfer_dir_diff_preview,
             commands::transfer_download,
+            commands::transfer_download_zip,
             commands::ps5_fs_delete,
             commands::ps5_fs_move,
             commands::ps5_fs_copy,

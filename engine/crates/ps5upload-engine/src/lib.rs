@@ -4812,6 +4812,194 @@ async fn transfer_download_handler(
         .into_response()
 }
 
+#[derive(Deserialize)]
+struct TransferDownloadZipReq {
+    addr: Option<String>,
+    /// Remote file or folder to archive.
+    src_path: String,
+    /// "file" | "folder".
+    kind: String,
+    /// Absolute host path of the `.zip` to create (the user-picked save path).
+    dest_zip: String,
+}
+
+/// POST /api/transfer/download-zip — pull a PS5 file/folder straight into a
+/// `.zip` on the host, streaming each file through Deflate as it downloads (no
+/// scratch dir, no second pass). Same job machinery as `/transfer/download`:
+/// returns a job_id immediately; progress lands in the shared bytes counter the
+/// ticker republishes over SSE. Sequential by nature (one zip stream).
+async fn transfer_download_zip_handler(
+    State(state): State<AppState>,
+    Json(req): Json<TransferDownloadZipReq>,
+) -> impl IntoResponse {
+    let mgmt_addr = mgmt_addr_or_default(req.addr, &state.default_ps5_addr);
+    crate::log_info!(
+        "transfer_download_zip: addr={mgmt_addr} src_path={} dest_zip={} kind={}",
+        req.src_path,
+        req.dest_zip,
+        req.kind
+    );
+    let kind = match req.kind.as_str() {
+        "file" => DownloadKind::File,
+        "folder" => DownloadKind::Folder,
+        other => {
+            return json_err(
+                StatusCode::BAD_REQUEST,
+                format!("kind must be 'file' or 'folder', got '{other}'"),
+            )
+            .into_response();
+        }
+    };
+    if req.src_path.trim_end_matches('/').is_empty() {
+        return json_err(StatusCode::BAD_REQUEST, "src_path cannot be empty or '/'")
+            .into_response();
+    }
+    if req.dest_zip.trim().is_empty() {
+        return json_err(StatusCode::BAD_REQUEST, "dest_zip cannot be empty").into_response();
+    }
+    let dest_zip = std::path::PathBuf::from(&req.dest_zip);
+    // The save dialog hands us a path inside an existing dir, but verify the
+    // parent is a real directory (off-reactor — it may be a network mount) so a
+    // bad path fails fast with a clear message instead of mid-stream.
+    if let Some(parent) = dest_zip.parent().map(|p| p.to_path_buf()) {
+        match tokio::task::spawn_blocking(move || std::fs::metadata(&parent)).await {
+            Ok(Ok(md)) if md.is_dir() => {}
+            Ok(_) => {
+                return json_err(
+                    StatusCode::BAD_REQUEST,
+                    "dest_zip's parent folder doesn't exist or isn't a directory",
+                )
+                .into_response()
+            }
+            Err(e) => {
+                return json_err(StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}"))
+                    .into_response()
+            }
+        }
+    }
+
+    let job_id = Uuid::new_v4();
+    let started_at_ms = now_ms();
+
+    let src_path_clone = req.src_path.clone();
+    let mgmt_addr_for_enum = mgmt_addr.clone();
+    let plan = match tokio::task::spawn_blocking(move || {
+        enumerate_download_set(&mgmt_addr_for_enum, &src_path_clone, kind)
+    })
+    .await
+    {
+        Ok(Ok(m)) => m,
+        Ok(Err(e)) => return json_err(StatusCode::BAD_GATEWAY, format!("{e:#}")).into_response(),
+        Err(e) => {
+            return json_err(StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")).into_response()
+        }
+    };
+    let manifest = plan.manifest;
+    let total_bytes: u64 = manifest.iter().map(|e| e.size).sum();
+    let files: Vec<PlannedFile> = manifest
+        .iter()
+        .map(|e| PlannedFile {
+            rel_path: e.rel_path.clone(),
+            size: e.size,
+        })
+        .collect();
+    let files_count = files.len() as u64;
+
+    let progress = Arc::new(AtomicU64::new(0));
+    let progress_files = Arc::new(AtomicU64::new(0));
+    let progress_files_finalized = Arc::new(AtomicU64::new(0));
+    let progress_bytes_finalized = Arc::new(AtomicU64::new(0));
+    let ctx = TickerContext {
+        started_at_ms,
+        total_bytes,
+        skipped_files: 0,
+        skipped_bytes: 0,
+    };
+    set_job(
+        &state.jobs,
+        &state.events_tx,
+        job_id,
+        JobState::Running {
+            started_at_ms,
+            bytes_sent: 0,
+            total_bytes,
+            files,
+            skipped_files: 0,
+            skipped_bytes: 0,
+            files_processing: 0,
+            files_finalized: 0,
+            files_finalizing_total: 0,
+            bytes_finalized: 0,
+        },
+    );
+
+    let jobs = Arc::clone(&state.jobs);
+    let events_tx = state.events_tx.clone();
+    let stop_ticker = spawn_progress_ticker(
+        Arc::clone(&jobs),
+        events_tx.clone(),
+        job_id,
+        ctx,
+        Arc::clone(&progress),
+        Arc::clone(&progress_files),
+        Arc::clone(&progress_files_finalized),
+        Arc::clone(&progress_bytes_finalized),
+    );
+
+    let dest_display = dest_zip.to_string_lossy().to_string();
+    tokio::task::spawn_blocking(move || {
+        let _stop_guard = TickerStopGuard::new(stop_ticker);
+        let mut fail_guard =
+            JobFailOnDropGuard::new(Arc::clone(&jobs), events_tx.clone(), job_id, started_at_ms);
+        match ps5upload_core::download::download_to_zip(
+            &mgmt_addr,
+            &dest_zip,
+            &manifest,
+            Some(&progress),
+        ) {
+            Ok(bytes_written) => {
+                let completed_at_ms = now_ms();
+                set_job(
+                    &jobs,
+                    &events_tx,
+                    job_id,
+                    JobState::Done {
+                        started_at_ms,
+                        completed_at_ms,
+                        elapsed_ms: completed_at_ms.saturating_sub(started_at_ms),
+                        tx_id_hex: String::new(),
+                        shards_sent: 0,
+                        bytes_sent: bytes_written,
+                        dest: dest_display,
+                        files_sent: files_count,
+                        skipped_files: 0,
+                        skipped_bytes: 0,
+                        commit_ack: None,
+                    },
+                );
+            }
+            Err(e) => {
+                let completed_at_ms = now_ms();
+                set_job(
+                    &jobs,
+                    &events_tx,
+                    job_id,
+                    job_failed_from_err(started_at_ms, completed_at_ms, &e),
+                );
+            }
+        }
+        fail_guard.mark_succeeded();
+    });
+
+    (
+        StatusCode::ACCEPTED,
+        Json(JobCreated {
+            job_id: job_id.to_string(),
+        }),
+    )
+        .into_response()
+}
+
 /// POST /api/transfer/dir-diff-preview
 ///
 /// Dry-run reconcile: same walk + diff as `dir-reconcile`, but returns
@@ -5613,6 +5801,10 @@ async fn run(cfg: EngineConfig) -> anyhow::Result<()> {
         .route("/api/rar/inspect", post(rar_inspect_handler))
         .route("/api/transfer/file-list", post(transfer_file_list_handler))
         .route("/api/transfer/download", post(transfer_download_handler))
+        .route(
+            "/api/transfer/download-zip",
+            post(transfer_download_zip_handler),
+        )
         .route("/api/profile/info", get(profile_info_handler))
         .route("/api/profile/username", post(profile_username_handler))
         .route(

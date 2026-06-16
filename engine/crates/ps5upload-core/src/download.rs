@@ -132,12 +132,17 @@ fn download_file_range(
     conn: &mut Connection,
     path: &str,
     expected: u64,
-    file: &mut std::fs::File,
+    // Any sequential sink. The local-file path passes a `File` (the caller
+    // seeks it to `*offset` before each call so a reconnect resumes in place);
+    // the zip-stream path passes a `ZipWriter`, which is append-only and is
+    // already positioned exactly at `*offset` bytes for the open entry — so the
+    // same resume math (`*offset` only advances on a durable write) holds with
+    // no seek. This fn never seeks; it only writes.
+    sink: &mut impl std::io::Write,
     offset: &mut u64,
     total_written: &mut u64,
     progress: Option<&Arc<AtomicU64>>,
 ) -> Result<()> {
-    use std::io::Write;
     let mut next_req = *offset;
     // Requested lengths, in send order — responses arrive in the same order
     // on a single connection.
@@ -162,7 +167,7 @@ fn download_file_range(
                 *offset
             );
         }
-        file.write_all(&buf[..n as usize])
+        sink.write_all(&buf[..n as usize])
             .context("write downloaded chunk")?;
         *offset += n;
         *total_written += n;
@@ -628,6 +633,95 @@ pub fn download_to_local(
         }
     }
     Ok(total_written)
+}
+
+/// Stream a manifest straight into a `.zip` at `dest_zip`, on the fly: each
+/// file is pulled over the (reused) connection and its bytes are piped through
+/// Deflate into the open zip entry as they arrive — no scratch dir, no
+/// download-then-zip second pass, memory bounded to one chunk.
+///
+/// Inherently single-stream (a zip's entries are written sequentially, one at a
+/// time), so it trades the multi-stream download's parallelism for "no temp
+/// space + one disk pass". Resume-on-drop still works: `download_file_range`
+/// only advances `*offset` on a durable write, FS_READ is offset-addressed, and
+/// the zip writer is append-only and already sits at exactly `*offset` bytes
+/// for the open entry — so a reconnect re-requests from `*offset` and keeps
+/// appending the same entry, no rewind. Returns total uncompressed bytes pulled.
+pub fn download_to_zip(
+    addr: &str,
+    dest_zip: &Path,
+    manifest: &[DownloadEntry],
+    progress_bytes: Option<&Arc<AtomicU64>>,
+) -> Result<u64> {
+    use std::io::BufWriter;
+    use zip::write::SimpleFileOptions;
+
+    let out = std::fs::File::create(dest_zip)
+        .with_context(|| format!("create {}", dest_zip.display()))?;
+    let mut zip = zip::ZipWriter::new(BufWriter::new(out));
+    // Deflate (matches the save-archive zips); `large_file(true)` arms zip64 so
+    // a single >4 GiB game file (or a >4 GiB archive) is encoded correctly.
+    let opts = SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated)
+        .large_file(true);
+
+    let mut total: u64 = 0;
+    let mut conn: Option<Connection> = None;
+    for entry in manifest {
+        // Zip names use forward slashes and no leading slash / drive. The
+        // manifest's rel_path is already root-relative (built by
+        // enumerate_download_set); normalise separators + strip any leading
+        // slash defensively so a crafted name can't escape the archive root.
+        let name = entry
+            .rel_path
+            .replace('\\', "/")
+            .trim_start_matches('/')
+            .to_string();
+        zip.start_file(&name, opts)
+            .with_context(|| format!("zip start entry {name}"))?;
+
+        let expected = entry.size;
+        let mut offset: u64 = 0;
+        let mut reconnects = 0u32;
+        loop {
+            if conn.is_none() {
+                let c = Connection::connect(addr)
+                    .with_context(|| format!("connect {addr} for zip download"))?;
+                let _ = c.set_io_timeout(DOWNLOAD_IO_TIMEOUT);
+                conn = Some(c);
+            }
+            let c = conn.as_mut().expect("just set");
+            match download_file_range(
+                c,
+                &entry.remote_path,
+                expected,
+                &mut zip,
+                &mut offset,
+                &mut total,
+                progress_bytes,
+            ) {
+                Ok(()) => break,
+                Err(e) => {
+                    // Drop the (possibly half-framed) connection and resume the
+                    // SAME zip entry from `offset` on a fresh one.
+                    conn = None;
+                    if reconnects < DOWNLOAD_MAX_RECONNECTS && is_retryable_transfer_error(&e) {
+                        reconnects += 1;
+                        eprintln!(
+                            "[download-zip] {} @ {offset}: {e:#}; reconnect {reconnects}/{DOWNLOAD_MAX_RECONNECTS}",
+                            entry.remote_path
+                        );
+                        continue;
+                    }
+                    return Err(e).with_context(|| {
+                        format!("download {} @ {offset} into zip", entry.remote_path)
+                    });
+                }
+            }
+        }
+    }
+    zip.finish().context("finish zip archive")?;
+    Ok(total)
 }
 
 /// Multi-stream sibling of `download_to_local`: split `manifest` into

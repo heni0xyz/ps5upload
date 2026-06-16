@@ -17,6 +17,7 @@ import {
   Copy,
   ClipboardPaste,
   Download,
+  FileArchive,
   X,
   HardDrive,
   Usb,
@@ -26,6 +27,7 @@ import {
   BadgeCheck,
 } from "lucide-react";
 import { pickPath } from "../../lib/pickPath";
+import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { PageHeader, Button, ConnectionGate } from "../../components";
 // Direct import to avoid the barrel's circular-dep warning at build.
 import {
@@ -46,6 +48,7 @@ import {
   fsOpCancel,
   jobStatus,
   startTransferDownload,
+  startTransferDownloadZip,
   fetchVolumes,
   type Volume,
 } from "../../api/ps5";
@@ -1465,26 +1468,51 @@ export default function FileSystemScreen() {
    *  flow as Library's per-row Download — pick a host folder, kick
    *  off `transfer_download`, poll jobStatus to terminal. Single-
    *  flight at the screen level: only one download at a time. */
-  const runDownload = async (entry: DirEntry) => {
+  const runDownload = async (entry: DirEntry, asZip = false) => {
     // Single-flight per console: only one download at a time on THIS
     // console (others download concurrently into their own slots).
     if (fsDownload.active) return;
-    const picked = await pickPath({
-      mode: "folder",
-      title: tr(
-        "fs_download_dialog_title",
-        { name: entry.name },
-        'Pick a destination folder for "{name}"',
-      ),
-    });
-    if (typeof picked !== "string") return;
     const addr = `${host}:${PS5_PAYLOAD_PORT}`;
     const remote = joinPath(path, entry.name);
     const kind: "file" | "folder" = entry.kind === "dir" ? "folder" : "file";
+
+    // asZip: pick a .zip save path and stream-zip into it (no scratch dir).
+    // Otherwise: pick a destination folder and pull the file/tree as-is.
+    let dest: string;
+    let rootName: string;
+    let start: () => Promise<string>;
+    if (asZip) {
+      const destZip = await saveDialog({
+        defaultPath: `${entry.name}.zip`,
+        filters: [{ name: "ZIP archive", extensions: ["zip"] }],
+        title: tr(
+          "fs_download_zip_dialog_title",
+          { name: entry.name },
+          'Save "{name}" as a .zip',
+        ),
+      });
+      if (!destZip || typeof destZip !== "string") return;
+      dest = destZip;
+      rootName = destZip.split(/[\\/]/).pop() || `${entry.name}.zip`;
+      start = () => startTransferDownloadZip(remote, destZip, addr, kind);
+    } else {
+      const picked = await pickPath({
+        mode: "folder",
+        title: tr(
+          "fs_download_dialog_title",
+          { name: entry.name },
+          'Pick a destination folder for "{name}"',
+        ),
+      });
+      if (typeof picked !== "string") return;
+      dest = picked;
+      rootName = entry.name;
+      start = () => startTransferDownload(remote, picked, addr, kind);
+    }
     setError(null);
     let jobId: string;
     try {
-      jobId = await startTransferDownload(remote, picked, addr, kind);
+      jobId = await start();
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       const friendly = tr(
@@ -1506,9 +1534,9 @@ export default function FileSystemScreen() {
     }
     const myRunId = fsDownload.begin({
       jobId,
-      rootName: entry.name,
+      rootName,
       rootSrcPath: remote,
-      destDir: picked,
+      destDir: dest,
     });
     // Generation-counted abort: the runner captures myRunId and
     // bails when the store's runId moves on (begin() of a new
@@ -2140,6 +2168,19 @@ export default function FileSystemScreen() {
                     ) : (
                       <Download size={12} />
                     )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => runDownload(e, true)}
+                    disabled={downloadOp.active}
+                    title={tr(
+                      "fs_download_zip_tooltip",
+                      undefined,
+                      "Download to this computer as a .zip (streamed — no temp copy)",
+                    )}
+                    className="rounded-md border border-[var(--color-border)] p-1 hover:bg-[var(--color-surface-3)] disabled:opacity-30"
+                  >
+                    <FileArchive size={12} />
                   </button>
                   <button
                     type="button"

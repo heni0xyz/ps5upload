@@ -567,6 +567,26 @@ export async function startTransferDownload(
   return res.job_id;
 }
 
+/** Download a PS5 file/folder straight into a `.zip` at `destZip`, streamed
+ *  through Deflate as it downloads (no scratch dir). Returns the job_id —
+ *  poll job_status for progress, same as a plain download. */
+export async function startTransferDownloadZip(
+  srcPath: string,
+  destZip: string,
+  transferAddr: string,
+  kind: "file" | "folder",
+): Promise<string> {
+  const res = await invoke<{ job_id: string }>("transfer_download_zip", {
+    req: {
+      src_path: srcPath,
+      dest_zip: destZip,
+      addr: transferAddr,
+      kind,
+    },
+  });
+  return res.job_id;
+}
+
 // ─── Folder diff (pre-upload preview) ─────────────────────────────────
 
 export interface DirDiffPreview {

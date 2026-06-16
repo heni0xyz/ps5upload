@@ -851,6 +851,30 @@ pub struct TransferDownloadReq {
     pub kind: String,
 }
 
+/// PS5 → host download streamed straight into a `.zip` (one pass, no scratch
+/// dir). `dest_zip` is the full path of the archive to create. Same `{ job_id }`
+/// response — poll job_status for progress.
+#[derive(Debug, Deserialize)]
+pub struct TransferDownloadZipReq {
+    pub src_path: String,
+    pub dest_zip: String,
+    pub addr: Option<String>,
+    pub kind: String,
+}
+
+#[tauri::command]
+pub async fn transfer_download_zip(req: TransferDownloadZipReq) -> Result<JsonValue, String> {
+    let base = engine::url();
+    let url = format!("{base}/api/transfer/download-zip");
+    let body = serde_json::json!({
+        "src_path": req.src_path,
+        "dest_zip": req.dest_zip,
+        "addr": req.addr,
+        "kind": req.kind,
+    });
+    post_json(&url, &body).await
+}
+
 #[tauri::command]
 pub async fn transfer_download(req: TransferDownloadReq) -> Result<JsonValue, String> {
     let base = engine::url();
