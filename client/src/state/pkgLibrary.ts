@@ -340,12 +340,14 @@ const PKG_VERIFY_SAFETY_CAP_MS = 3 * 60 * 60 * 1000;
 /** Re-install guidance appended when Sony fails the async install — mirrors the
  *  may-not-launch copy so the user has a concrete next step. */
 const PKG_ASYNC_FAILED_HINT =
-  'the PS5 reported the install didn’t complete (the tile may show "Can’t start the game or app. The data is corrupted."). Re-install from the PS5: Settings → System → Debug Settings → Game → Package Installer.';
+  'the PS5 reported the install didn’t complete (the tile may show "Can’t start the game or app"). That tile is empty and safe to delete from the PS5. Re-install from the PS5: Settings → System → Debug Settings → Game → Package Installer.';
 
 /** Stall guidance — the install accepted but disk progress flatlined. The
- *  staged pkg was KEPT, so the user can simply retry. */
+ *  staged pkg was KEPT, so the user can simply retry. We deliberately do NOT
+ *  blame free space (a stall has many causes, and users with plenty of space
+ *  found that misleading) and we tell them the empty tile is safe to delete. */
 const PKG_STALL_HINT =
-  "the install stopped making progress on the PS5 before it finished. The package was kept on the PS5 — try installing it again (and check the console has enough free space).";
+  'the install stopped making progress before it finished, so nothing was actually installed. Your package was kept on the PS5 — you can simply try again. If a tile appeared that won’t open ("Can’t start the game or app"), it’s empty and safe to delete. For stubborn .pkg files (often PS4 backports), the PS5’s own Package Installer (Settings → System → Debug Settings → Game → Package Installer) is the most reliable.';
 
 /** What the install tracker concludes. */
 interface VerifyOutcome {

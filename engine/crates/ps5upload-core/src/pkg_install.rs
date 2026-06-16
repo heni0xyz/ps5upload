@@ -546,11 +546,11 @@ pub fn err_code_message(code: u32) -> Option<&'static str> {
         0x8099_0001 => Some("BGFT initialised already (benign)"),
         0x8099_0036 => Some("DRM mismatch — this PKG isn't valid for this console"),
         0x8099_0038 => Some("PKG entitlement check failed — wrong account / region"),
-        0x8099_0039 => Some("Out of free space on the PS5"),
+        0x8099_0039 => Some("PS5 reports not enough free space — if the console clearly has room, its storage is likely too fragmented; rebuild the database from Safe Mode, then retry"),
         0x8099_0085 => Some("Need defragmented free space — Settings → Storage → Free up space"),
         0x8099_0086 => Some("Leftover download in notifications — clear it from the PS5 first"),
         0x8099_0088 => Some("This title is already installed"),
-        0x80A3_0026 => Some("Out of free space on the PS5"),
+        0x80A3_0026 => Some("PS5 reports not enough free space — if the console clearly has room, its storage is likely too fragmented; rebuild the database from Safe Mode, then retry"),
         // PlayGo (BGFT's HTTP fetcher) — the engine returned a non-2xx
         // response to BGFT during the install pull. Usually means the
         // /pkg-host URL session expired or the engine restarted mid-
