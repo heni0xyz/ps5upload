@@ -610,7 +610,19 @@ fn spawn_progress_ticker(
             if stop_for_tick.load(Ordering::Acquire) {
                 break;
             }
-            let bytes_sent = progress.load(Ordering::Relaxed);
+            // Clamp to the known total: the progress counter is CUMULATIVE
+            // bytes pushed, so a resume-on-drop (which re-sends from the last
+            // durable offset) makes it climb PAST the file size — the UI then
+            // showed "36 GiB / 24.6 GiB". A progress counter can't meaningfully
+            // exceed the target, so cap it (when the total is known); the bar
+            // pins at 100% instead of overshooting. Dedup below then also sees
+            // a steady value once capped, so it stops emitting noise ticks.
+            let raw_bytes = progress.load(Ordering::Relaxed);
+            let bytes_sent = if ctx.total_bytes > 0 {
+                raw_bytes.min(ctx.total_bytes)
+            } else {
+                raw_bytes
+            };
             let files_processing = progress_files.load(Ordering::Relaxed);
             let files_finalized = progress_files_finalized.load(Ordering::Relaxed);
             let bytes_finalized = progress_bytes_finalized.load(Ordering::Relaxed);
