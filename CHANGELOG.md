@@ -4,6 +4,26 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 3.3.13
+
+Smoother, smarter installs — especially when queueing a game with updates + DLC.
+
+- **Installs now go in the right order: base game → update → DLC.** Queue a game
+  with its updates and add-ons and they install base-first, so an update or DLC
+  never tries to install before the game it belongs to (which wasted the upload
+  and space). Items within the same kind keep the order you added them.
+- **A heads-up before an install that won't fit.** ps5upload now checks free
+  space up-front and, if a package is clearly too big for what's left, tells you
+  to free up space *before* you wait through a doomed install (estimate-based —
+  the real installed size can vary a little).
+- **No more spurious "Delete failed" after a successful install.** The staged
+  package is now removed with a brief wait + retry (the PS5 can hold the file
+  for a moment right after installing), and if cleanup still can't happen it's
+  left quietly for "Clear finished" instead of throwing an error at you.
+- **Queues of small updates/DLC no longer stall on FW 12.** After each install
+  the app waits for the console to settle (the brief "screen goes black" blip on
+  FW 12) before starting the next item's upload.
+
 ## 3.3.12
 
 - **Download a PS5 file or folder straight to a `.zip`.** In the File System
