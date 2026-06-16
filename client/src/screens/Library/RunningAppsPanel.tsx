@@ -194,7 +194,16 @@ export default function RunningAppsPanel({ mgmtAddr }: { mgmtAddr: string }) {
   // Hide the panel entirely when nothing is running and no error —
   // typical Library use is "I'm browsing my games", and an always-empty
   // panel would just steal screen space.
-  if (apps.length === 0 && !error && !loading) return null;
+  //
+  // Visibility is gated ONLY on having something to show (apps or an error),
+  // never on `loading`: the panel polls every 5s, and each poll flips
+  // `loading` true→false. Including `!loading` here meant that, with nothing
+  // running, every tick briefly satisfied the render path (loading=true →
+  // empty panel appears) then hid it again (loading=false, still empty) —
+  // the Library "flickers every few seconds" bug. A poll while apps already
+  // exist keeps the panel mounted (apps.length > 0) and just spins the header
+  // refresh icon, so no loading indicator is lost.
+  if (apps.length === 0 && !error) return null;
 
   return (
     <section className="mb-4 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3">

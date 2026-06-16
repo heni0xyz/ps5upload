@@ -25,6 +25,9 @@ messaging when an install fails.
   delete, and points to the PS5's own Package Installer for stubborn packages.
   An "out of space" error from the PS5 now notes it can mean fragmented storage
   even when space is free (rebuild the database from Safe Mode).
+- **The Library no longer flickers.** When nothing was running, the "Running
+  apps" panel flashed in and out every few seconds as it refreshed; it now stays
+  hidden until there's actually something to show.
 
 ## 3.3.6
 
