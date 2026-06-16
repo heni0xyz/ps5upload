@@ -451,18 +451,16 @@ const PKG_ASYNC_FAILED_HINT =
 const PKG_STALL_HINT =
   'the install stopped making progress before it finished, so nothing was actually installed. Your package was kept on the PS5 — you can simply try again. If a tile appeared that won’t open ("Can’t start the game or app"), it’s empty and safe to delete. For stubborn .pkg files (often PS4 backports), the PS5’s own Package Installer (Settings → System → Debug Settings → Game → Package Installer) is the most reliable.';
 
-/** Guidance when a PATCH/UPDATE (a "…DP" package) is rejected at register time.
- *  An update shares the base game's content id, so it can only go in through the
- *  PS5's safe install path — and ps5upload deliberately will NOT fall back to the
- *  method that re-registers that id (which would delete the base game). On some
- *  firmware the safe path declines the update (e.g. a file:// install authid
- *  gate, hardware-observed), and the update simply can't be applied from here.
- *  The base game is untouched; the PS5's own Package Installer applies updates
- *  correctly. This replaces the raw, misleading "PKG header — corrupt or wrongly
- *  named" code text for this case (the file is fine — it's an update that can't
- *  apply on top through our safe path). */
+/** Guidance when a PATCH/UPDATE (a "…DP" package) can't be applied even after
+ *  the DPI fallback. ps5upload applies updates through Sony's safe installer
+ *  (in-process appinst, or the DPI daemon when the in-process path hits a
+ *  firmware authid gate) — never the destructive tier that would delete the
+ *  base. When even DPI declines it, the update usually doesn't match the
+ *  installed game (or the base isn't installed). The base game is untouched;
+ *  the PS5's own Package Installer is the most reliable last resort. This
+ *  replaces the raw, misleading "PKG header — corrupt or wrongly named" text. */
 export const PKG_PATCH_REJECTED_HINT =
-  "This update couldn’t be applied. Because it’s an update (it shares your game’s ID), ps5upload will only add it through the PS5’s safe install path — and won’t fall back to a method that could delete your installed base game. On this console that safe path declined it, so nothing changed and your base game is untouched. To apply the update, install it from the PS5 itself: Settings → System → Debug Settings → Game → Package Installer.";
+  "This update couldn’t be applied. ps5upload installs updates through the PS5’s safe install path (never one that could delete your base game), and on this console the PS5 declined it — most often because the update doesn’t match your installed version of the game, or the base game isn’t installed yet. Your base game is untouched. If you have the right update, you can also apply it from the PS5 itself: Settings → System → Debug Settings → Game → Package Installer.";
 
 /** What the install tracker concludes. */
 interface VerifyOutcome {
@@ -764,39 +762,44 @@ export async function runPkgInstall(
     mainErr = pkgError(e);
   }
 
-  // A patch ("…DP") the payload guard rejected can NEVER be rescued by the DPI
-  // fallback: DPI installs via the SAME sceAppInstUtilInstallByPackage that just
-  // failed, on the same firmware — so it's guaranteed to fail again, only slower
-  // (it swaps our payload out and back). Skipping it surfaces the clean "can't
-  // apply on top — base is safe" result immediately instead of after a wasted
-  // payload swap. `resolvedType` is the engine's post-parse type, so this holds
-  // for USB/queue/File-System patches too, where the client sent no type.
-  if (!installed && startRejected && resolvedType.endsWith("DP")) {
-    // Replace the raw Sony code text (often "PKG header — corrupt or wrongly
-    // named", which is misleading: the file is fine) with update-specific
-    // guidance that reassures the base game is safe and points to the PS5's
-    // own Package Installer — the reliable way to apply an update here.
-    return {
-      installed: false,
-      mayNotLaunch,
-      errMessage: PKG_PATCH_REJECTED_HINT,
-      stalled,
-    };
-  }
-
   if (!installed && startRejected) {
-    // FALLBACK: the jailbroken-context install was rejected. Try the
-    // standalone DPI daemon (replaces our payload on the single-payload
-    // loader, installs, then we restore the payload).
+    // FALLBACK: the in-process install was rejected. Hand off to the standalone
+    // DPI daemon (:9040), which runs Sony's appinst in a SEPARATE, properly-
+    // authid'd process. This rescues two cases the in-process path can't:
+    //   • a patch ("…DP") whose only remaining in-process route is the
+    //     destructive shellui-rpc tier the data-loss guard forbids, and
+    //   • firmware (e.g. FW 5.10) where the in-process appinst file:// install
+    //     hits an authid gate (err 0x80B21106 — the base game itself lands via
+    //     shellui-rpc, but a patch can't use that tier).
+    // DPI is NON-destructive: appinst applies an update on top of the base, so
+    // it's safe for patches. HW-proven on the Phat — a Jak X v01.04 patch landed
+    // in /user/patch/CUSA07842/patch.pkg with the 3.8 GB base in
+    // /user/app/CUSA07842/app.pkg fully intact.
     const dpi = await runDpiInstall(host, localPs5Path);
     if (dpi.daemonFailed) {
+      // DPI couldn't even come up. For a patch, give update-specific guidance
+      // (base is safe; try the PS5's Package Installer) rather than a raw
+      // daemon error.
+      if (resolvedType.endsWith("DP")) {
+        return {
+          installed: false,
+          mayNotLaunch,
+          errMessage: PKG_PATCH_REJECTED_HINT,
+          stalled,
+        };
+      }
       throw new Error(
         `Main-payload install failed (${mainErr}) and ${dpi.errMessage}`,
       );
     }
     installed = dpi.ok;
     if (!installed) {
-      mainErr = dpi.errMessage || mainErr;
+      // DPI ran but the PS5 declined the install. An update that can't apply
+      // (wrong base version, or no base) gets the update-specific guidance;
+      // everything else keeps DPI's own error.
+      mainErr = resolvedType.endsWith("DP")
+        ? PKG_PATCH_REJECTED_HINT
+        : dpi.errMessage || mainErr;
     }
   }
   return { installed, mayNotLaunch, errMessage: mainErr, stalled };

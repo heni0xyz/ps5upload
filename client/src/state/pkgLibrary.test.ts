@@ -255,12 +255,12 @@ describe("runPkgInstall — forwards deleteStaging to the engine", () => {
     expect(startArgs()?.deleteStaging).toBe(true);
   });
 
-  it("a rejected patch (…DP) surfaces clear guidance, not the raw 'PKG header' code, and skips DPI", async () => {
-    // The user-reported case: a Jak X update rejected at register with
-    // 0x80B21106 ("PKG header — corrupt or wrongly named"). For a patch that's
-    // misleading (the file is fine; the safe path declined it). We replace it
-    // with reassuring guidance and must NOT try the DPI fallback (same failing
-    // installer, and the destructive path is exactly what the guard forbids).
+  it("a rejected patch (…DP) is rescued by the DPI fallback (safe appinst)", async () => {
+    // The user-reported case: a Jak X update rejected in-process with 0x80B21106
+    // (a firmware authid gate; the base game itself lands via shellui-rpc, which
+    // a patch can't use). The DPI daemon runs Sony's appinst in a separate
+    // process and applies the update on top of the base — HW-proven safe. So a
+    // patch MUST fall through to DPI, not bail with the raw error.
     mockedInvoke.mockReset();
     mockedInvoke.mockImplementation(async (cmd: unknown) => {
       if (cmd === "pkg_install_start") {
@@ -271,6 +271,33 @@ describe("runPkgInstall — forwards deleteStaging to the engine", () => {
           package_type: "PS4DP",
         };
       }
+      if (cmd === "dpi_ensure") return { ok: true };
+      if (cmd === "pkg_dpi_install") return { ok: true, rc: 0 };
+      if (cmd === "payload_bundled_path") return { ok: true, path: "/tmp/p.elf" };
+      return {};
+    });
+    const r = await runPkgInstall(
+      "192.168.1.50",
+      "/user/data/ps5upload/pkg_library/updates/CID.pkg",
+      "CID",
+      "PS4DP",
+      false,
+    );
+    expect(r.installed).toBe(true);
+    expect(mockedInvoke.mock.calls.some((c) => c[0] === "pkg_dpi_install")).toBe(
+      true,
+    );
+  });
+
+  it("a patch DPI can't apply gets update-specific guidance, not the raw error", async () => {
+    mockedInvoke.mockReset();
+    mockedInvoke.mockImplementation(async (cmd: unknown) => {
+      if (cmd === "pkg_install_start") {
+        return { err_code: 0x80b21106, register_path: "none", package_type: "PS4DP" };
+      }
+      if (cmd === "dpi_ensure") return { ok: true };
+      if (cmd === "pkg_dpi_install") return { ok: false, rc: 0x80b21106, err_message: "raw" };
+      if (cmd === "payload_bundled_path") return { ok: true, path: "/tmp/p.elf" };
       return {};
     });
     const r = await runPkgInstall(
@@ -282,11 +309,6 @@ describe("runPkgInstall — forwards deleteStaging to the engine", () => {
     );
     expect(r.installed).toBe(false);
     expect(r.errMessage).toBe(PKG_PATCH_REJECTED_HINT);
-    expect(r.errMessage).not.toMatch(/corrupt or wrongly named/);
-    // DPI must not be attempted for a guarded patch.
-    expect(mockedInvoke.mock.calls.some((c) => c[0] === "pkg_dpi_install")).toBe(
-      false,
-    );
   });
 });
 
