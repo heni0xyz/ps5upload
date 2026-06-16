@@ -44,6 +44,22 @@ if (!skipBuild) run("client vite build", "npm", ["run", "build:vite"], { cwd: pa
 if (full) {
   run("payload ELF build/validation", "make", ["test-payload"]);
   run("root aggregate test", "make", ["test"]);
+
+  // Mobile (Android) compile. The desktop and mobile builds share the command
+  // layer but have separate engine modules (engine.rs vs engine_mobile.rs); a
+  // helper added to one but used by a shared command compiles on the host yet
+  // breaks the Android target — exactly the kind of regression CI's `android`
+  // job catches and the desktop-only checks above miss. Run it here too (only
+  // when the Android toolchain is set up) so `--full` mirrors CI. Best-effort:
+  // skipped cleanly on a machine without the SDK/NDK/JDK.
+  const hasRustup = spawnSync("rustup", ["--version"], { stdio: "ignore" }).status === 0;
+  if (hasRustup && process.env.ANDROID_HOME) {
+    run("android compile (mobile target)", "make", ["android-build"]);
+  } else {
+    process.stdout.write(
+      "\n==> android compile — skipped (no Android toolchain: need rustup + ANDROID_HOME + NDK + JDK 17)\n",
+    );
+  }
 }
 
 if (hardware) {
