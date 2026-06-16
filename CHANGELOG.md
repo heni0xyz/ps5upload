@@ -4,6 +4,20 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 3.3.18
+
+- **Cancel a single upload without stopping the whole queue.** The item that's
+  actively uploading now has a Cancel button. It stops just that transfer (the
+  partial upload stays resumable) and the rest of that console's queue keeps
+  going — handy when one big item is hogging the line. ("Stop" still halts
+  everything as before.)
+- **A ready-to-run engine Docker image.** The self-hosted transfer engine is
+  now published as an official multi-arch image at
+  `ghcr.io/phantomptr/ps5upload-engine` (`:latest` or pin `:<version>`), so you
+  can run it on a NAS or home server without building from source. As always:
+  the engine has no password — keep it on a trusted LAN, never the internet.
+  Thanks to @Twice6804 for the contribution.
+
 ## 3.3.17
 
 UI polish pass — tighter on phones and small windows.
