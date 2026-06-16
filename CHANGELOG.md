@@ -4,6 +4,24 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 3.3.8
+
+Tell a game's updates apart at a glance — and stop an update from looking
+"installed" when it isn't.
+
+- **An update/DLC no longer shows "Installed · Reinstall" just because the base
+  game is installed.** A PS4 update shares the base game's title id, so once the
+  base was on the console its never-installed update inherited the "installed"
+  badge and a "Reinstall" button. Add-ons now always read as installable —
+  only the base game shows as installed (its install state is the one the PS5
+  can actually confirm).
+- **Each package now shows its version and original filename.** Updates share a
+  ContentID *and* a title, so they used to look identical apart from the
+  "update" badge. The library now shows the real package version (e.g. `v01.04`,
+  read straight from the package) plus the filename you uploaded — so you can
+  tell `[v01.00]` from `[v01.04]` at a glance. (Newer uploads carry this; an
+  already-staged package shows it again once re-uploaded.)
+
 ## 3.3.7
 
 The 3.3.6 data-loss fix now actually covers PS4 game updates — plus clearer
