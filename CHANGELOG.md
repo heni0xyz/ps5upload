@@ -4,6 +4,28 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 3.3.7
+
+The 3.3.6 data-loss fix now actually covers PS4 game updates — plus clearer
+messaging when an install fails.
+
+- **Installing a PS4 game's update (patch) can no longer delete the base game.**
+  3.3.6 added this protection, but it relied on the update being labelled as one
+  in a way the install couldn't always see — so a PS4 patch still looked like a
+  full game, reinstalled the shared ID, and **wiped the installed base**
+  (hardware-confirmed on two consoles: a Jak X patch deleted its 3.8 GB base).
+  The app now reads the real "update vs. full game" flag **straight from the
+  package on the console** at install time, so an update is recognised no matter
+  how it reached the PS5 (uploaded, copied from USB, or picked from the file
+  browser) — while a normal full-game re-install still works as before. Verified
+  on real hardware, internal *and* extended storage: the base game stays put and
+  an update that can't apply on top simply fails harmlessly.
+- **Clearer guidance when an install fails or stalls.** A failed install no
+  longer blames free space, tells you the empty tile it left behind is safe to
+  delete, and points to the PS5's own Package Installer for stubborn packages.
+  An "out of space" error from the PS5 now notes it can mean fragmented storage
+  even when space is free (rebuild the database from Safe Mode).
+
 ## 3.3.6
 
 A data-loss fix: installing a game's update can no longer delete the game.
