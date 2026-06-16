@@ -32,6 +32,10 @@ messaging when an install fails.
   box now loads the chosen user's existing avatar by default (instead of a blank
   placeholder), so you can see what's there before replacing it. (Picking
   different users was already supported.)
+- **Screenshots show thumbnails.** Each row now shows a small preview of the
+  shot instead of a generic icon. Previews decode lazily as you scroll (PS5
+  screenshots are HDR JPEG XR, so this is desktop-only — same as Convert/Preview)
+  and are cached so each decodes once.
 
 ## 3.3.6
 
