@@ -25,6 +25,7 @@ import {
   isFinishedPkg,
   pkgInstallMayNotLaunch,
   pkgTypeForCategory,
+  pkgRowInstalled,
   installedLastResult,
   runPkgInstall,
   PKG_MAY_NOT_LAUNCH_MESSAGE,
@@ -123,6 +124,49 @@ describe("pkgTypeForCategory (patch data-loss guard input)", () => {
     expect(pkgTypeForCategory(null)).toBeNull();
     expect(pkgTypeForCategory("")).toBeNull();
     expect(pkgTypeForCategory("zz")).toBeNull();
+  });
+});
+
+describe("pkgRowInstalled (installed/Reinstall badge)", () => {
+  // The reported bug: installing a base game made its never-installed UPDATE
+  // (and DLC) show "INSTALLED · Reinstall", because an add-on shares the base
+  // game's title id and the console's app_list is keyed on title id.
+  const installed = new Set(["CUSA07842"]); // base game is on the console
+
+  it("marks an installed BASE game as installed", () => {
+    expect(
+      pkgRowInstalled({ titleId: "CUSA07842", category: "gd" }, installed),
+    ).toBe(true);
+    // A root-level pkg of unknown category is treated as a base game.
+    expect(
+      pkgRowInstalled({ titleId: "CUSA07842", category: undefined }, installed),
+    ).toBe(true);
+  });
+
+  it("does NOT mark an UPDATE installed just because its base is", () => {
+    // The load-bearing regression case — the update shares CUSA07842 but was
+    // never itself installed, so it must read as installable, not "Reinstall".
+    expect(
+      pkgRowInstalled({ titleId: "CUSA07842", category: "gp" }, installed),
+    ).toBe(false);
+  });
+
+  it("does NOT mark DLC installed off the base game's title id", () => {
+    expect(
+      pkgRowInstalled({ titleId: "CUSA07842", category: "ac" }, installed),
+    ).toBe(false);
+  });
+
+  it("is not installed when the base title isn't on the console", () => {
+    expect(
+      pkgRowInstalled({ titleId: "CUSA99999", category: "gd" }, installed),
+    ).toBe(false);
+  });
+
+  it("is not installed without a derivable title id", () => {
+    expect(
+      pkgRowInstalled({ titleId: undefined, category: "gd" }, installed),
+    ).toBe(false);
   });
 });
 

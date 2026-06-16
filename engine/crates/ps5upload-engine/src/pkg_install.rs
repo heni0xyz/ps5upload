@@ -1798,6 +1798,7 @@ async fn resolve_parts_and_meta(
             title: String::new(),
             title_id: String::new(),
             category: String::new(),
+            app_ver: String::new(),
             package_type: req.package_type_override.clone(),
             platform: ps5upload_pkg::derive_platform(
                 ps5upload_pkg::PKG_MAGIC,

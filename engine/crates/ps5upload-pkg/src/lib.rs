@@ -497,6 +497,12 @@ pub struct PkgMetadata {
     /// PARAM.SFO `CATEGORY` field — `gd` (game), `gp` (patch),
     /// `ac` (DLC/add-on), `gde` (extra), etc.
     pub category: String,
+    /// PARAM.SFO `APP_VER` field — the application version this package
+    /// brings, e.g. `01.04`. For a patch (`gp`) this is the authoritative
+    /// "which update is this" answer (a patch shares the base game's
+    /// content_id and TITLE, so nothing else distinguishes versions). Empty
+    /// when the SFO is missing or has no APP_VER key.
+    pub app_ver: String,
     /// Mapping of `category` to BGFT's `package_type` string. None
     /// when the category is unknown / SFO missing — caller may still
     /// attempt install with `package_type=PS4GD` as a default.
@@ -553,6 +559,7 @@ pub fn parse_pkg(path: &Path) -> Result<PkgMetadata, PkgError> {
         title: String::new(),
         title_id: String::new(),
         category: String::new(),
+        app_ver: String::new(),
         package_type: None,
         platform: String::new(),
         icon_png_base64: None,
@@ -781,6 +788,7 @@ fn parse_sfo_into(buf: &[u8], meta: &mut PkgMetadata) -> Result<(), &'static str
             "TITLE" => meta.title = val,
             "TITLE_ID" => meta.title_id = val,
             "CATEGORY" => meta.category = val,
+            "APP_VER" => meta.app_ver = val,
             "CONTENT_ID" if meta.content_id.is_empty() => meta.content_id = val,
             _ => {}
         }
@@ -947,6 +955,73 @@ mod tests {
         pkg[e + 0x14..e + 0x18].copy_from_slice(&(sfo.len() as u32).to_be_bytes());
         pkg.extend_from_slice(&sfo);
         pkg
+    }
+
+    // Build a PARAM.SFO carrying several string keys (CATEGORY, APP_VER, …).
+    // Matches the layout `parse_sfo_into` reads: 0x14 header, 0x10-byte index
+    // entries (key_off u16, fmt u16, len u32, max u32, data_off u32), then the
+    // key table, then the data table.
+    fn build_sfo_multi(pairs: &[(&str, &str)]) -> Vec<u8> {
+        let n = pairs.len();
+        let key_table_off = 0x14 + n * 0x10;
+        let mut keys = Vec::new();
+        let mut key_offs = Vec::new();
+        for (k, _) in pairs {
+            key_offs.push(keys.len() as u16);
+            keys.extend_from_slice(k.as_bytes());
+            keys.push(0);
+        }
+        let data_table_off = key_table_off + keys.len();
+        let mut data = Vec::new();
+        let mut data_offs = Vec::new();
+        let mut lens = Vec::new();
+        for (_, v) in pairs {
+            data_offs.push(data.len() as u32);
+            let val = format!("{v}\0");
+            lens.push(val.len() as u32);
+            data.extend_from_slice(val.as_bytes());
+        }
+        let mut sfo = Vec::new();
+        sfo.extend_from_slice(b"\x00PSF");
+        sfo.extend_from_slice(&[1, 1, 0, 0]);
+        sfo.extend_from_slice(&(key_table_off as u32).to_le_bytes());
+        sfo.extend_from_slice(&(data_table_off as u32).to_le_bytes());
+        sfo.extend_from_slice(&(n as u32).to_le_bytes());
+        for i in 0..n {
+            sfo.extend_from_slice(&key_offs[i].to_le_bytes()); // key_off
+            sfo.extend_from_slice(&0x0204u16.to_le_bytes()); // fmt = utf8
+            sfo.extend_from_slice(&lens[i].to_le_bytes()); // len
+            sfo.extend_from_slice(&lens[i].to_le_bytes()); // max
+            sfo.extend_from_slice(&data_offs[i].to_le_bytes()); // data_off
+        }
+        sfo.extend_from_slice(&keys);
+        sfo.extend_from_slice(&data);
+        sfo
+    }
+
+    #[test]
+    fn parse_sfo_into_reads_app_ver() {
+        // A patch's APP_VER is the authoritative "which update is this" — it
+        // shares the base game's content_id and TITLE, so nothing else tells
+        // versions apart. Parse it alongside CATEGORY from a realistic SFO.
+        let sfo = build_sfo_multi(&[("APP_VER", "01.04"), ("CATEGORY", "gp")]);
+        let mut meta = PkgMetadata {
+            path: PathBuf::new(),
+            size: 0,
+            kind: PkgKind::Standard,
+            content_id: String::new(),
+            title: String::new(),
+            title_id: String::new(),
+            category: String::new(),
+            app_ver: String::new(),
+            package_type: None,
+            platform: String::new(),
+            icon_png_base64: None,
+            warnings: Vec::new(),
+        };
+        parse_sfo_into(&sfo, &mut meta).expect("SFO should parse");
+        assert_eq!(meta.app_ver, "01.04");
+        assert_eq!(meta.category, "gp");
     }
 
     #[test]

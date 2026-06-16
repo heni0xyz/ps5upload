@@ -16,6 +16,7 @@ import {
   HardDrive,
   FolderOpen,
   Copy,
+  FileText,
 } from "lucide-react";
 
 import { isAndroid } from "../../lib/platform";
@@ -39,6 +40,7 @@ import { useTr } from "../../state/lang";
 import {
   usePkgLibrary,
   isFinishedPkg,
+  pkgRowInstalled,
   type PkgEntry,
 } from "../../state/pkgLibrary";
 import { useInstallSettingsStore } from "../../state/installSettings";
@@ -96,7 +98,14 @@ function PkgRow({
       icon: <Copy size={12} />,
       onSelect: () =>
         void navigator.clipboard?.writeText(
-          [entry.title, entry.contentId, entry.titleId, entry.path]
+          [
+            entry.title,
+            entry.appVer ? `v${entry.appVer}` : "",
+            entry.originalName,
+            entry.contentId,
+            entry.titleId,
+            entry.path,
+          ]
             .filter(Boolean)
             .join("\n"),
         ),
@@ -138,12 +147,34 @@ function PkgRow({
                     : tr("pkglib.badge.dlc", "DLC")}
                 </span>
               )}
+            {/* Authoritative PARAM.SFO version — the definitive "which update
+                is this" (updates share a ContentID and a title). */}
+            {entry.appVer && (
+              <span
+                className="inline-flex shrink-0 items-center rounded-full border border-[var(--color-border)] px-1.5 py-0.5 font-mono text-xs font-medium tabular-nums text-[var(--color-muted)]"
+                title={tr("pkglib.version.title", "Package version (PARAM.SFO APP_VER)")}
+              >
+                v{entry.appVer}
+              </span>
+            )}
           </div>
           <div className="mt-0.5 truncate font-mono text-xs text-[var(--color-muted)]">
             {entry.contentId || entry.name}
             <span className="px-1 opacity-60">·</span>
             <span className="tabular-nums">{formatBytes(entry.size)}</span>
           </div>
+          {/* Original uploaded filename — the only thing that tells a game's
+              updates apart (they share a ContentID and a title). Best-effort:
+              shown when we captured it at upload (cached locally). */}
+          {entry.originalName && (
+            <div
+              className="mt-0.5 flex items-center gap-1 truncate text-xs text-[var(--color-muted)]"
+              title={entry.originalName}
+            >
+              <FileText size={11} className="shrink-0 opacity-70" />
+              <span className="truncate">{entry.originalName}</span>
+            </div>
+          )}
         </div>
 
         {/* Actions */}
@@ -664,7 +695,11 @@ export default function InstallPackageScreen() {
         <>
           <ul className="grid gap-2">
             {sorted.map((e) => {
-              const installed = !!e.titleId && installedIds.has(e.titleId);
+              // Only a base game earns the "installed"/"Reinstall" treatment —
+              // an update/DLC shares the base's title id, so a present base
+              // would otherwise make a never-installed add-on read as
+              // "INSTALLED · Reinstall". See `pkgRowInstalled`.
+              const installed = pkgRowInstalled(e, installedIds);
               return (
                 <PkgRow
                   key={e.path}

@@ -11,6 +11,7 @@ import {
   stagingBasename,
   stagingSubdirForCategory,
   categoryForSubdir,
+  isAddonCategory,
 } from "../lib/pkgStagingPath";
 import { ensurePayloadCurrent } from "../lib/ensurePayloadCurrent";
 import { transferScreenBusy } from "../lib/ps5Transfers";
@@ -105,6 +106,21 @@ export interface PkgEntry {
   contentId: string;
   /** Friendly title, when known (parsed at upload, cached in localStorage). */
   title?: string;
+  /** The original on-disk filename the user uploaded, e.g.
+   *  `Jak X… [v01.04].pkg`. The staged file is renamed to `<ContentID>.pkg`
+   *  (Sony's installer keys on that), and a base game + its updates share a
+   *  ContentID — so the PARAM.SFO `title` is identical across them and the
+   *  staged name is useless for telling versions apart. The original filename
+   *  (which usually carries the version) is the one human-readable
+   *  distinguisher, so we capture it at upload and cache it (path → name).
+   *  Best-effort, like `title`: undefined for files staged on another machine
+   *  or after the cache was cleared. */
+  originalName?: string;
+  /** PARAM.SFO `APP_VER` (e.g. `01.04`) — the authoritative package version,
+   *  parsed at upload and cached (path → version). For a patch this is the
+   *  definitive "which update is this", since updates share a ContentID and a
+   *  title. Best-effort, same caveats as `originalName`. */
+  appVer?: string;
   /** Title id (PPSA/CUSA…) derived from the ContentID. Drives cover art and
    *  the "installed" badge. Undefined when it can't be derived. */
   titleId?: string;
@@ -155,6 +171,29 @@ export function platformFromTitleId(titleId: string | null | undefined): string 
   return "";
 }
 
+/**
+ * Whether a library row should get the "installed"/"Reinstall" treatment
+ * (badge + secondary button) for a given set of installed title ids.
+ *
+ * The console's `app_list` is keyed on TITLE id, which only proves the BASE
+ * game is present — it says nothing about whether a specific update/DLC has
+ * been applied, because an add-on shares the base game's title id (a patch
+ * literally bumps the base title's version). So an installed base would
+ * otherwise make a never-installed update read as "INSTALLED · Reinstall"
+ * (hardware-reported). Only a base game is eligible; an add-on always reads as
+ * installable. Exported for unit testing.
+ */
+export function pkgRowInstalled(
+  entry: Pick<PkgEntry, "titleId" | "category">,
+  installedTitleIds: Set<string>,
+): boolean {
+  return (
+    !!entry.titleId &&
+    installedTitleIds.has(entry.titleId) &&
+    !isAddonCategory(entry.category)
+  );
+}
+
 /** ContentID from a `<ContentID>.pkg` filename (strip the extension). */
 function contentIdFromName(name: string): string {
   return name.toLowerCase().endsWith(".pkg") ? name.slice(0, -4) : name;
@@ -189,6 +228,57 @@ function cacheTitle(contentId: string, title: string): void {
   }
 }
 
+// ── Per-path metadata cache ───────────────────────────────────────────
+// The staged file is renamed to `<ContentID>.pkg` (losing the user's original
+// filename) and refresh-from-disk lists files without re-parsing them (so the
+// version is unknown then too). Both are the only things that tell a game's
+// updates apart — they share a ContentID *and* a PARAM.SFO title — so we
+// capture them at upload and cache here. Keyed by the on-PS5 PATH (unique per
+// staged file) rather than ContentID, because a base and its update share a
+// ContentID but live at distinct paths. A newer update overwrites the same
+// path (updates are cumulative — you only keep the latest), so the cached
+// entry tracks whatever is currently staged there.
+const PATH_META_CACHE_KEY = "ps5upload.pkg_library.pathmeta.v1";
+
+/** Per-staged-path metadata we can't recover from a bare dir listing. */
+interface PkgPathMeta {
+  /** Original uploaded filename, e.g. `Jak X… [v01.04].pkg`. */
+  name?: string;
+  /** PARAM.SFO `APP_VER`, e.g. `01.04` — the authoritative package version. */
+  appVer?: string;
+}
+
+function loadPathMetaCache(): Record<string, PkgPathMeta> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(PATH_META_CACHE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function cachePathMeta(path: string, meta: PkgPathMeta): void {
+  if (!path) return;
+  try {
+    const c = loadPathMetaCache();
+    // Merge so a later partial write doesn't drop a previously-cached field.
+    c[path] = { ...c[path], ...meta };
+    window.localStorage.setItem(PATH_META_CACHE_KEY, JSON.stringify(c));
+  } catch {
+    /* best-effort */
+  }
+}
+
+/** The trailing path component of a local file path (handles both `/` and
+ *  Windows `\\` separators). Used to capture the user's original .pkg
+ *  filename at upload time. */
+function basenameOf(p: string): string {
+  const parts = p.split(/[\\/]/);
+  return parts[parts.length - 1] || p;
+}
+
 interface SplitParseResponse {
   parts?: string[];
   total_size?: number;
@@ -199,6 +289,8 @@ interface SplitParseResponse {
      *  engine's parse-split response (it serialises the full PkgMetadata);
      *  we just hadn't been reading it. */
     category?: string;
+    /** PARAM.SFO APP_VER ("01.04") — the package's application version. */
+    app_ver?: string;
     /** Target platform for badging: "ps4" | "ps5" | "" (unknown). Derived
      *  engine-side from the header magic + title-id prefix. */
     platform?: string;
@@ -699,6 +791,7 @@ const makePkgLibraryStore = () =>
     set({ loading: true, error: null });
     const addr = mgmtAddr(host);
     const titles = loadTitleCache();
+    const pathMeta = loadPathMetaCache();
     try {
       // List one dir, tolerating ENOENT (errno 2 — dir not created yet =
       // empty, not an error). `strict` re-throws any OTHER error so an
@@ -730,12 +823,15 @@ const makePkgLibraryStore = () =>
             continue;
           }
           const contentId = contentIdFromName(e.name);
+          const path = `${dir}/${e.name}`;
           entries.push({
             name: e.name,
-            path: `${dir}/${e.name}`,
+            path,
             size: e.size,
             contentId,
             title: titles[contentId],
+            originalName: pathMeta[path]?.name,
+            appVer: pathMeta[path]?.appVer,
             titleId: titleIdFromContentId(contentId) ?? undefined,
             category: categoryForSubdir(subdir),
             platform: platformFromTitleId(titleIdFromContentId(contentId)),
@@ -805,6 +901,12 @@ const makePkgLibraryStore = () =>
       platformFromTitleId(titleIdFromContentId(contentId));
     const totalBytes = meta.total_size ?? 0;
     if (title) cacheTitle(contentId, title);
+    // The user's original filename (e.g. `… [v01.04].pkg`) and the authoritative
+    // PARAM.SFO version — the things that distinguish a game's updates, which
+    // share a ContentID and a title. Captured here at upload (the only point we
+    // parse the pkg) and cached by staged path for later refresh-from-disk.
+    const originalName = basenameOf(localPath);
+    const appVer = meta.head?.app_ver || undefined;
 
     // 2. Name the on-PS5 file `<ContentID>.pkg` (Sony's installer keys on the
     //    basename matching the ContentID — see lib/pkgStagingPath). A base
@@ -820,6 +922,9 @@ const makePkgLibraryStore = () =>
     const destPath = subdir
       ? `${PKG_LIBRARY_DIR}/${subdir}/${basename}`
       : `${PKG_LIBRARY_DIR}/${basename}`;
+    // Remember the filename + version for this staged path so the row can show
+    // them (survives refresh-from-disk and app restarts via localStorage).
+    cachePathMeta(destPath, { name: originalName, appVer });
 
     // Refuse to re-add a pkg that's already uploading to the same path:
     // two concurrent transfers to one file would corrupt it, and the two
@@ -853,6 +958,8 @@ const makePkgLibraryStore = () =>
       size: totalBytes,
       contentId,
       title,
+      originalName,
+      appVer,
       titleId: titleIdFromContentId(contentId) ?? undefined,
       category,
       platform,
