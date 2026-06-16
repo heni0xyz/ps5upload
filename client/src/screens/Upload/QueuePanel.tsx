@@ -13,6 +13,7 @@ import {
   RotateCcw,
   ListOrdered,
   X,
+  Ban,
 } from "lucide-react";
 
 import { Button } from "../../components";
@@ -85,6 +86,7 @@ export function QueuePanel() {
   const stopHost = useUploadQueueStore((s) => s.stopHost);
   const clear = useUploadQueueStore((s) => s.clear);
   const remove = useUploadQueueStore((s) => s.remove);
+  const cancelItem = useUploadQueueStore((s) => s.cancelItem);
   const moveUp = useUploadQueueStore((s) => s.moveUp);
   const moveDown = useUploadQueueStore((s) => s.moveDown);
   const retryFailed = useUploadQueueStore((s) => s.retryFailed);
@@ -243,6 +245,7 @@ export function QueuePanel() {
             onMoveUp={moveUp}
             onMoveDown={moveDown}
             onRemove={remove}
+            onCancel={cancelItem}
           />
         ))}
       </div>
@@ -263,6 +266,7 @@ function ConsoleGroup({
   onMoveUp,
   onMoveDown,
   onRemove,
+  onCancel,
 }: {
   host: string;
   items: QueueItem[];
@@ -273,6 +277,7 @@ function ConsoleGroup({
   onMoveUp: (id: string) => void;
   onMoveDown: (id: string) => void;
   onRemove: (id: string) => void;
+  onCancel: (id: string) => void;
 }) {
   const tr = useTr();
   const label = useConsoleLabel(host);
@@ -312,6 +317,7 @@ function ConsoleGroup({
           onMoveUp={() => onMoveUp(item.id)}
           onMoveDown={() => onMoveDown(item.id)}
           onRemove={() => onRemove(item.id)}
+          onCancel={() => onCancel(item.id)}
         />
       ))}
     </ul>
@@ -415,11 +421,13 @@ function QueueRow({
   onMoveUp,
   onMoveDown,
   onRemove,
+  onCancel,
 }: {
   item: QueueItem;
   onMoveUp: () => void;
   onMoveDown: () => void;
   onRemove: () => void;
+  onCancel: () => void;
 }) {
   const tr = useTr();
   // Game identity for the row — so you can tell what's what at a glance.
@@ -584,15 +592,34 @@ function QueueRow({
           >
             <ArrowDown size={14} />
           </button>
-          <button
-            type="button"
-            onClick={onRemove}
-            disabled={lockRow}
-            title={tr("queue_remove", undefined, "Remove from queue")}
-            className="rounded p-1 text-[var(--color-muted)] hover:bg-[var(--color-bad)] hover:text-[var(--color-accent-contrast)] disabled:opacity-30"
-          >
-            <X size={14} />
-          </button>
+          {isActive ? (
+            // The actively-uploading row: move/remove are locked (mutating the
+            // array under the runner is unsafe), so Cancel is the only per-item
+            // control here. It aborts THIS upload (partial transfer stays
+            // resumable) and lets the console's other pending jobs keep going —
+            // unlike Stop, which halts the whole console.
+            <button
+              type="button"
+              onClick={onCancel}
+              title={tr(
+                "queue_cancel_item",
+                undefined,
+                "Cancel this upload (keeps the rest of the queue going)",
+              )}
+              className="rounded p-1 text-[var(--color-bad)] hover:bg-[var(--color-bad)] hover:text-[var(--color-accent-contrast)]"
+            >
+              <Ban size={14} />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={onRemove}
+              title={tr("queue_remove", undefined, "Remove from queue")}
+              className="rounded p-1 text-[var(--color-muted)] hover:bg-[var(--color-bad)] hover:text-[var(--color-accent-contrast)]"
+            >
+              <X size={14} />
+            </button>
+          )}
         </div>
       </div>
 

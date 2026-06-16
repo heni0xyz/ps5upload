@@ -295,6 +295,107 @@ describe("upload runner concurrency (per-console, parallel)", () => {
   });
 });
 
+// ── Per-item cancel ──────────────────────────────────────────────────────────
+
+describe("cancelItem (per-item cancel)", () => {
+  beforeEach(() => {
+    installLocalStorageStub();
+    vi.useFakeTimers();
+    mockedJobStatus.mockReset().mockResolvedValue({
+      status: "running",
+    } as Awaited<ReturnType<typeof jobStatus>>);
+    mockedStartFile.mockReset().mockResolvedValue("job");
+    useUploadQueueStore.setState({
+      items: [],
+      running: false,
+      runningHosts: {},
+      continueOnFailure: true,
+      loaded: true,
+    });
+  });
+  afterEach(() => {
+    useUploadQueueStore.getState().stop();
+    vi.useRealTimers();
+  });
+
+  const byId = (name: string) =>
+    useUploadQueueStore.getState().items.find((i) => i.displayName === name)!;
+
+  it("removes a PENDING item without disturbing the running one", async () => {
+    addItem("192.168.1.10:9113", "A1");
+    addItem("192.168.1.10:9113", "A2"); // pending behind A1 (same console)
+
+    void useUploadQueueStore.getState().startHost("192.168.1.10");
+    await vi.advanceTimersByTimeAsync(50);
+    expect(itemsByStatus("running").map((i) => i.displayName)).toEqual(["A1"]);
+
+    useUploadQueueStore.getState().cancelItem(byId("A2").id);
+    await vi.advanceTimersByTimeAsync(10);
+
+    // A2 gone, A1 still uploading.
+    expect(
+      useUploadQueueStore.getState().items.map((i) => i.displayName),
+    ).toEqual(["A1"]);
+    expect(itemsByStatus("running").map((i) => i.displayName)).toEqual(["A1"]);
+  });
+
+  it("cancels the RUNNING item and resumes the console's next pending", async () => {
+    addItem("192.168.1.10:9113", "A1");
+    addItem("192.168.1.10:9113", "A2");
+
+    void useUploadQueueStore.getState().startHost("192.168.1.10");
+    await vi.advanceTimersByTimeAsync(50);
+    expect(byId("A1").status).toBe("running");
+
+    useUploadQueueStore.getState().cancelItem(byId("A1").id);
+    await vi.advanceTimersByTimeAsync(200);
+
+    // A1 dropped; A2 now the running item; console still active.
+    expect(
+      useUploadQueueStore.getState().items.map((i) => i.displayName),
+    ).toEqual(["A2"]);
+    expect(itemsByStatus("running").map((i) => i.displayName)).toEqual(["A2"]);
+    expect(useUploadQueueStore.getState().runningHosts).toEqual({
+      "192.168.1.10": true,
+    });
+  });
+
+  it("cancelling the only running item leaves the console idle", async () => {
+    addItem("192.168.1.10:9113", "A1");
+
+    void useUploadQueueStore.getState().startHost("192.168.1.10");
+    await vi.advanceTimersByTimeAsync(50);
+
+    useUploadQueueStore.getState().cancelItem(byId("A1").id);
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(useUploadQueueStore.getState().items).toHaveLength(0);
+    expect(useUploadQueueStore.getState().running).toBe(false);
+    expect(useUploadQueueStore.getState().runningHosts).toEqual({});
+  });
+
+  it("does not touch a sibling console when cancelling a running item", async () => {
+    addItem("192.168.1.10:9113", "A1");
+    addItem("192.168.1.20:9113", "B1");
+
+    void useUploadQueueStore.getState().start();
+    await vi.advanceTimersByTimeAsync(50);
+    expect(itemsByStatus("running")).toHaveLength(2);
+
+    useUploadQueueStore.getState().cancelItem(byId("A1").id);
+    await vi.advanceTimersByTimeAsync(100);
+
+    // A1 gone, B1 keeps uploading untouched.
+    expect(
+      useUploadQueueStore.getState().items.map((i) => i.displayName),
+    ).toEqual(["B1"]);
+    expect(itemsByStatus("running").map((i) => i.displayName)).toEqual(["B1"]);
+    expect(useUploadQueueStore.getState().runningHosts).toEqual({
+      "192.168.1.20": true,
+    });
+  });
+});
+
 // ── Runner: auto-resume after failure ────────────────────────────────────────
 
 describe("upload runner auto-resume", () => {

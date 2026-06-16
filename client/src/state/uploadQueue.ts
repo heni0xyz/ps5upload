@@ -263,6 +263,12 @@ interface QueueState {
   hydrate: () => Promise<void>;
   add: (item: AddQueueItem) => void;
   remove: (id: string) => void;
+  /** Cancel a single item and drop it from the queue. If it's the one
+   *  actively uploading, its in-flight engine job is aborted (at the next
+   *  shard boundary, partial tx left resumable) and that console's remaining
+   *  pending work keeps draining — unlike Stop, which halts the whole console.
+   *  A pending/finished item is just removed. */
+  cancelItem: (id: string) => void;
   moveUp: (id: string) => void;
   moveDown: (id: string) => void;
   clear: () => void;
@@ -1157,6 +1163,32 @@ export const useUploadQueueStore = create<QueueState>((set, get) => {
     remove(id) {
       set((s) => ({ items: removeItem(s.items, id) }));
       scheduleSave();
+    },
+
+    cancelItem(id) {
+      const item = get().items.find((it) => it.id === id);
+      if (!item) return;
+      const h = hostOf(item.addr);
+      // A pending / done / failed item isn't touching the wire — just drop it.
+      // (Pending removal also keeps the drain loop from ever claiming it.)
+      if (item.status !== "running") {
+        set((s) => ({ items: removeItem(s.items, id) }));
+        scheduleSave();
+        return;
+      }
+      // The actively-uploading item. The transfer port is single-client, so
+      // there is exactly one running item per console. Tear this console's loop
+      // down the same way Stop does (aborts the in-flight job, re-stamps the
+      // generation so runOne bails at its next await), drop the cancelled item,
+      // then resume the console so its OTHER pending jobs aren't held hostage by
+      // cancelling this one.
+      const wasRunning = !!get().runningHosts[h];
+      get().stopHost(h);
+      set((s) => ({ items: removeItem(s.items, id) }));
+      scheduleSave();
+      if (wasRunning && nextPendingForHost(get().items, h)) {
+        void get().startHost(h);
+      }
     },
 
     moveUp(id) {
