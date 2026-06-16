@@ -613,6 +613,20 @@ fight — the payload doesn't lock by destination, it commits the
 shards each transfer ACKs in arrival order. For routine use ("one
 person uploading, another browsing"), no coordination is needed.
 
+**Q: Can I run the transfer engine on a different machine (remote /
+self-hosted engine)? (3.3.7)**
+Yes. The app normally launches its transfer engine as a bundled background
+process on `127.0.0.1:19113`, but you can run that engine somewhere else — a
+home server, a NAS, or the tiny Docker image in `engine/` — and point the app at
+it in **Settings → Engine URL**. When the URL isn't loopback, the app skips the
+bundled engine and talks to your remote one (cover art included). Two things to
+know: (1) the engine's API has **no password**, so to let a remote machine reach
+it you set `PS5UPLOAD_ALLOW_IP` to that machine's IP — do this **only on a
+trusted home network**, never expose the engine to the internet (it can read,
+write, and delete files on your PS5); and (2) the engine still needs a network
+route to the PS5 (`PS5_ADDR`). Leave Engine URL blank/loopback for the normal
+all-in-one mode.
+
 **Q: Opening the Hardware screen drops the connection ("Couldn't read
 hardware info — connection refused").**
 A single hardware reading that misbehaves on a particular firmware or
@@ -965,15 +979,20 @@ confirms the install by the actual data written to *any* drive, so extended-stor
 installs are recognized correctly. If you saw this on an older version, the game was
 fine all along — just launch it.
 
-**Q: I'm installing a game update (patch) — is my installed game safe? (3.3.6)**
+**Q: I'm installing a game update (patch) — is my installed game safe? (3.3.7)**
 Yes. A game's update carries the *same ID* as the game, so an older build could end
-up re-installing that ID and wiping the game instead of patching it. As of 3.3.6 an
-update only installs via the safe path that applies it *on top* of your game; if
-that path can't apply it on your firmware, the update **fails harmlessly and your
-installed game is left completely intact** — never overwritten or deleted. If an
-update won't go through the app, install it from the PS5's own **Package Installer**
-(Settings → Debug Settings → Game → Package Installer) — your base game is safe
-either way. Always install the **base game first**, then the update.
+up re-installing that ID and wiping the game instead of patching it. An update only
+installs via the safe path that applies it *on top* of your game; if that path can't
+apply it on your firmware, the update **fails harmlessly and your installed game is
+left completely intact** — never overwritten or deleted. (3.3.6 added this but only
+recognised updates labelled a certain way, so some **PS4** patches still slipped
+through and wiped the base — hardware-confirmed. **3.3.7** reads the real
+"update vs. full game" flag straight from the package on the console, so an update
+is recognised no matter how it reached the PS5 — uploaded, copied from USB, or
+picked in the File System tab — while a normal full-game *re-install* still works.)
+If an update won't go through the app, install it from the PS5's own **Package
+Installer** (Settings → Debug Settings → Game → Package Installer) — your base game
+is safe either way. Always install the **base game first**, then the update.
 
 **Q: A system (NPXS) pkg won't install. What do I do?**
 System app pkgs (NPXS-prefix content_id — Store updates, Settings
