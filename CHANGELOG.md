@@ -4,6 +4,13 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 3.3.14
+
+- **Upload progress no longer overshoots the file size.** If an upload's
+  connection blipped and resumed, the progress could read past 100% — e.g.
+  "36 GiB / 24.6 GiB". The progress now caps at the file size (the upload itself
+  was always fine; this was just the counter double-counting resent bytes).
+
 ## 3.3.13
 
 Smoother, smarter installs — especially when queueing a game with updates + DLC.
