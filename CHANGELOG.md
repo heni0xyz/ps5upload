@@ -4,6 +4,14 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 3.3.12
+
+- **Download a PS5 file or folder straight to a `.zip`.** In the File System
+  browser, each entry now has a "Download as ZIP" button next to Download. It
+  streams the file(s) from the PS5 and zips them on the fly — no temporary copy,
+  no waiting for a separate compress step. Great for grabbing a save folder, a
+  homebrew folder, or a single big file as one tidy archive.
+
 ## 3.3.11
 
 Installs you can watch from anywhere, plus a few handy touches.
