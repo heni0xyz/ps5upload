@@ -32,6 +32,7 @@ import {
   installedLastResult,
   runPkgInstall,
   PKG_MAY_NOT_LAUNCH_MESSAGE,
+  PKG_PATCH_REJECTED_HINT,
   type PkgEntry,
 } from "./pkgLibrary";
 
@@ -252,6 +253,40 @@ describe("runPkgInstall — forwards deleteStaging to the engine", () => {
   it("passes deleteStaging=true → engine cleans the pkg (Auto Delete on)", async () => {
     await runPkgInstall("192.168.1.50", "/user/data/x.pkg", "CID", null, true);
     expect(startArgs()?.deleteStaging).toBe(true);
+  });
+
+  it("a rejected patch (…DP) surfaces clear guidance, not the raw 'PKG header' code, and skips DPI", async () => {
+    // The user-reported case: a Jak X update rejected at register with
+    // 0x80B21106 ("PKG header — corrupt or wrongly named"). For a patch that's
+    // misleading (the file is fine; the safe path declined it). We replace it
+    // with reassuring guidance and must NOT try the DPI fallback (same failing
+    // installer, and the destructive path is exactly what the guard forbids).
+    mockedInvoke.mockReset();
+    mockedInvoke.mockImplementation(async (cmd: unknown) => {
+      if (cmd === "pkg_install_start") {
+        return {
+          err_code: 0x80b21106,
+          err_message: "PS5 rejected the PKG header — file may be corrupt or wrongly named",
+          register_path: "none",
+          package_type: "PS4DP",
+        };
+      }
+      return {};
+    });
+    const r = await runPkgInstall(
+      "192.168.1.50",
+      "/user/data/ps5upload/pkg_library/updates/CID.pkg",
+      "CID",
+      "PS4DP",
+      false,
+    );
+    expect(r.installed).toBe(false);
+    expect(r.errMessage).toBe(PKG_PATCH_REJECTED_HINT);
+    expect(r.errMessage).not.toMatch(/corrupt or wrongly named/);
+    // DPI must not be attempted for a guarded patch.
+    expect(mockedInvoke.mock.calls.some((c) => c[0] === "pkg_dpi_install")).toBe(
+      false,
+    );
   });
 });
 

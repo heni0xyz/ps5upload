@@ -451,6 +451,19 @@ const PKG_ASYNC_FAILED_HINT =
 const PKG_STALL_HINT =
   'the install stopped making progress before it finished, so nothing was actually installed. Your package was kept on the PS5 — you can simply try again. If a tile appeared that won’t open ("Can’t start the game or app"), it’s empty and safe to delete. For stubborn .pkg files (often PS4 backports), the PS5’s own Package Installer (Settings → System → Debug Settings → Game → Package Installer) is the most reliable.';
 
+/** Guidance when a PATCH/UPDATE (a "…DP" package) is rejected at register time.
+ *  An update shares the base game's content id, so it can only go in through the
+ *  PS5's safe install path — and ps5upload deliberately will NOT fall back to the
+ *  method that re-registers that id (which would delete the base game). On some
+ *  firmware the safe path declines the update (e.g. a file:// install authid
+ *  gate, hardware-observed), and the update simply can't be applied from here.
+ *  The base game is untouched; the PS5's own Package Installer applies updates
+ *  correctly. This replaces the raw, misleading "PKG header — corrupt or wrongly
+ *  named" code text for this case (the file is fine — it's an update that can't
+ *  apply on top through our safe path). */
+export const PKG_PATCH_REJECTED_HINT =
+  "This update couldn’t be applied. Because it’s an update (it shares your game’s ID), ps5upload will only add it through the PS5’s safe install path — and won’t fall back to a method that could delete your installed base game. On this console that safe path declined it, so nothing changed and your base game is untouched. To apply the update, install it from the PS5 itself: Settings → System → Debug Settings → Game → Package Installer.";
+
 /** What the install tracker concludes. */
 interface VerifyOutcome {
   /** Confirmed complete — the title registered (or byte-settled on
@@ -759,7 +772,16 @@ export async function runPkgInstall(
   // payload swap. `resolvedType` is the engine's post-parse type, so this holds
   // for USB/queue/File-System patches too, where the client sent no type.
   if (!installed && startRejected && resolvedType.endsWith("DP")) {
-    return { installed: false, mayNotLaunch, errMessage: mainErr, stalled };
+    // Replace the raw Sony code text (often "PKG header — corrupt or wrongly
+    // named", which is misleading: the file is fine) with update-specific
+    // guidance that reassures the base game is safe and points to the PS5's
+    // own Package Installer — the reliable way to apply an update here.
+    return {
+      installed: false,
+      mayNotLaunch,
+      errMessage: PKG_PATCH_REJECTED_HINT,
+      stalled,
+    };
   }
 
   if (!installed && startRejected) {
@@ -1246,15 +1268,26 @@ const makePkgLibraryStore = () =>
       return { ok: false, message: "Another install is in progress." };
     }
     set({ installing: true, busyNotice: null, installPending: false });
+    // The fast external scan often returns an EMPTY content id — it derives the
+    // title id from the filename and skips the per-file header read. But Sony's
+    // installer keys on the staged basename matching the content id, so staging
+    // under a random fallback name gets rejected ("PKG header — wrongly named").
+    // Read the real content id off the console first (best-effort) so the
+    // staged copy is named `<ContentID>.pkg`, exactly like the upload flow.
+    let contentId = pkg.contentId;
+    if (!contentId) {
+      const m = await pkgMetadataConsole(transferAddr(host), pkg.path);
+      if (m?.contentId) contentId = m.contentId;
+    }
     // Stage to internal with the Sony-friendly `<ContentID>.pkg` basename
     // (falls back to a unique name for headerless pkgs).
     const basename = stagingBasename(
-      pkg.contentId,
+      contentId,
       Math.random().toString(36).slice(2),
       Date.now(),
     );
     const internalPath = `${PKG_TEMP_DIR}/${basename}`;
-    const label = pkg.name || pkg.contentId || "package";
+    const label = pkg.name || contentId || "package";
     // Live install %, shared by the direct-from-USB and the copy-fallback paths.
     const onProgress = (installedBytes: number, total: number) => {
       if (total > 0) {
@@ -1338,7 +1371,7 @@ const makePkgLibraryStore = () =>
       const viaCopy = await runPkgInstall(
         host,
         internalPath,
-        pkg.contentId || null,
+        contentId || null,
         // External scan (USB/exFAT) carries no PARAM.SFO category, so the
         // package_type is unknown here. The engine reads the category straight
         // from the staged pkg to detect a patch and arm the data-loss guard.
