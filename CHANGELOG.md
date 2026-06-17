@@ -4,6 +4,14 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 3.3.19
+
+- **"Installed" no longer leaks between consoles.** If you staged the same .pkg
+  on more than one PS5 and installed it on just one, the others wrongly showed
+  it as already installed (Reinstall). Each console now tracks its own installs,
+  so a package reads as installed only on the console you actually installed it
+  on.
+
 ## 3.3.18
 
 - **Cancel a single upload without stopping the whole queue.** The item that's

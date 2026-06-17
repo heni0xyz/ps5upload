@@ -704,11 +704,12 @@ export const useUploadQueueStore = create<QueueState>((set, get) => {
               installPhase = r.mayNotLaunch ? "warn" : "done";
               installedTitle =
                 item.installedTitle ?? item.contentId ?? item.displayName ?? null;
-              // Persist this exact package as installed (per staged path) so its
+              // Persist this exact package as installed ON THIS CONSOLE so its
               // library row shows "Reinstall" — works for an update/DLC, which
-              // the console's app_list can't confirm. Survives auto-delete being
-              // off (the staged file then reappears in the library).
-              recordPkgInstalled(finalDest);
+              // the console's app_list can't confirm. Scoped to the item's host
+              // so a sibling console with the same staged file isn't affected.
+              // Survives auto-delete being off (the staged file then reappears).
+              recordPkgInstalled(hostOf(item.addr), finalDest);
               if (r.mayNotLaunch) {
                 mountWarnings.push(
                   "Installed, but it may not launch on this firmware — re-install from the Install Package tab if it won't start.",

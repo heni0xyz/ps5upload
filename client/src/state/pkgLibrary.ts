@@ -295,11 +295,6 @@ interface PkgPathMeta {
   /** PARAM.SFO `CATEGORY` (`gd`/`gp`/`ac`) — authoritative, vs. the directory
    *  inference. Populated when we read the staged pkg off the console. */
   category?: string;
-  /** True once we've installed THIS exact staged package via the app. Lets an
-   *  update/DLC row show "Reinstall" after it's installed — the console's
-   *  app_list only tracks the base title id, so it can't tell us a specific
-   *  update/DLC was applied; this per-package record can. Survives restarts. */
-  installed?: boolean;
 }
 
 function loadPathMetaCache(): Record<string, PkgPathMeta> {
@@ -325,14 +320,49 @@ function cachePathMeta(path: string, meta: PkgPathMeta): void {
   }
 }
 
-/** Persistently mark the staged package at `path` as having been installed via
- *  the app, so its library row reads "Reinstall" instead of "Install". This is
- *  the only reliable per-package signal for an update/DLC — the console's
- *  app_list is keyed on the base title id and can't confirm a specific add-on.
- *  Called from both install paths (the library tab and the upload-queue
- *  finisher). Best-effort and survives restarts. */
-export function recordPkgInstalled(path: string): void {
-  cachePathMeta(path, { installed: true });
+// Per-CONSOLE record of which staged paths we've installed. Keyed by bare host
+// (port-stripped) → the set of installed paths on THAT console. This must NOT
+// live in the path-only PATH_META cache: staged packages land at identical
+// paths on every console (e.g. the shared staging dir), so a path-keyed flag
+// would make installing on one console light up "Reinstall" on all the others
+// that happen to have the same file. The console's own app_list can't
+// distinguish a specific update/DLC (it only tracks the base title id), so this
+// is the authoritative per-console signal. Survives restarts.
+const INSTALLED_CACHE_KEY = "ps5upload.pkg_library.installed.v1";
+
+function loadInstalledCache(): Record<string, string[]> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(INSTALLED_CACHE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+/** Persistently mark the staged package at `path` as installed ON THIS CONSOLE,
+ *  so its library row reads "Reinstall" instead of "Install" — scoped to `host`
+ *  so the same file staged on a sibling console is unaffected. Called from both
+ *  install paths (the library tab and the upload-queue finisher). */
+export function recordPkgInstalled(host: string, path: string): void {
+  if (!path || typeof window === "undefined") return;
+  try {
+    const h = hostOf(host);
+    const c = loadInstalledCache();
+    const set = new Set(c[h] ?? []);
+    set.add(path);
+    c[h] = [...set];
+    window.localStorage.setItem(INSTALLED_CACHE_KEY, JSON.stringify(c));
+  } catch {
+    /* best-effort */
+  }
+}
+
+/** Whether `path` was installed on `host` via the app (see recordPkgInstalled). */
+export function isPkgInstalledHere(host: string, path: string): boolean {
+  if (!path || typeof window === "undefined") return false;
+  return (loadInstalledCache()[hostOf(host)] ?? []).includes(path);
 }
 
 /** The trailing path component of a local file path (handles both `/` and
@@ -940,7 +970,7 @@ const makePkgLibraryStore = () =>
             title: titles[contentId],
             originalName: pathMeta[path]?.name,
             appVer: pathMeta[path]?.appVer,
-            installedHere: pathMeta[path]?.installed,
+            installedHere: isPkgInstalledHere(host, path),
             titleId: titleIdFromContentId(contentId) ?? undefined,
             // Authoritative category (read off the console) when we have it,
             // else the directory inference (updates/ → gp, dlc/ → ac).
@@ -1335,10 +1365,12 @@ const makePkgLibraryStore = () =>
         .finish(actId, installed ? "done" : stalled ? "stopped" : "failed");
 
       if (installed) {
-        // Record THIS package as installed (per-path, persisted) and reflect it
-        // on the row, so an update/DLC that's been installed shows "Reinstall"
-        // — not "Install" — even though app_list can't confirm an add-on.
-        cachePathMeta(path, { installed: true });
+        // Record THIS package as installed ON THIS CONSOLE (persisted) and
+        // reflect it on the row, so an update/DLC that's been installed shows
+        // "Reinstall" — not "Install" — even though app_list can't confirm an
+        // add-on. Scoped to `host` so a sibling console with the same staged
+        // file isn't wrongly marked installed.
+        recordPkgInstalled(host, path);
         patch({
           status: "idle",
           installedHere: true,

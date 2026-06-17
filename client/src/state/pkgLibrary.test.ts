@@ -38,6 +38,8 @@ import {
   installSpaceWarning,
   installedLastResult,
   runPkgInstall,
+  recordPkgInstalled,
+  isPkgInstalledHere,
   PKG_MAY_NOT_LAUNCH_MESSAGE,
   PKG_PATCH_REJECTED_HINT,
   type PkgEntry,
@@ -227,6 +229,50 @@ describe("pkgRowInstalled (installed/Reinstall badge)", () => {
         installed,
       ),
     ).toBe(true);
+  });
+});
+
+describe("recordPkgInstalled / isPkgInstalledHere (per-console isolation)", () => {
+  // The reported bug: the same .pkg staged on multiple consoles lands at an
+  // identical path, and installing on ONE console used to mark it installed on
+  // ALL of them (the flag was keyed on path only). It must be scoped per host.
+  beforeEach(() => {
+    const store = new globalThis.Map<string, string>();
+    (globalThis as { window?: unknown }).window = {
+      localStorage: {
+        getItem: (k: string) => (store.has(k) ? store.get(k)! : null),
+        setItem: (k: string, v: string) => void store.set(k, String(v)),
+        removeItem: (k: string) => void store.delete(k),
+        clear: () => store.clear(),
+      },
+    };
+  });
+  afterEach(() => {
+    delete (globalThis as { window?: unknown }).window;
+  });
+
+  const PATH = "/data/ps5upload/pkg_temp/Game[v01.04].pkg";
+  const A = "192.168.1.10";
+  const B = "192.168.1.20";
+
+  it("installing on one console does NOT mark it installed on another", () => {
+    recordPkgInstalled(A, PATH);
+    expect(isPkgInstalledHere(A, PATH)).toBe(true);
+    // The sibling console with the SAME staged path must read as not-installed.
+    expect(isPkgInstalledHere(B, PATH)).toBe(false);
+  });
+
+  it("normalizes host:port to the bare host (addr form is accepted)", () => {
+    recordPkgInstalled("192.168.1.10:9113", PATH);
+    expect(isPkgInstalledHere("192.168.1.10", PATH)).toBe(true);
+    expect(isPkgInstalledHere("192.168.1.10:1234", PATH)).toBe(true);
+  });
+
+  it("tracks distinct paths per console independently", () => {
+    const other = "/data/ps5upload/pkg_temp/Other.pkg";
+    recordPkgInstalled(A, PATH);
+    expect(isPkgInstalledHere(A, PATH)).toBe(true);
+    expect(isPkgInstalledHere(A, other)).toBe(false);
   });
 });
 
