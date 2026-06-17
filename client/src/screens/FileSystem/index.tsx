@@ -93,11 +93,13 @@ import { humanizePs5Error } from "../../lib/humanizeError";
  * from the toolbar whenever the clipboard is non-empty, pasting into
  * the currently-browsed directory.
  *
- * Cross-volume note: fsMove uses rename() which fails with EXDEV across
- * mount points. fsCopy works across mounts because the payload reads +
- * writes bytes explicitly. The UI falls back to "Copy, then delete"
- * when a Cut+Paste fails with EXDEV — matches how file managers on
- * Linux/macOS handle cross-filesystem moves.
+ * Cross-volume note: fsMove is rename()-based, which only works within one
+ * volume. Across mounts (e.g. USB → internal) the payload does NOT attempt the
+ * rename — a cross-device rename panics the PS5 kernel — and returns
+ * `fs_move_cross_mount`. fsCopy works across mounts because the payload reads +
+ * writes bytes explicitly, so the UI falls back to "Copy, then delete" on that
+ * error — matching how file managers on Linux/macOS handle cross-filesystem
+ * moves.
  */
 
 interface DirEntry {

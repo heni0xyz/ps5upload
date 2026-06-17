@@ -7008,9 +7008,14 @@ static int handle_fs_delete(runtime_state_t *state, int client_fd,
 }
 
 /* ── FS_MOVE handler ────────────────────────────────────────────────────
- * rename(2) only works intra-volume on POSIX. Cross-volume moves return
- * EXDEV, which we surface as a specific error so the client can tell
- * the user "move across mounts not supported". */
+ * rename(2) only works intra-volume on POSIX. Cross-volume moves are supposed
+ * to fail with EXDEV — but on this kernel a cross-DEVICE rename (e.g. a USB
+ * exFAT file → the internal SSD) does NOT return EXDEV: it KERNEL PANICS and
+ * crashes the console (a reproducible hard crash, reported on USB→internal cut
+ * & paste). So we must NEVER let rename() run across devices. We compare the
+ * source's device id against the destination directory's up front and surface
+ * `fs_move_cross_mount` instead — the client then completes the move safely as
+ * copy-then-delete (FS_COPY reads/writes bytes, which is cross-volume safe). */
 static int handle_fs_move(runtime_state_t *state, int client_fd,
                            uint64_t trace_id, const char *request_body, uint64_t body_len) {
     char from[512], to[512];
@@ -7024,6 +7029,31 @@ static int handle_fs_move(runtime_state_t *state, int client_fd,
     if (!is_path_allowed(from) || !is_path_allowed(to)) {
         return send_frame(client_fd, FTX2_FRAME_ERROR, 0, trace_id,
                           "fs_move_path_not_allowed", 24);
+    }
+    /* Cross-device guard — see the header comment. Compare st_dev of the source
+     * and of the destination's parent directory; if they differ, refuse the
+     * rename (it would panic) and report cross-mount. stat() on USB is safe
+     * (FS_COPY stats the same paths). If either stat fails we fall through to
+     * rename(), but only when devices can't be compared — a missing source/dest
+     * there fails with a normal errno, not the cross-device panic. */
+    {
+        struct stat sf, sdp;
+        char to_dir[512];
+        const char *slash = strrchr(to, '/');
+        if (slash && slash != to) {
+            size_t dlen = (size_t)(slash - to);
+            if (dlen >= sizeof(to_dir)) dlen = sizeof(to_dir) - 1;
+            memcpy(to_dir, to, dlen);
+            to_dir[dlen] = '\0';
+        } else {
+            to_dir[0] = '/';
+            to_dir[1] = '\0';
+        }
+        if (stat(from, &sf) == 0 && stat(to_dir, &sdp) == 0 &&
+            sf.st_dev != sdp.st_dev) {
+            return send_frame(client_fd, FTX2_FRAME_ERROR, 0, trace_id,
+                              "fs_move_cross_mount", 19);
+        }
     }
     if (rename(from, to) != 0) {
         if (errno == EXDEV) {
@@ -12237,13 +12267,37 @@ static int handle_shell_builtin(const char *cmd_in, char **out_text,
                 any_err = 1;
                 continue;
             }
-            if (rename(argv[i], target) == 0) continue;
-            if (errno != EXDEV) {
-                len = shell_appendf(&out, &cap, len,
-                                     "mv: %s -> %s: %s\n",
-                                     argv[i], target, strerror(errno));
-                any_err = 1;
-                continue;
+            /* A cross-DEVICE rename() panics this kernel instead of returning
+             * EXDEV (see handle_fs_move). Only attempt the rename when source
+             * and dest are on the SAME device; otherwise skip straight to the
+             * copy-then-unlink path below. Never call rename() across mounts. */
+            int mv_same_dev = 0;
+            {
+                struct stat mv_sf, mv_dd;
+                char mv_dpar[1024];
+                const char *mv_ds = strrchr(target, '/');
+                if (mv_ds && mv_ds != target) {
+                    size_t dl = (size_t)(mv_ds - target);
+                    if (dl >= sizeof(mv_dpar)) dl = sizeof(mv_dpar) - 1;
+                    memcpy(mv_dpar, target, dl);
+                    mv_dpar[dl] = '\0';
+                } else {
+                    mv_dpar[0] = '/';
+                    mv_dpar[1] = '\0';
+                }
+                mv_same_dev = (stat(argv[i], &mv_sf) == 0 &&
+                               stat(mv_dpar, &mv_dd) == 0 &&
+                               mv_sf.st_dev == mv_dd.st_dev);
+            }
+            if (mv_same_dev) {
+                if (rename(argv[i], target) == 0) continue;
+                if (errno != EXDEV) {
+                    len = shell_appendf(&out, &cap, len,
+                                         "mv: %s -> %s: %s\n",
+                                         argv[i], target, strerror(errno));
+                    any_err = 1;
+                    continue;
+                }
             }
             /* Cross-FS — copy then unlink. Single file only; cross-FS
              * directory mv is too complex for shell tab (use cp -r +

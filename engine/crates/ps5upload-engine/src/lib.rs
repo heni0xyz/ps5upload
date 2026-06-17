@@ -1301,12 +1301,13 @@ async fn ps5_fs_move(
     crate::log_info!("fs_move: addr={addr} from={from} to={to}");
     let from_for_log = from.clone();
     let to_for_log = to.clone();
-    // 1-hour deadline: most fs_move calls return in milliseconds
-    // (rename(2) is metadata-only), but cross-volume moves that the
-    // payload retries via copy-then-delete inherit the same long
-    // bound as fs_copy. The default 30 s socket timeout would fire
-    // mid-copy of any multi-GiB file and surface as the cryptic "read
-    // frame header" 502.
+    // 1-hour deadline: an intra-volume fs_move returns in milliseconds
+    // (rename(2) is metadata-only). A CROSS-volume move can't rename (the
+    // payload refuses it — a cross-device rename panics this kernel) and
+    // returns `fs_move_cross_mount`; the CLIENT then completes it as
+    // copy-then-delete, which can run for minutes on a multi-GiB file. Keep the
+    // generous bound so the default 30 s socket timeout can't fire mid-op and
+    // surface as the cryptic "read frame header" 502.
     let io_timeout = std::time::Duration::from_secs(60 * 60);
     match tokio::task::spawn_blocking(move || {
         fs_move_with_timeout(&addr, &from, &to, Some(io_timeout))

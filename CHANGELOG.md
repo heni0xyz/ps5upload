@@ -4,6 +4,18 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 3.3.21
+
+- **Fixed: moving files from USB to the internal SSD crashed the console.** Cut
+  & paste from a USB drive to internal storage was reliably kernel-panicking the
+  PS5 (a hard crash + reboot). The tool was asking the console to *rename* the
+  file across drives, which this kernel can't do — it panics instead of
+  reporting the error. ps5upload now detects a cross-drive move up front and
+  completes it the safe way (copy, then remove the original) — the same thing it
+  already did for copies. **Hardware-verified: the move that used to crash the
+  console now completes without a hitch.** (Same fix applied to the shell tab's
+  `mv` command.)
+
 ## 3.3.20
 
 - **Installs wait for the PS5 to be ready — fewer "couldn't be applied" errors.**
