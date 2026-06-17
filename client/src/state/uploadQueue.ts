@@ -37,15 +37,18 @@ import {
   type RateSample,
 } from "../lib/rollingRate";
 import { archiveFormat, type SourceKind } from "./upload";
-import { runPkgInstall, pkgLibraryStore, recordPkgInstalled } from "./pkgLibrary";
+import {
+  runPkgInstall,
+  pkgLibraryStore,
+  recordPkgInstalled,
+  waitForConsoleReady,
+} from "./pkgLibrary";
 import type { UploadStrategy } from "./transfer";
 import { useUploadSettingsStore } from "./uploadSettings";
 import { useRecentHostMetricsStore } from "./recentHostMetrics";
 import { pushNotification } from "./notifications";
 import { withConsolePrefix } from "./roster";
 import { hostOf, mgmtAddr } from "../lib/addr";
-import { useConnectionStore } from "./connection";
-import { parsePS5Firmware } from "../lib/ps5Firmware";
 import { log } from "./logs";
 import { ensurePayloadCurrent } from "../lib/ensurePayloadCurrent";
 import { effectiveUploadStreams } from "../lib/uploadStreams";
@@ -699,6 +702,8 @@ export const useUploadQueueStore = create<QueueState>((set, get) => {
                   });
                 }
               },
+              // Readiness-gate status (pre-install wait / DPI transient retry).
+              (msg) => pkgStore.setState({ busyNotice: msg }),
             );
             if (r.installed) {
               installPhase = r.mayNotLaunch ? "warn" : "done";
@@ -1344,16 +1349,20 @@ export const useUploadQueueStore = create<QueueState>((set, get) => {
   };
 });
 
-/** Extra post-install settle on FW12+, where the main-payload install briefly
- *  destabilises SceShellUI (the screen-black blip) and the connection recovers
- *  a beat later. Without it, the next queued item's upload can start before the
- *  payload is back and stall the queue (reported on multi small DLC/updates).
- *  No-op below FW12, where the blip isn't observed. Env-free, host-scoped. */
+/** Post-install settle. A main-payload install briefly destabilises SceShellUI
+ *  (the screen-black blip) and the connection recovers a beat later; starting
+ *  the next queued item's upload/install before the console is back stalls the
+ *  queue (reported on multi small DLC/updates) or draws a transient install
+ *  rejection. Rather than a blind sleep, ACTIVELY wait for the console to answer
+ *  the readiness probe again — adaptive (returns the moment it's ready) and
+ *  applies on every firmware, not just FW12. Bounded so a console that never
+ *  clears the probe doesn't wedge the queue; a short floor sleep still covers
+ *  the case where the probe can't report readiness at all. */
 async function fw12InstallSettle(host: string): Promise<void> {
-  const rt = useConnectionStore.getState().runtimeByHost[host] ?? null;
-  const fw = parsePS5Firmware(rt?.ps5Kernel ?? null);
-  const major = fw ? parseFloat(fw) : 0;
-  if (major >= 12) await sleep(3000);
+  const ready = await waitForConsoleReady(mgmtAddr(host), { timeoutMs: 30_000 });
+  // If the probe never reported ready (older payload), fall back to the old
+  // fixed settle so we don't barrel straight into the recovery window.
+  if (!ready) await sleep(3000);
 }
 
 function sleep(ms: number): Promise<void> {

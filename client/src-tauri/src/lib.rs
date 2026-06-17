@@ -172,6 +172,7 @@ pub fn run() {
             commands::pkg_metadata_console,
             commands::ps5_list_dir,
             commands::ps5_apps_installed,
+            commands::ps5_readiness,
             commands::transfer_file,
             commands::transfer_dir,
             commands::transfer_zip,

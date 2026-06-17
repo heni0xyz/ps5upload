@@ -207,6 +207,20 @@ pub async fn ps5_apps_installed(addr: Option<String>) -> Result<JsonValue, Strin
     get_json(&url).await
 }
 
+/// Probe whether the console is settled enough to take a .pkg install (the
+/// AppListRegistered frame round-trips cleanly). Proxies GET
+/// /api/ps5/readiness. Used as a pre-install + post-install gate so we don't
+/// fire an install into the post-install SceShellUI recovery window.
+#[tauri::command]
+pub async fn ps5_readiness(addr: Option<String>) -> Result<JsonValue, String> {
+    let base = engine::url();
+    let url = match addr {
+        Some(a) => format!("{base}/api/ps5/readiness?addr={}", urlencoding(&a)),
+        None => format!("{base}/api/ps5/readiness"),
+    };
+    get_json(&url).await
+}
+
 #[tauri::command]
 pub async fn ps5_list_dir(
     path: String,

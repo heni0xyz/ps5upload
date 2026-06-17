@@ -2738,6 +2738,34 @@ async fn ps5_status(
     }
 }
 
+/// GET /api/ps5/readiness?addr=IP:MGMT_PORT
+///
+/// Lightweight "is the console in a stable state to install a .pkg" probe. It
+/// round-trips the AppListRegistered frame — the exact request that goes
+/// unanswered ("read frame header: failed to fill whole buffer" / ECONNRESET)
+/// while the console is recovering from a prior install (the post-install
+/// SceShellUI black-screen blip). A clean response ⇒ the console is settled and
+/// ready to take another install; an error ⇒ it's still busy. Always returns
+/// 200 with `{ ready, detail }` so the client reads `ready` directly instead of
+/// having to treat a transient "busy" as an HTTP failure.
+async fn ps5_readiness(
+    State(state): State<AppState>,
+    Query(q): Query<AddrQuery>,
+) -> impl IntoResponse {
+    let addr = mgmt_addr_or_default(q.addr, &state.default_ps5_addr);
+    let result = tokio::task::spawn_blocking(move || app_list_registered(&addr)).await;
+    let (ready, detail) = match result {
+        Ok(Ok(_)) => (true, String::new()),
+        Ok(Err(e)) => (false, format!("{e:#}")),
+        Err(e) => (false, format!("{e:#}")),
+    };
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({ "ready": ready, "detail": detail })),
+    )
+        .into_response()
+}
+
 /// POST /api/transfer/file
 async fn transfer_file_handler(
     State(state): State<AppState>,
@@ -5761,6 +5789,7 @@ async fn run(cfg: EngineConfig) -> anyhow::Result<()> {
     let app = Router::new()
         .route("/", get(ui_handler))
         .route("/api/ps5/status", get(ps5_status))
+        .route("/api/ps5/readiness", get(ps5_readiness))
         .route("/api/ps5/cleanup", post(ps5_cleanup))
         .route("/api/ps5/volumes", get(ps5_volumes))
         .route("/api/ps5/pkg/scan-external", get(ps5_pkg_scan_external))

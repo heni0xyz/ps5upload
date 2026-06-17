@@ -2942,6 +2942,22 @@ export async function appsInstalled(
   return { titles, registeredUnavailable: !!res?.registered_unavailable };
 }
 
+/** Whether the console is settled enough to take a .pkg install — the engine
+ *  round-trips the AppListRegistered frame, which goes unanswered while the
+ *  console is recovering from a prior install (the post-install SceShellUI
+ *  black-screen blip). Returns false on any error (treat "can't tell" as
+ *  "not ready" so the caller waits rather than firing into the blip). */
+export async function consoleReadiness(host: string): Promise<boolean> {
+  try {
+    const res = await invoke<{ ready?: boolean }>("ps5_readiness", {
+      addr: toMgmtAddr(host),
+    });
+    return !!res?.ready;
+  } catch {
+    return false;
+  }
+}
+
 /** One `.pkg` found on a connected external/USB drive. */
 export interface ExternalPkg {
   /** Absolute on-console path, e.g. `/mnt/usb0/games/foo.pkg`. */

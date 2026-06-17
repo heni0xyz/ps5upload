@@ -11,6 +11,7 @@ import {
   pkgMetadataConsole,
   toastPush,
   installFreeBytes,
+  consoleReadiness,
 } from "../api/ps5";
 import type { ExternalPkg } from "../api/ps5";
 import { formatBytes } from "../lib/format";
@@ -536,6 +537,52 @@ const PKG_VERIFY_POLL_MS = 2_500;
  *  assume success — `completed` stays false so the pkg is KEPT (never delete on
  *  uncertainty). */
 const PKG_VERIFY_MAX_POLL_ERRORS = 5;
+
+// ── Console-readiness gate ───────────────────────────────────────────────────
+// A console goes unresponsive on the AppListRegistered frame while it recovers
+// from a prior install (the post-install SceShellUI black-screen blip). Firing
+// an install into that window is what produces the transient rejections seen on
+// hardware — DPI rc=0x80020002 and appinst 0x80b21106 — which clear once the
+// console settles (the user's logs: rejected twice, then ok minutes later after
+// they waited). We gate installs on a readiness probe and retry the transient.
+const READY_POLL_MS = 1_500;
+/** Cap on each readiness wait. We never hard-block forever — if the probe can't
+ *  clear (e.g. an older payload that can't report registered apps), attempting
+ *  the install is better than refusing to try, and the DPI transient-retry is
+ *  the real safety net for a genuinely-busy console. Kept modest (30s) so a
+ *  console whose probe never clears adds a bounded delay, not a 90s stall; the
+ *  real post-install blip settles well within this. */
+const READY_WAIT_TIMEOUT_MS = 30_000;
+/** The DPI daemon's "console not in an installable state" rejection — transient
+ *  (clears on settle). Retried with a readiness gate rather than failed outright. */
+const DPI_TRANSIENT_BUSY_RC = 0x80020002;
+/** How many times to (re)attempt a DPI install that keeps hitting the transient
+ *  busy rc, each gated on the console becoming ready again. */
+const DPI_MAX_ATTEMPTS = 4;
+
+/**
+ * Poll the console-readiness probe (the AppListRegistered round-trip) until it
+ * reports ready, or `timeoutMs` elapses. Returns true once ready, false on
+ * timeout. The first probe runs with no delay — a settled console proceeds
+ * instantly. `onWait` fires before each subsequent poll so the caller can
+ * surface a "waiting for the PS5…" notice. Exported for the queue's pre-install
+ * gate and for tests.
+ */
+export async function waitForConsoleReady(
+  host: string,
+  opts: { timeoutMs?: number; onWait?: (elapsedMs: number) => void } = {},
+): Promise<boolean> {
+  const timeoutMs = opts.timeoutMs ?? READY_WAIT_TIMEOUT_MS;
+  const maxAttempts = Math.max(1, Math.ceil(timeoutMs / READY_POLL_MS));
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (await consoleReadiness(host)) return true;
+    if (attempt < maxAttempts - 1) {
+      opts.onWait?.(attempt * READY_POLL_MS);
+      await sleep(READY_POLL_MS);
+    }
+  }
+  return false;
+}
 /** Absolute backstop so a pathological engine that keeps returning "install"
  *  forever can't block the queue indefinitely. Generously past the engine's
  *  own 2h session GC — under normal operation the engine reaches a terminal
@@ -690,7 +737,8 @@ async function verifyInstallCompleted(
 async function runDpiInstall(
   host: string,
   localPs5Path: string,
-): Promise<{ ok: boolean; errMessage: string; daemonFailed: boolean }> {
+  onStatus?: (msg: string) => void,
+): Promise<{ ok: boolean; errMessage: string; daemonFailed: boolean; rc: number }> {
   const ip = hostOf(host);
   const ens = (await invoke("dpi_ensure", { ip })) as {
     ok?: boolean;
@@ -700,17 +748,34 @@ async function runDpiInstall(
     return {
       ok: false,
       daemonFailed: true,
+      rc: 0,
       errMessage: ens.error || "the DPI daemon didn't come up on :9040",
     };
   }
+  // Send the install, retrying the transient "console busy" rejection
+  // (0x80020002) — it clears once the console settles, so we gate each retry on
+  // the readiness probe instead of failing the way a single attempt used to.
   let resp: { ok?: boolean; rc?: number; err_message?: string } = {};
-  try {
-    resp = (await invoke("pkg_dpi_install", {
-      ps5Addr: mgmtAddr(host),
-      localPs5Path,
-    })) as typeof resp;
-  } catch (e) {
-    resp = { ok: false, rc: 0, err_message: pkgError(e) };
+  for (let attempt = 1; attempt <= DPI_MAX_ATTEMPTS; attempt++) {
+    try {
+      resp = (await invoke("pkg_dpi_install", {
+        ps5Addr: mgmtAddr(host),
+        localPs5Path,
+      })) as typeof resp;
+    } catch (e) {
+      resp = { ok: false, rc: 0, err_message: pkgError(e) };
+    }
+    const rcNow = (resp.rc ?? 0) >>> 0;
+    if (resp.ok || rcNow !== DPI_TRANSIENT_BUSY_RC || attempt === DPI_MAX_ATTEMPTS) {
+      break;
+    }
+    // Transient busy → wait for the console to settle, then retry.
+    onStatus?.(
+      `PS5 is busy finishing the last install — waiting for it to be ready (attempt ${attempt}/${DPI_MAX_ATTEMPTS})…`,
+    );
+    await waitForConsoleReady(host, {
+      onWait: () => onStatus?.("Waiting for the PS5 to be ready…"),
+    });
   }
   // Restore our main payload — the daemon replaced it. Best-effort.
   try {
@@ -729,6 +794,7 @@ async function runDpiInstall(
   return {
     ok,
     daemonFailed: false,
+    rc,
     errMessage: ok
       ? ""
       : resp.err_message ||
@@ -796,7 +862,20 @@ export async function runPkgInstall(
   // can render a real % for large titles (Sony's BGFT progress isn't
   // meaningful on the file:// staging path). Optional — no-op if omitted.
   onProgress?: (installedBytes: number, total: number) => void,
+  // Called with a human-readable status line while the install waits on the
+  // console-readiness gate (pre-install + DPI transient retry). Lets the caller
+  // surface "Waiting for the PS5 to be ready…" instead of a frozen UI.
+  onStatus?: (msg: string) => void,
 ): Promise<PkgInstallOutcome> {
+  // PRE-INSTALL GATE: don't fire an install into the post-install SceShellUI
+  // recovery window — that's what produces the transient rejections. Wait for
+  // the console to answer the readiness probe cleanly first. Best-effort: on
+  // timeout we proceed anyway (an older payload may never report ready, and the
+  // transient-retry below still rescues a genuinely-busy console).
+  await waitForConsoleReady(host, {
+    onWait: () => onStatus?.("Waiting for the PS5 to be ready…"),
+  });
+
   let installed = false;
   // True when the install accepted but stalled (flatlined) before completing —
   // the pkg is KEPT and the caller shows a retry message, not a hard failure.
@@ -878,7 +957,7 @@ export async function runPkgInstall(
     // it's safe for patches. HW-proven on the Phat — a Jak X v01.04 patch landed
     // in /user/patch/CUSA07842/patch.pkg with the 3.8 GB base in
     // /user/app/CUSA07842/app.pkg fully intact.
-    const dpi = await runDpiInstall(host, localPs5Path);
+    const dpi = await runDpiInstall(host, localPs5Path, onStatus);
     if (dpi.daemonFailed) {
       // DPI couldn't even come up. For a patch, give update-specific guidance
       // (base is safe; try the PS5's Package Installer) rather than a raw
@@ -1359,6 +1438,8 @@ const makePkgLibraryStore = () =>
               set({ busyNotice: `Installing on the PS5… ${pct}%` });
             }
           },
+          // Readiness-gate status (pre-install wait / DPI transient retry).
+          (msg) => set({ busyNotice: msg }),
         );
       useActivityHistoryStore
         .getState()

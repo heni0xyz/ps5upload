@@ -4,6 +4,16 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 3.3.20
+
+- **Installs wait for the PS5 to be ready — fewer "couldn't be applied" errors.**
+  Right after an install the PS5 has a brief recovery moment (the screen-black
+  blink); starting the next install during it was getting rejected with a
+  transient error, so you'd have to wait and retry by hand. ps5upload now checks
+  the console is settled before it installs, and if the PS5 says it's busy it
+  waits and retries automatically instead of failing — so back-to-back updates
+  and DLC just work. (Shows "Waiting for the PS5 to be ready…" while it waits.)
+
 ## 3.3.19
 
 - **"Installed" no longer leaks between consoles.** If you staged the same .pkg

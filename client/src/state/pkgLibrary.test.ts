@@ -20,12 +20,21 @@ vi.mock("../api/ps5", () => ({
   // Pre-install space check; default to "plenty free" so store tests aren't
   // blocked. (null would also be fine — it means "couldn't read, don't block".)
   installFreeBytes: vi.fn(async () => 1_000_000_000_000),
+  // Console-readiness probe; default to "ready" so install tests proceed past
+  // the pre-install gate immediately. Readiness-specific tests override it.
+  consoleReadiness: vi.fn(async () => true),
 }));
 // No active transfer in tests → installs proceed immediately.
 vi.mock("../lib/ps5Transfers", () => ({ transferScreenBusy: () => false }));
 
 import { invoke } from "@tauri-apps/api/core";
-import { fsDelete, fsListDir, fsCopy, pkgMetadataConsole } from "../api/ps5";
+import {
+  fsDelete,
+  fsListDir,
+  fsCopy,
+  pkgMetadataConsole,
+  consoleReadiness,
+} from "../api/ps5";
 import {
   titleIdFromContentId,
   platformFromTitleId,
@@ -38,6 +47,7 @@ import {
   installSpaceWarning,
   installedLastResult,
   runPkgInstall,
+  waitForConsoleReady,
   recordPkgInstalled,
   isPkgInstalledHere,
   PKG_MAY_NOT_LAUNCH_MESSAGE,
@@ -229,6 +239,49 @@ describe("pkgRowInstalled (installed/Reinstall badge)", () => {
         installed,
       ),
     ).toBe(true);
+  });
+});
+
+describe("waitForConsoleReady (install readiness gate)", () => {
+  const mockedReady = vi.mocked(consoleReadiness);
+  beforeEach(() => {
+    mockedReady.mockReset();
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    // Restore the module default ("ready") so later install suites sail through
+    // the pre-install gate instead of inheriting this suite's not-ready stub.
+    mockedReady.mockReset();
+    mockedReady.mockResolvedValue(true);
+  });
+
+  it("returns true immediately when the console is already ready (no wait)", async () => {
+    mockedReady.mockResolvedValue(true);
+    const p = waitForConsoleReady("192.168.1.10");
+    await expect(p).resolves.toBe(true);
+    expect(mockedReady).toHaveBeenCalledTimes(1); // first probe, no delay
+  });
+
+  it("polls until the console becomes ready", async () => {
+    // Not ready twice, then ready.
+    mockedReady
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValue(true);
+    const p = waitForConsoleReady("192.168.1.10");
+    // Let the polling timers + awaits flush.
+    await vi.advanceTimersByTimeAsync(5_000);
+    await expect(p).resolves.toBe(true);
+    expect(mockedReady.mock.calls.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("gives up (false) after the timeout when never ready", async () => {
+    mockedReady.mockResolvedValue(false);
+    const p = waitForConsoleReady("192.168.1.10", { timeoutMs: 4_500 });
+    await vi.advanceTimersByTimeAsync(10_000);
+    // timeoutMs/POLL(1500) = 3 attempts, then false.
+    await expect(p).resolves.toBe(false);
   });
 });
 
