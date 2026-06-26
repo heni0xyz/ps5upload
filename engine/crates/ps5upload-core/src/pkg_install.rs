@@ -273,6 +273,22 @@ pub fn install_may_not_launch(register_path: &str) -> bool {
     register_path == "appinst-local"
 }
 
+/// Whether to PRESERVE the staged .pkg after an in-process register-reject,
+/// instead of auto-deleting it.
+///
+/// A guarded patch ("…DP") that the in-process `InstallByPackage` rejects
+/// (typically `0x80B21106`, the FW 11/12 authid gate) is the EXPECTED first
+/// step: the client then retries the SAME staged file through the standalone
+/// DPI daemon — a separate, properly-authid'd loader process that is HW-proven
+/// to land patches the in-process path can't. Deleting the file on reject pulls
+/// it out from under that fallback and the update can never apply (HW bug
+/// bundle, FW 12.70). For every other type the auto-clean stands: it keeps a
+/// failed register idempotent and stops a stale pkg polluting Sony's installer
+/// queue. The client owns cleanup of its transient copy after the full cascade.
+pub fn preserve_staging_on_reject(package_type: &str) -> bool {
+    package_type.ends_with("DP")
+}
+
 /// Whether `s` has the shape of a PS5 title_id: four uppercase letters
 /// (CUSA / PPSA / NPXS / …) followed by five digits, e.g. "CUSA12345".
 /// Mirrors `looks_like_title_id` in the payload's register.c so the two
@@ -681,6 +697,23 @@ mod tests {
         assert!(!install_may_not_launch("tier0-worker"));
         assert!(!install_may_not_launch("none"));
         assert!(!install_may_not_launch(""));
+    }
+
+    #[test]
+    fn preserve_staging_on_reject_only_for_patches() {
+        // A patch (…DP) must KEEP its staged pkg on a register-reject so the
+        // client's DPI-daemon fallback can install the same file. Both PS4 and
+        // PS5 patch types end in "DP" (PS4DP / the PS5 patch category).
+        assert!(preserve_staging_on_reject("PS4DP"));
+        assert!(preserve_staging_on_reject("PS5DP"));
+        // Base games and DLC auto-clean as before (idempotent retry, no
+        // installer-queue pollution). A DLC ("…AC") carries its OWN content_id,
+        // so a stale staged copy is exactly the residue the cleanup prevents.
+        assert!(!preserve_staging_on_reject("PS4GD"));
+        assert!(!preserve_staging_on_reject("PS5GD"));
+        assert!(!preserve_staging_on_reject("PS4AC"));
+        assert!(!preserve_staging_on_reject("PS5AC"));
+        assert!(!preserve_staging_on_reject(""));
     }
 
     #[test]

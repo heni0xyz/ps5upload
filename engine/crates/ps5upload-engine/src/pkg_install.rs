@@ -665,12 +665,40 @@ async fn install_start_handler(
         // residue. Take() so we don't double-delete if status
         // somehow runs later. Spawn-blocking because fs_delete
         // does sync I/O over the mgmt socket.
-        let path_to_clean = {
+        //
+        // EXCEPTION — a guarded patch ("…DP"). The in-process
+        // InstallByPackage hitting 0x80B21106 is the EXPECTED first
+        // step for a PS4 update on FW 11/12: the client then retries
+        // through the standalone DPI daemon (a separate, properly-
+        // authid'd loader process — HW-proven to land patches the
+        // in-process path can't). That fallback installs the SAME
+        // staged pkg by its on-disk path, so deleting it here pulls
+        // the file out from under DPI and the update can never apply
+        // (HW bug bundle, FW 12.70: "register-reject staging cleaned"
+        // fired right after 0x80B21106, leaving DPI nothing to install).
+        // The client owns cleanup of its transient copy after the FULL
+        // cascade (the USB path fs_deletes it unconditionally; the
+        // queue keeps it for retry on failure / deletes on success),
+        // so skipping the auto-clean for a patch doesn't leak.
+        let is_guarded_patch =
+            ps5upload_core::pkg_install::preserve_staging_on_reject(&package_type);
+        let path_to_clean = if is_guarded_patch {
+            // Leave staging_path in the session ref untouched — the client's
+            // DPI fallback needs the file. Don't auto-delete.
+            None
+        } else {
             let mut sessions = state.sessions.lock().unwrap_or_else(|e| e.into_inner());
             sessions
                 .get_mut(&session_id)
                 .and_then(|s| s.staging_path.take())
         };
+        if is_guarded_patch {
+            crate::log_info!(
+                "register-reject staging PRESERVED for DPI fallback: session={} package_type={}",
+                session_id,
+                package_type,
+            );
+        }
         if let Some(path) = path_to_clean {
             let addr = req.ps5_addr.clone();
             let sid = session_id.clone();
