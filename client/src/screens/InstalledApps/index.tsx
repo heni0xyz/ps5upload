@@ -51,6 +51,7 @@ import { pushNotification } from "../../state/notifications";
 import { withConsolePrefix } from "../../state/roster";
 import { useTr } from "../../state/lang";
 import { transferAddr, mgmtAddr, hostOf } from "../../lib/addr";
+import { transferScreenBusy } from "../../lib/ps5Transfers";
 import { useStaleHostGuard } from "../../lib/staleHostGuard";
 
 // ── Classification helpers ───────────────────────────────────────────────────
@@ -483,6 +484,14 @@ export default function InstalledAppsScreen() {
     let cancelled = false;
     const addr = mgmtAddr(host);
     const tick = async () => {
+      // Don't add mgmt-port load while an upload to THIS console is running.
+      // A folder reconcile (e.g. a many-chunk exfat.ffpfsc game) fires a
+      // per-file connection burst at the payload's mgmt port; injecting a
+      // process-list poll every 3s onto that contends with each file's
+      // finalize round-trip and can collapse effective throughput on a
+      // many-file upload (a single .pkg is one finalize, so it's immune).
+      // The running-game badge can wait until the upload finishes.
+      if (transferScreenBusy(host)) return;
       try {
         const r = await fetchRunningGames(addr);
         if (!cancelled) setRunning(r);
@@ -587,14 +596,32 @@ export default function InstalledAppsScreen() {
       if (!ok || probe.isStale()) return;
       setStoppingId(t.titleId);
       try {
-        // Prefer Sony's clean app-kill (by app id); fall back to SIGKILL of a
-        // pid for the title when no app id was reported.
+        // Prefer Sony's clean app-kill (by app id); fall back to a SIGKILL of
+        // the title's pid. CRUCIAL: appKill can *throw* (the engine bails when
+        // the payload returns ok=false — observed on FW 12.20, where
+        // sceApplicationKill rejects the app id), so the fallback must run on a
+        // throw too, not only on a resolved ok=false. Treating both the same
+        // way is what makes the SIGKILL path actually reachable — previously a
+        // 12.20 appKill threw straight to the outer catch and the pid fallback
+        // (which runs with the payload's elevated ucred) never fired, so the
+        // Close button "did nothing".
         const addr = mgmtAddr(probe.host);
-        let ack = game.appId ? await appKill(addr, game.appId) : { ok: false };
-        if (!ack.ok && game.pid) {
-          const k = await processKill(addr, game.pid);
-          ack = { ok: k.ok };
+        let killed = false;
+        if (game.appId) {
+          try {
+            killed = (await appKill(addr, game.appId)).ok;
+          } catch {
+            /* Sony's app-kill failed/threw — fall through to SIGKILL. */
+          }
         }
+        if (!killed && game.pid) {
+          try {
+            killed = (await processKill(addr, game.pid)).ok;
+          } catch {
+            /* SIGKILL also failed — reported as "couldn't close" below. */
+          }
+        }
+        const ack = { ok: killed };
         if (probe.isStale()) return;
         if (ack.ok) {
           // Drop it from the running set immediately so the card flips back to
