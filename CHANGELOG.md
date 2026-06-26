@@ -4,6 +4,26 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 3.3.23
+
+- **Fixed: game updates that couldn't install on newer firmware.** When the PS5's
+  in-app installer turned an update away (a common first step on firmware 11/12),
+  the tool was deleting the staged update file a split second too early — so the
+  fallback installer (the one that actually lands updates) had nothing left to
+  install. The update file is now kept until the whole install cascade has had its
+  turn, so updates can fall through to the path that works. Your base game is never
+  touched either way. *(Needs a final confirmation on real firmware-12 hardware.)*
+- **Fixed: the "Close game" button did nothing on some firmware.** On firmware
+  12.20, the PS5's clean "close app" call is rejected, and the tool was giving up
+  there instead of trying its backup way of stopping the game. It now falls through
+  to the backup stop so the button actually closes the game.
+- **Faster uploads while the app is open.** The Installed Apps and Library screens
+  quietly check what's running on your PS5 every few seconds. That check shares a
+  channel with uploads, and on big multi-part games (exfat/ShadowMount dumps) it
+  could drag transfer speed down. Those checks now pause while an upload to that
+  console is running, and resume the moment it finishes.
+- Routine dependency and CI updates.
+
 ## 3.3.22
 
 - **See what's playing, and stop it.** Installed Apps now shows a "Playing" badge
