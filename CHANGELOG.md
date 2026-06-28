@@ -4,6 +4,18 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 3.3.24
+
+- **New: back up a PS5 save straight to a USB drive.** From the Saves screen you
+  can now copy a save (or all of them) to a USB drive plugged into the PS5 — each
+  backup lands in its own timestamped folder so nothing gets overwritten. There's
+  a configurable save path in Settings too. *(Thanks to @Twice6804 for the
+  contribution.)*
+- **Fixed: a few payloads in the catalogue showed "Not Found."** ps5-app-dumper
+  and Itemzflow had moved to different repos and were 404ing in the Payloads
+  catalogue — both now point at their current homes.
+- Routine dependency and CI updates.
+
 ## 3.3.23
 
 - **Fixed: game updates that couldn't install on newer firmware.** When the PS5's
