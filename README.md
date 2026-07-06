@@ -64,17 +64,32 @@
   `.jar` files to the PS5's loader port (typical defaults: `.elf` →
   9021 elfldr, `.js` → 50000 WebKit-stage, `.lua` → 9026, `.jar` →
   9025 BD-JB / BDJ; custom loaders may listen anywhere). Recent-sends
-  history with click-to-replay and per-row success/fail badges.
+  history with click-to-replay and per-row success/fail badges. Curated
+  payload catalogue (kstuff, ShadowMount+, etaHEN, …) fetches releases on
+  demand — or **add your own GitHub/Gitea repo** and it tracks + caches
+  that too. **Payload playlists** run a scripted boot sequence, and a
+  playlist step can pull straight from a repo at run time so you don't
+  keep a pile of `.elf` files on your PC.
 - **Install fakepkgs (package library)** — add a `.pkg` and it uploads
   to your PS5 once and stays there. **Install Package** lists every
   uploaded package with cover art and size; **Install**, **Reinstall**,
   or **Delete** any of them in a click — no re-uploading to install
-  again. Installs run through the **DPI daemon** (`sceAppInstUtilAppInstallPkg`
-  from a clean loader process), the most reliable path on current
-  firmware. Verified end-to-end on FW 9.60. Game pkgs (CUSA / PPSA /
-  PCSA / EP / UP) install cleanly; for system pkgs (NPXS-prefix — Store
-  updates, Settings) use the on-PS5 Settings → Debug Settings → Game →
-  Package Installer.
+  again. **Install all** does a whole set in one tap, in base → update →
+  DLC order. Installs run through the **DPI daemon**
+  (`sceAppInstUtilInstallByPackage` from a clean loader process), the
+  most reliable path on current firmware. Verified end-to-end on FW 9.60.
+  Game pkgs (CUSA / PPSA / PCSA / EP / UP) install cleanly; for system
+  pkgs (NPXS-prefix — Store updates, Settings) use the on-PS5 Settings →
+  Debug Settings → Game → Package Installer. **Stream (beta)** installs a
+  `.pkg` straight from your PC over HTTP with no staging upload — handy
+  when console storage is tight.
+- **Web browser access** — run the engine (or the official Docker image)
+  and manage your PS5 from any browser on the LAN, the full app served
+  over HTTP. No desktop install needed on that machine. Unauthenticated —
+  keep it on a trusted LAN. See the self-hosted-engine FAQ below.
+- **Screenshots & video clips** — browse the PS5's Capture Gallery,
+  preview, and download screenshots (HDR `.jxr` auto-converted to PNG) or
+  gameplay video clips to your computer.
 - **Register + launch** — Library row's Play button always registers
   first (idempotent if already registered), retries with DRM-type
   patch on rejection, then launches. Unmount unregisters every

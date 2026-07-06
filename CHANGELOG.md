@@ -4,6 +4,43 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 3.3.25
+
+A big feature + reliability release.
+
+- **Fixed: PKG updates that crashed the on-console helper.** On some firmware,
+  trying to install a game update could kill the PS5-side helper a few seconds
+  later, so the update never applied. The root cause was the install-fallback
+  daemon calling Sony's installer without initialising it first. It now
+  initialises properly (with a boot-timing wait and retry), so a rejected
+  update no longer takes the helper down. *(Verified on real FW 5.10 + 9.60
+  hardware — the helper survives now.)*
+- **New: manage ps5upload from a web browser.** The engine can serve the full
+  app over HTTP, so a NAS/Docker user can drive their PS5 from any browser on
+  the LAN — no desktop app needed.
+- **New: install a .pkg straight from your PC — "Stream (beta)".** Installs a
+  package over HTTP without staging the whole file on the PS5 first, so you can
+  install even when disk space is tight. Labeled beta; the normal
+  upload-then-install path is still the reliable default.
+- **New: your own payload repos.** Add any GitHub/Gitea repo to the Payloads
+  tab and ps5upload tracks its releases and caches the ELF locally — no more
+  keeping a pile of `.elf` files on your PC.
+- **New: repo-based playlists.** A payload playlist can now pull from a repo at
+  run time instead of a local file, so a boot sequence needs no local files.
+- **New: video clips.** Browse and download the PS5's gameplay video clips,
+  like the Screenshots tab.
+- **New: "Install all" for packages.** Install every staged package in one tap,
+  in the right order (base game → update → DLC).
+- **New: rest mode after uploads.** Optionally put the PS5 to sleep once its
+  upload queue finishes — handy for an overnight queue. Off by default.
+- **New: restore a save straight from a USB drive** on the PS5 (the counterpart
+  to Save-to-USB), plus **find unused games** on the Installed Apps screen —
+  sort by play time and surface the ones you haven't touched, then uninstall.
+- **Fixed: a dead payload in the catalogue** (the Lapy JB Daemon source had
+  moved) and a batch of **UI text that always showed in English** even in other
+  languages.
+- Routine dependency and CI updates.
+
 ## 3.3.24
 
 - **New: back up a PS5 save straight to a USB drive.** From the Saves screen you

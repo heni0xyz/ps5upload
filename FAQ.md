@@ -629,6 +629,28 @@ write, and delete files on your PS5); and (2) the engine still needs a network
 route to the PS5 (`PS5_ADDR`). Leave Engine URL blank/loopback for the normal
 all-in-one mode.
 
+**Q: Can I use ps5upload from a web browser (no desktop app)? (3.3.25)**
+Yes. A `webui` build of the engine serves the **full app over HTTP**, so you
+can manage your PS5 from any browser on your LAN — useful on a NAS or headless
+box where you don't want to install the desktop app. Build the browser image
+with `docker build -f engine/Dockerfile.webui -t ps5upload-engine-webui .`,
+run it, and open `http://<host>:19113`. Same security rules as the self-hosted
+engine above: it's **unauthenticated**, so only reach it from IPs you add to
+`PS5UPLOAD_ALLOW_IP`, and only on a trusted LAN — never expose port 19113 to
+the internet. (Host-side actions that need your PC's own filesystem — picking a
+local file to upload — are desktop-only; everything that operates on the PS5
+works in the browser.)
+
+**Q: What is "Stream (beta)" on the Install Package screen? (3.3.25)**
+It installs a `.pkg` **straight from your PC over HTTP** — the PS5 pulls the
+bytes directly instead of the file being uploaded and staged on the console
+first. That saves disk space (no "pkg + installed game both taking room") and a
+whole transfer step, so you can install even when the console is tight on
+space. It's **beta**: your PC has to stay connected for the whole install, and
+reliability varies by firmware — if it doesn't take, the normal
+upload-then-install path is always there as the reliable fallback. The
+data-loss guard for updates/DLC stays fully in place either way.
+
 **Q: Opening the Hardware screen drops the connection ("Couldn't read
 hardware info — connection refused").**
 A single hardware reading that misbehaves on a particular firmware or
