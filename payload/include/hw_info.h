@@ -114,4 +114,11 @@ int hw_fan_pinned_threshold(void);
  * up on its next tick. */
 void hw_fan_pin_threshold(uint8_t threshold_c);
 
+/* Load the persisted fan threshold from
+ * /data/ps5upload/fan_threshold.conf. Returns the °C value, or 0 if
+ * no valid persisted file exists. Call once at boot (after
+ * runtime_ensure_directories) to restore the user's last setting —
+ * a zero return means "nothing pinned, leave fan at firmware default". */
+int hw_fan_load_persisted(void);
+
 #endif /* PS5UPLOAD2_HW_INFO_H */

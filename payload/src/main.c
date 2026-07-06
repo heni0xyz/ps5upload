@@ -14,6 +14,7 @@
 #include "shellui_rpc.h"
 #include "hw_guard.h"
 #include "kernel_rw_lock.h"
+#include "hw_info.h"
 
 /* Sony "debugger" / system-process authid. Setting our process's
  * ucred authid to this value grants the credentials Sony's kernel
@@ -457,6 +458,32 @@ int main(void) {
         return 1;
     }
     startup_trace("WRITE_OWNERSHIP_DONE");
+
+    /* Restore persisted fan threshold. The runtime root now exists
+     * (created by runtime_ensure_directories above), so the persist
+     * file is readable if a previous session wrote one. A non-zero
+     * return arms the in-memory pin + starts the 15 s reapply watcher,
+     * so a redeploy/reboot seamlessly continues holding the user's
+     * last-set threshold without the desktop needing to resend it.
+     *
+     * Deliberately placed AFTER ownership is written so a fan-ioctl
+     * failure can never block the payload from coming up — worst case
+     * the threshold stays at firmware default and the desktop's next
+     * fan-set command re-pins it. */
+    {
+        int persisted = hw_fan_load_persisted();
+        if (persisted >= HW_FAN_THRESHOLD_MIN && persisted <= HW_FAN_THRESHOLD_MAX) {
+            const char *err = NULL;
+            if (hw_fan_set_threshold((uint8_t)persisted, &err) == 0) {
+                startup_trace("FAN_RESTORED");
+                printf("fan: restored persisted threshold %d°C\n", persisted);
+            } else {
+                startup_trace("FAN_RESTORE_FAILED");
+                /* Non-fatal — the watcher is still armed via the pin,
+                 * and the next desktop fan-set will retry the ioctl. */
+            }
+        }
+    }
 
     /* `runtime_reconcile_mounts` is also deliberately not called at
      * startup. It walks `getmntinfo` on potentially-stale entries

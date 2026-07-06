@@ -19,6 +19,24 @@ hit, P2 = feature parity, P3 = polish.
 
 ---
 
+## Implementation status
+
+| Item | Status | Notes |
+| --- | --- | --- |
+| **P0-1** DPI init + boot wait | **DONE** | `payload/dpi/ezremote_dpi.c`: 25 s boot wait, `timed_init()` on detached thread w/ 10 s timeout, per-request init retry, hex reply format |
+| **P0-2** app.db row verify | **DONE (pre-existing)** | `ps5upload-core/src/pkg_install.rs:372+`: `verify_launchable()`, `verify_title_registered()`, `probe_installed_pkg()`, `appdb_has_title()` |
+| **P0-3** DPI authid self-escalation | **DONE (code)** | `ezremote_dpi.c`: ported `jb_escalate_pid(getpid())` from elf-arsenal `jb.c`. Sets authid `0x4801000000000013`, caps all-FF, uid/gid=0, rootdir/jaildir=rootvnode. Runs after 25 s boot wait. Needs HW compile test |
+| **P1-3** Path rewrite `/data/`→`/user/data/` | **DONE** | `ezremote_dpi.c`: `rewrite_path_for_install()` |
+| **P1-4** Staging delete retry | **DONE** | `engine/.../pkg_install.rs`: `delete_staging_with_retry()` (3 attempts, 2 s backoff) at all 3 cleanup sites |
+| **P1-5** Direct/streaming install (#81) | **DONE** | New `/api/pkg/dpi-direct-install` route + `DpiDirectInstallRequest`; `installStream()` action + "Stream (beta)" button in InstallPackage |
+| **P1-6** Connection-loss resilience | **DONE** | Engine retry layer was already present. Added transfer-port (:9113) liveness ping in client status poller — detects "uploads fail but dot is green" wedge |
+| **P3-10** Path-safety guards | **DONE** | `ezremote_dpi.c`: `path_is_safe()` rejects `..`, non-absolute, overflow |
+| **P2-7** Persistent fan threshold | **DONE** | `hw_info.c`: added `hw_fan_load_persisted()` + `hw_fan_save_persisted()` writing `/data/ps5upload/fan_threshold.conf` (one decimal int). Save wired into `hw_fan_set_threshold` after pin; load wired into `main.c` boot after `runtime_ensure_directories` |
+| **P2-8** NP fake sign-in | **DONE (pre-existing)** | `payload/src/profile.c` + `profile.h`: full offact slot ops (get/set name/id/type/flags), `profile_gen_id` (FNV-1a w/ exact seed), `profile_slot_activate`/`clear`, `profile_foreground_user` (NP info). Frame handlers in `runtime.c` (PROFILE_INFO/ACTIVATE/CLEAR/SET_USERNAME). Client API + UI in `screens/Profile/` |
+| **P2-9** Web UI | **DONE (pre-existing)** | `engine/.../webui.rs` embeds client build via rust-embed + serves SPA via axum. README documents it (self-hosted-engine FAQ). Client Profile/Accounts UI already present |
+
+---
+
 ## 0. Status of the three "headline" bugs (already merged)
 
 Before pulling new fixes, confirm what's **already** in v3.3.24 so we

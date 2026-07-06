@@ -12,11 +12,27 @@
  * forged ShellCore authid, prior ptrace/Initialize calls). On FW 11.x
  * Sony's installer rejects an install issued from that context
  * (observed 0x8041013d). A freshly elfldr-loaded standalone process —
- * this daemon — calls the same API with the loader's pristine
- * credentials and succeeds. ps5upload's engine auto-sends this ELF to
- * the loader port when :9040 isn't already listening, then hands it an
- * http(s):// URL to install (the engine serves the .pkg over its own
- * /pkg-host/ endpoint).
+ * this daemon — calls the same API with clean credentials and succeeds.
+ * ps5upload's engine auto-sends this ELF to the loader port when :9040
+ * isn't already listening, then hands it an http(s):// URL to install
+ * (the engine serves the .pkg over its own /pkg-host/ endpoint).
+ *
+ * ── SYSTEM_AUTHID self-escalation (the FW-9.60 stream-install fix) ──
+ * BGFT's task-creation path requires the calling process to hold
+ * SYSTEM_AUTHID (0x4801000000000013) before it will queue a download
+ * for an http:// URL. Without it, InstallByPackage returns 0x80431068
+ * (BGFT download error) and fetches zero bytes — the exact failure
+ * observed during HW testing on a Pro (FW 9.60). elf-arsenal solves
+ * this by spawning dpi.elf as a CHILD of its kernel-RW main process
+ * and escalating the child's pid via jb_escalate_pid(child_pid).
+ *
+ * Our DPI daemon is loaded by the PS5's :9021 elfldr, which is a
+ * single-payload loader — there is no parent to escalate us. Instead
+ * we self-escalate: the 25 s boot wait guarantees kstuff's kernel
+ * patches are in place, so the kernel_set_ucred_* primitives from
+ * <ps5/kernel.h> work from our freshly-loaded process. This mirrors
+ * elf-arsenal's backup-helper and sdk-changer standalone payloads,
+ * which also self-escalate via jb_escalate_pid(getpid()) on entry.
  *
  * Protocol (matches the reference so it stays drop-in compatible with
  * the wider scene tooling): connect to TCP :9040, send one line — an
@@ -33,13 +49,13 @@
  * after the first install is rejected" symptom, issue #152):
  * kstuff spawns last in the payload chain and applies kernel patches
  * that sceAppInstUtilInitialize depends on. This daemon sleeps 25 s at
- * startup (500 ms steps) to let those patches land, then runs
- * sceAppInstUtilInitialize on a detached thread with a 10 s timeout.
- * If startup init failed (IPMI backend not ready yet, or FW-11+
- * SYSTEM_AUTHID gate), every incoming install request retries init
- * once before attempting the install. Calling InstallByPackage COLD
- * (no init) leaves IPMI state half-wedged and Sony's watchdog kills
- * the helper a few seconds later — exactly the symptom users report.
+ * startup (500 ms steps) to let those patches land, then self-escalates
+ * to SYSTEM_AUTHID, then runs sceAppInstUtilInitialize on a detached
+ * thread with a 10 s timeout. If startup init failed (IPMI backend not
+ * ready yet), every incoming install request retries init once before
+ * attempting the install. Calling InstallByPackage COLD (no init)
+ * leaves IPMI state half-wedged and Sony's watchdog kills the helper a
+ * few seconds later — exactly the symptom users report.
  */
 /* NOTE: no `#undef main` here (the reference had one for a different
  * loader). The PS5 Payload SDK's crt wraps `main` to wire up the payload
@@ -59,8 +75,73 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <sys/types.h>
+
+#include <ps5/kernel.h>
 
 #include "sceAppInstUtil.h"
+
+/* The SYSTEM_AUTHID Sony's BGFT download manager requires before it will
+ * queue an InstallByPackage task. Without this, on FW 9.60+ BGFT rejects
+ * the task before downloading a single byte (0x80431068 / 0x80B22404).
+ * This is the same constant elf-arsenal's jb.c uses (JB_AUTHID) and the
+ * same one our main payload's bgft.c uses for the FW>=11 install path
+ * (PS5_SYSTEM_INSTALL_AUTHID). */
+#define DPI_JB_AUTHID 0x4801000000000013ULL
+
+/* ── jb_escalate_pid (ported from elf-arsenal's jb.c) ──────────────────
+ * Rewrites the target pid's ucred to full root + SYSTEM_AUTHID + all
+ * capabilities. Uses the kernel R/W primitives from <ps5/kernel.h>,
+ * which work from ANY process once kstuff has patched the kernel
+ * syscalls (the 25 s boot wait below guarantees kstuff has loaded).
+ *
+ * This is the exact pattern elf-arsenal's standalone payloads use
+ * (backup-helper/main.c:25, sdk-changer/src/main.c:53) — they link
+ * -lkernel_sys and self-escalate on entry. Our DPI daemon is in the
+ * same situation: loaded by the PS5's :9021 elfldr with no parent
+ * process to escalate it, so it must escalate itself. */
+static int jb_escalate_pid(pid_t pid) {
+    if (pid <= 0) return -1;
+
+    intptr_t proc = kernel_get_proc(pid);
+    if (!proc) return -1;
+
+    int rc = 0;
+
+    /* uid → 0 (root) on every cred slot the kernel checks. */
+    if (kernel_set_ucred_uid (pid, 0) != 0) rc = -1;
+    if (kernel_set_ucred_ruid(pid, 0) != 0) rc = -1;
+    if (kernel_set_ucred_svuid(pid, 0) != 0) rc = -1;
+    if (kernel_set_ucred_rgid(pid, 0) != 0) rc = -1;
+    if (kernel_set_ucred_svgid(pid, 0) != 0) rc = -1;
+
+    /* Sandbox escape: rootdir/jaildir → kernel root vnode. */
+    intptr_t rootvnode = kernel_get_root_vnode();
+    if (rootvnode) {
+        if (kernel_set_proc_rootdir(pid, rootvnode) != 0) rc = -1;
+        if (kernel_set_proc_jaildir(pid, rootvnode) != 0) rc = -1;
+    }
+
+    /* The load-bearing write: authid → SYSTEM (0x4801...0013). This is
+     * what BGFT's task-creation path checks before accepting a download.
+     * Without it, InstallByPackage returns 0x80431068 (BGFT download
+     * error) and no bytes are fetched. */
+    if (kernel_set_ucred_authid(pid, DPI_JB_AUTHID) != 0) rc = -1;
+
+    /* All capability bits set. */
+    uint8_t caps[16];
+    memset(caps, 0xff, sizeof(caps));
+    if (kernel_set_ucred_caps(pid, caps) != 0) rc = -1;
+
+    /* cr_sceAttr high-attr flag. Mirrors elf-arsenal's backup-helper
+     * exactly (attrs = 0x80). Our main payload uses 0x80000000 — a
+     * different byte in the 8-byte attrs field — but the backup-helper
+     * pattern is the proven one for standalone self-escalating ELFs
+     * that pass BGFT's auth gate, so we follow it verbatim. */
+    if (kernel_set_ucred_attrs(pid, 0x80) != 0) rc = -1;
+
+    return rc;
+}
 
 #define BUF_SIZE      4096
 #define PORT          9040
@@ -171,6 +252,31 @@ int main(void) {
         for (int i = 0; i < BOOT_WAIT_STEPS; i++)            /* 25 s total */
             nanosleep(&ts, NULL);
     }
+
+    /* Self-escalate to SYSTEM_AUTHID BEFORE calling sceAppInstUtilInitialize.
+     * This is the fix for the FW-9.60 "Stream (beta) doesn't install"
+     * bug: BGFT's task-creation path rejects InstallByPackage(http_url)
+     * calls from processes without SYSTEM_AUTHID (0x4801...0013), with
+     * 0x80431068 (BGFT download error) and zero bytes fetched. The 25 s
+     * boot wait above guarantees kstuff's kernel patches are in place,
+     * so the kernel_set_ucred_* primitives work from this freshly-loaded
+     * elfldr process. Mirrors elf-arsenal's backup-helper/sdk-changer
+     * standalone payloads (jb_escalate_pid(getpid()) on entry). */
+    {
+        pid_t me = getpid();
+        int esc_rc = jb_escalate_pid(me);
+        fprintf(stderr, "[dpi] jb_escalate_pid(self=%d) rc=%d%s\n",
+                (int)me, esc_rc,
+                esc_rc == 0 ? " (SYSTEM_AUTHID acquired)" :
+                " (FAILED — install will likely be rejected by BGFT)");
+        if (esc_rc != 0) {
+            notify("ezRemote DPI WARNING:\n"
+                   "authid escalation failed.\n"
+                   "Stream install may not work.\n"
+                   "Ensure kstuff is loaded.");
+        }
+    }
+
     fprintf(stderr, "[dpi] startup wait done, calling sceAppInstUtilInitialize\n");
     int init_rc = timed_init();
     fprintf(stderr, "[dpi] sceAppInstUtilInitialize rc=0x%x%s\n",

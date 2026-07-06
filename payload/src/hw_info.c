@@ -37,6 +37,7 @@
 #include "hw_info.h"
 #include "hw_guard.h"
 #include "shellui_rpc.h"
+#include "config.h"
 
 /* ── Fault guard for Sony hardware getters ────────────────────────
  *
@@ -873,6 +874,51 @@ void hw_fan_pin_threshold(uint8_t threshold_c) {
     atomic_store(&g_pinned_threshold_c, (int)threshold_c);
 }
 
+/* ── Persistence ──────────────────────────────────────────────────
+ *
+ * The pinned threshold is saved to a one-line file at
+ * /data/ps5upload/fan_threshold.conf so it survives payload redeploy
+ * and console reboot. Loaded once at boot from `hw_fan_load_persisted`
+ * (called by main after runtime_ensure_directories). Saved on every
+ * successful set inside `hw_fan_set_threshold`.
+ *
+ * File format is a single decimal integer (the °C threshold). We
+ * intentionally use a trivial format — no JSON, no key=value — so
+ * the file is easy to inspect/edit via FTP and can't be corrupted
+ * by a half-written JSON parser. */
+
+#define FAN_PERSIST_PATH PS5UPLOAD2_RUNTIME_ROOT "/fan_threshold.conf"
+
+/* Returns the persisted threshold, or 0 if no valid file exists.
+ * The caller (main) treats 0 as "nothing to restore". */
+int hw_fan_load_persisted(void) {
+    FILE *fp = fopen(FAN_PERSIST_PATH, "r");
+    if (!fp) return 0;
+
+    int val = 0;
+    int matched = fscanf(fp, "%d", &val);
+    fclose(fp);
+
+    if (matched != 1 || val < HW_FAN_THRESHOLD_MIN || val > HW_FAN_THRESHOLD_MAX) {
+        /* Stale/corrupt file — treat as unset. Don't delete it here
+         * (avoids a surprising side-effect from a read-only API);
+         * the next successful set will overwrite it cleanly. */
+        return 0;
+    }
+    return val;
+}
+
+/* Saves the threshold to the persist file. Best-effort: a write
+ * failure (e.g., /data/ps5upload doesn't exist yet on a brand-new
+ * console) is silently ignored — the in-memory pin still works for
+ * this session, and the next successful set will retry the write. */
+static void hw_fan_save_persisted(uint8_t threshold_c) {
+    FILE *fp = fopen(FAN_PERSIST_PATH, "w");
+    if (!fp) return;
+    fprintf(fp, "%u\n", (unsigned)threshold_c);
+    fclose(fp);
+}
+
 /* Forward decl — defined below the setter so it can share the same
  * fd open/ioctl pattern via a static helper. */
 static int hw_fan_apply_locked(uint8_t threshold_c);
@@ -988,8 +1034,13 @@ int hw_fan_set_threshold(uint8_t threshold_c, const char **err_reason_out) {
     /* On success, pin the value and arm the auto-reapply watcher.
      * Order matters: pin first, then start. If we started first and
      * the thread happened to tick before atomic_store landed, it
-     * would early-exit on the still-zero pin and skip a cycle. */
+     * would early-exit on the still-zero pin and skip a cycle.
+     *
+     * Persist to disk after pinning so a payload redeploy or console
+     * reboot restores the same threshold automatically (matches
+     * elf-arsenal's config_save() call after a successful fan set). */
     hw_fan_pin_threshold(threshold_c);
+    hw_fan_save_persisted(threshold_c);
     pthread_mutex_unlock(&g_fan_set_mtx);
     hw_fan_watcher_start_once();
     return 0;
