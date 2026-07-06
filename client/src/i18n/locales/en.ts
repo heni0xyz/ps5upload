@@ -2185,10 +2185,14 @@ shortcuts_activate: "Open / activate",
   "pkglib.baseMissing.title": "Base game isn't installed",
   "pkglib.stream.hint":
     "Install a .pkg straight from this PC over HTTP — no staging upload (beta)",
-  "pkglib.stream.fw11.title": "Stream install isn't reliable on this firmware",
+  "pkglib.stream.fw11.title": "Stream install is beta on this firmware",
   "pkglib.stream.fw11.body":
-    'Your PS5 is on firmware {fw}.x. Stream (beta) installs through a path that can\'t get the credentials firmware 11 and up require, so it may register the game but install no data (a "hollow" tile that won\'t launch). Use the normal Upload → Install instead — it handles firmware {fw} correctly. Continue with Stream anyway?',
+    "Your PS5 is on firmware {fw}.x. Stream (beta) install hasn't been fully tested on this firmware yet. If it doesn't work, use the normal Upload → Install instead — that path is reliable on all firmwares. Continue with Stream?",
   "pkglib.stream.fw11.confirm": "Stream anyway",
+  "pkglib.stream.fwLow.hint":
+    "Stream install needs firmware 11+ — yours is {fw}.x. The HTTP path hangs on older firmware. Use Upload → Install (staged) instead.",
+  "pkglib.stream.fwLow.message":
+    "Stream install needs firmware 11 or newer — yours is {fw}.x. The HTTP install path hangs on older firmware because Sony's PlayGo pre-flight check never returns without kernel patches we don't have. Use the normal Upload → Install (staged) instead — it works perfectly on firmware {fw}.",
   roster_remove_aria: "Remove {name}",
   schedule_daily_at: "daily at {time}",
   schedule_once_at: "once at {time}",

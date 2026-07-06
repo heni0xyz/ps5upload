@@ -4,6 +4,31 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 3.3.26
+
+A reliability release focused on fixing package installs on older firmware (FW < 11).
+
+- **Fixed: package installs that failed with error 0x80B21106 on FW < 11.** The install
+  helper was wrapping local file paths in `file://` before handing them to Sony's
+  installer, but the installer's URI parser rejects that scheme on older firmware and
+  returns a parser error — producing hollow, metadata-only installs that would never
+  launch. Bare local paths are now passed through directly, matching the standalone DPI
+  daemon's behaviour. *(HW-verified on a PS5 Pro FW 9.60 and a PS5 Fat.)*
+- **Fixed: the DPI fallback daemon now self-escalates to the right credentials.** On
+  FW < 11, `InstallByPackage` needs ShellCore authority to succeed. The daemon (loaded
+  fresh via the elfldr port) now self-escalates its own credentials on startup and swaps
+  to ShellCore before each install, so the fallback path lands real data instead of
+  silently failing. *(Issues #152 and #164 — the "helper dies ~4s after a rejected
+  install" symptom is gone.)*
+- **Fixed: Stream (beta) no longer offered on firmware where it hangs.** Stream install
+  pulls a `.pkg` straight from your PC over HTTP without staging it first, but on
+  FW < 11 Sony's PlayGo pre-flight check never returns without kernel patches we don't
+  have for those firmwares. The Stream button is now disabled with an explanatory
+  tooltip when the connected PS5 is on FW < 11 — use the normal Upload → Install (staged)
+  instead, which works perfectly everywhere.
+- **New: persistent fan-control threshold.** Set a custom fan speed on the Fan Control
+  tab and it survives a reboot — the payload restores it at boot.
+
 ## 3.3.25
 
 A big feature + reliability release.

@@ -336,6 +336,12 @@ export default function InstallPackageScreen() {
   const [dropActive, setDropActive] = useState(false);
 
   const hostReady = !!host?.trim();
+  // Stream install hangs on FW < 11 (PlayGo PPR auth check never returns
+  // without kernel patches we don't have for those firmwares). Hard-disable
+  // the button when we KNOW the firmware is too old. Unknown firmware (null)
+  // leaves it enabled — the handler's belt-and-suspenders dialog catches it.
+  const fwMajor = firmwareMajor(runtime?.ps5Kernel);
+  const streamBlocked = fwMajor !== null && fwMajor < 11;
   // Stable ref so the drag-drop effect (subscribed once per host) always
   // calls the latest uploader without re-subscribing each render. Updated
   // in an effect (not during render) per the rules-of-hooks ref rule.
@@ -471,25 +477,41 @@ export default function InstallPackageScreen() {
       );
       return;
     }
-    // FW-11 authority cliff: the Stream (beta) path installs via the standalone
-    // DPI daemon, which can't acquire the SYSTEM install authid that FW 11+
-    // requires for the content-copy — so a stream install there registers a
-    // hollow tile with no content. Steer the user to the normal
-    // upload-then-install (whose in-process installer DOES escalate) before we
-    // waste a transfer on an install that won't land. Only a hard block when we
-    // KNOW it's FW 11+; unknown/<11 proceeds.
-    const fwMajor = firmwareMajor(runtime?.ps5Kernel);
+    // FW gate — two separate concerns, HW-verified:
+    //
+    //  FW < 11 (e.g. 9.60): Stream install HANGS. The http:// URL path hits
+    //    Sony's PlayGo PPR auth check (pf_auth_client_request_for_ppr) which
+    //    never returns without kernel PPR patches. elf-arsenal carries those
+    //    patches for FW 1.x/2.x/12.00 only — there is NO patch table for
+    //    FW 9.60, so stream install is genuinely broken there. HARD block.
+    //
+    //  FW >= 11 (e.g. 12.00): May work (PPR patches exist for 12.00 in
+    //    elf-arsenal) but is still untested by us. Advisory warn only.
+    //
+    // The button itself is also disabled for FW < 11 (see `streamBlocked`
+    // below), so this dialog is a belt-and-suspenders guard for the case
+    // where the firmware is known-bad but the button was somehow triggered.
+    if (fwMajor !== null && fwMajor < 11) {
+      setPickError(
+        tr(
+          "pkglib.stream.fwLow.message",
+          { fw: String(fwMajor) },
+          `Stream install needs firmware 11 or newer — yours is ${fwMajor}.x. The HTTP install path hangs on older firmware because Sony's PlayGo pre-flight check never returns without kernel patches we don't have. Use the normal Upload → Install (staged) instead — it works perfectly on firmware ${fwMajor}.`,
+        ),
+      );
+      return;
+    }
     if (fwMajor !== null && fwMajor >= 11) {
       const proceed = await confirm({
         title: tr(
           "pkglib.stream.fw11.title",
           undefined,
-          "Stream install isn't reliable on this firmware",
+          "Stream install is beta on this firmware",
         ),
         message: tr(
           "pkglib.stream.fw11.body",
           { fw: String(fwMajor) },
-          `Your PS5 is on firmware ${fwMajor}.x. Stream (beta) installs through a path that can't get the credentials firmware 11 and up require, so it may register the game but install no data (a "hollow" tile that won't launch). Use the normal Upload → Install instead — it handles firmware ${fwMajor} correctly. Continue with Stream anyway?`,
+          `Your PS5 is on firmware ${fwMajor}.x. Stream (beta) install hasn't been fully tested on this firmware yet. If it doesn't work, use the normal Upload → Install instead — that path is reliable on all firmwares. Continue with Stream?`,
         ),
         confirmLabel: tr("pkglib.stream.fw11.confirm", undefined, "Stream anyway"),
         cancelLabel: tr("cancel", undefined, "Cancel"),
@@ -704,17 +726,25 @@ export default function InstallPackageScreen() {
               }
               onClick={handleStreamPick}
               loading={streaming}
-              disabled={!hostReady || installing || installingAll}
+              disabled={
+                !hostReady || installing || installingAll || streamBlocked
+              }
               title={
                 !hostReady
                   ? tr(
                       "install.add.disabledHint",
                       "Set a PS5 host on the Connection tab first",
                     )
-                  : tr(
-                      "pkglib.stream.hint",
-                      "Install a .pkg straight from this PC over HTTP — no staging upload (beta)",
-                    )
+                  : streamBlocked
+                    ? tr(
+                        "pkglib.stream.fwLow.hint",
+                        { fw: String(fwMajor) },
+                        `Stream install needs firmware 11+ — yours is ${fwMajor}.x. The HTTP path hangs on older firmware. Use Upload → Install (staged) instead.`,
+                      )
+                    : tr(
+                        "pkglib.stream.hint",
+                        "Install a .pkg straight from this PC over HTTP — no staging upload (beta)",
+                      )
               }
             >
               {tr("pkglib.stream", undefined, "Stream (beta)")}

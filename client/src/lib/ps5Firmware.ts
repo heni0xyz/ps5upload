@@ -38,12 +38,23 @@ export function parsePS5Firmware(kernel: string | null | undefined): string | nu
 
 /**
  * The firmware MAJOR number (9, 10, 11, 12, …) from the kernel string, or
- * null when it can't be parsed. Used for the FW-11 "authority cliff": at and
- * above FW 11, Sony gates the package content-copy behind the SYSTEM install
- * authid, which the standalone DPI daemon (Stream beta) can't acquire — so a
- * stream install there registers a hollow tile with no content. The reliable
- * path on FW 11+ is the normal upload-then-install (its in-process installer
- * DOES escalate). Callers use `firmwareMajor(kernel) >= 11` to steer users.
+ * null when it can't be parsed.
+ *
+ * Used for the Stream Install (beta) firmware gate:
+ *
+ *  FW < 11 (e.g. 9.60): Stream install via http:// URL HANGS. Sony's PlayGo
+ *    PPR auth check (pf_auth_client_request_for_ppr) never returns without
+ *    kernel PPR patches. elf-arsenal carries PPR patches for FW 1.x, 2.x,
+ *    and 12.00 only — there is no patch table for FW 9.60, so stream install
+ *    is genuinely broken there. The Stream button is hard-disabled and the
+ *    handler refuses to proceed. Staged (upload-then-install) works perfectly.
+ *
+ *  FW >= 11: Stream install MAY work (PPR patches exist for 12.00 in
+ *    elf-arsenal) but is still untested by us. An advisory dialog warns the
+ *    user before proceeding.
+ *
+ * Callers use `firmwareMajor(kernel) < 11` to hard-block Stream, and
+ * `firmwareMajor(kernel) >= 11` for the advisory warning.
  */
 export function firmwareMajor(kernel: string | null | undefined): number | null {
   const fw = parsePS5Firmware(kernel);

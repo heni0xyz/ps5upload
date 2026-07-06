@@ -38,24 +38,27 @@ describe("parsePS5Firmware", () => {
   });
 });
 
-describe("firmwareMajor (Stream FW-11 guard)", () => {
-  it("returns the integer major below the FW-11 cliff", () => {
+describe("firmwareMajor (Stream Install FW gate)", () => {
+  it("returns the integer major below the FW-11 cutoff (stream BLOCKED)", () => {
     expect(
       firmwareMajor("FreeBSD 11.0 r218215/releases/09.60 Jul 18 2023")
     ).toBe(9);
     expect(firmwareMajor("r/releases/05.00")).toBe(5);
     expect(firmwareMajor("r/releases/10.40")).toBe(10);
+    // FW < 11: stream install hangs (PPR patches missing). Button disabled.
+    expect(firmwareMajor("r/releases/09.60")! < 11).toBe(true);
+    expect(firmwareMajor("r/releases/10.40")! < 11).toBe(true);
   });
 
-  it("returns >= 11 at and above the cliff (the guard trigger)", () => {
+  it("returns >= 11 at and above the cutoff (stream ALLOWED with advisory)", () => {
     expect(firmwareMajor("r/releases/11.00")).toBe(11);
     expect(firmwareMajor("r/releases/12.40")).toBe(12);
-    // The guard is `fw !== null && fw >= 11`.
+    // FW >= 11: stream install may work, advisory warning only.
     expect(firmwareMajor("r/releases/12.40")! >= 11).toBe(true);
     expect(firmwareMajor("r/releases/09.60")! >= 11).toBe(false);
   });
 
-  it("returns null when the firmware can't be parsed (guard does NOT block)", () => {
+  it("returns null when the firmware can't be parsed (gate does NOT block)", () => {
     expect(firmwareMajor(null)).toBeNull();
     expect(firmwareMajor("")).toBeNull();
     expect(firmwareMajor("unknown build")).toBeNull();
