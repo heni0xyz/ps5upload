@@ -699,7 +699,8 @@ mod tests {
     fn parse_hw_temps_m2_temp_omitted() {
         // Older payload that doesn't send m2_temp at all: default to 0
         // (no drive), same as absent.
-        let body = b"cpu_temp=42\nsoc_temp=40\ncpu_freq_mhz=2560\nsoc_clock_mhz=0\nsoc_power_mw=18000\n";
+        let body =
+            b"cpu_temp=42\nsoc_temp=40\ncpu_freq_mhz=2560\nsoc_clock_mhz=0\nsoc_power_mw=18000\n";
         let t = sanitize_temps(parse_hw_temps(body));
         assert_eq!(t.m2_temp, 0, "missing m2_temp ⇒ 0 (no drive)");
     }

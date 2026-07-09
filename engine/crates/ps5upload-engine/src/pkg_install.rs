@@ -3221,8 +3221,7 @@ mod tests {
 
     #[test]
     fn range_start_end() {
-        let (start, end) =
-            parse_range_header(&range_headers("bytes=100-199"), 1000).unwrap();
+        let (start, end) = parse_range_header(&range_headers("bytes=100-199"), 1000).unwrap();
         assert_eq!(start, 100);
         assert_eq!(end, 199);
     }
@@ -3230,8 +3229,7 @@ mod tests {
     #[test]
     fn range_open_end() {
         // bytes=500- → start=500, end=total-1
-        let (start, end) =
-            parse_range_header(&range_headers("bytes=500-"), 1000).unwrap();
+        let (start, end) = parse_range_header(&range_headers("bytes=500-"), 1000).unwrap();
         assert_eq!(start, 500);
         assert_eq!(end, 999);
     }
@@ -3239,8 +3237,7 @@ mod tests {
     #[test]
     fn range_suffix() {
         // bytes=-200 → last 200 bytes of a 1000-byte file
-        let (start, end) =
-            parse_range_header(&range_headers("bytes=-200"), 1000).unwrap();
+        let (start, end) = parse_range_header(&range_headers("bytes=-200"), 1000).unwrap();
         assert_eq!(start, 800);
         assert_eq!(end, 999);
     }
@@ -3248,8 +3245,7 @@ mod tests {
     #[test]
     fn range_suffix_larger_than_total() {
         // bytes=-2000 on a 1000-byte file → saturating_sub gives 0
-        let (start, end) =
-            parse_range_header(&range_headers("bytes=-2000"), 1000).unwrap();
+        let (start, end) = parse_range_header(&range_headers("bytes=-2000"), 1000).unwrap();
         assert_eq!(start, 0);
         assert_eq!(end, 999);
     }
