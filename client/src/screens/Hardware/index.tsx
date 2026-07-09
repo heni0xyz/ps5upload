@@ -453,6 +453,19 @@ export default function HardwareScreen() {
                   : undefined
               }
             />
+            <StatRow
+              label={tr("hardware_label_m2", "M.2 SSD")}
+              value={formatTemp(temps?.m2_temp ?? 0)}
+              hint={
+                temps && temps.m2_temp === 0
+                  ? tr(
+                      "hw_m2_not_installed",
+                      undefined,
+                      "No M.2 drive installed or sensor unavailable",
+                    )
+                  : undefined
+              }
+            />
           </SensorCard>
 
           <SensorCard

@@ -1259,6 +1259,8 @@ export interface HwTemps {
   cpu_temp: number;
   /** celsius */
   soc_temp: number;
+  /** M.2 NVMe expansion slot temp (celsius). 0 = no drive installed. */
+  m2_temp: number;
   cpu_freq_mhz: number;
   soc_clock_mhz: number;
   /** milliwatts */

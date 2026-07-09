@@ -174,6 +174,12 @@ export default function DashboardScreen() {
                   label={tr("dashboard_label_soc", "SoC")}
                   value={`${temps.soc_temp?.toFixed(0) ?? "?"}°C`}
                 />
+                {temps.m2_temp > 0 && (
+                  <KvRow
+                    label={tr("dashboard_label_m2", "M.2 SSD")}
+                    value={`${temps.m2_temp.toFixed(0)}°C`}
+                  />
+                )}
                 <KvRow
                   label={tr("dashboard_label_cpu_freq", "CPU freq")}
                   value={`${(temps.cpu_freq_mhz ?? 0).toFixed(0)} MHz`}

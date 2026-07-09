@@ -421,6 +421,7 @@ typedef struct {
     time_t   last_read;
     int      cpu_temp;
     int      soc_temp;
+    int      m2_temp;
     long     cpu_freq_mhz;
     int      valid;
 } hw_temps_cache_t;
@@ -480,7 +481,7 @@ int hw_temps_get_text_ex(int flags, char *out, size_t out_cap,
     }
     hw_resolve_once();
 
-    int cpu_temp = 0, soc_temp = 0;
+    int cpu_temp = 0, soc_temp = 0, m2_temp = 0;
     long cpu_freq_mhz = 0;
     uint32_t power_mw = 0;
     int cpu_usage_pct = -1, fan_duty_pct = -1, product_shape = -1;
@@ -491,6 +492,7 @@ int hw_temps_get_text_ex(int flags, char *out, size_t out_cap,
     if (g_temps_cache.valid && (now - g_temps_cache.last_read) < 1) {
         cpu_temp     = g_temps_cache.cpu_temp;
         soc_temp     = g_temps_cache.soc_temp;
+        m2_temp      = g_temps_cache.m2_temp;
         cpu_freq_mhz = g_temps_cache.cpu_freq_mhz;
     } else {
         /* All three direct sensor getters are dlsym'd Sony calls — fault-
@@ -506,26 +508,27 @@ int hw_temps_get_text_ex(int flags, char *out, size_t out_cap,
                 cpu_temp = t;
             }
         }
-        /* SoC thermal sensor. Sweep channels 0–7 rather than reading only
+        /* SoC thermal sensors. Sweep channels 0–7 rather than reading only
          * channel 0: the canonical SoC junction sensor is channel 0 on the
          * phat + Pro (hardware-confirmed), but the channel layout isn't
          * guaranteed across SoC revisions — a Slim or other SKU may surface
-         * its usable reading on a different channel, in which case a
-         * channel-0-only read would report "unavailable" while a real value
-         * sits one channel over. Matches the 0–7 sweep the Elf Arsenal
-         * reference uses. The first in-range channel wins, so on any console
-         * where channel 0 is valid (phat/Pro) the result is byte-identical
-         * to the old code — zero regression — and other SKUs gain coverage.
-         * Same direct API we already call cleanly for channel 0; only the
-         * channel arg varies, and each value is bounds-checked. */
+         * its usable reading on a different channel. The first in-range
+         * channel wins for soc_temp, so on any console where channel 0 is
+         * valid (phat/Pro) the result is byte-identical to the old code.
+         *
+         * Channel 2 is the M.2 NVMe expansion slot sensor (per elf-arsenal's
+         * sensors.c mapping). An empty slot returns 0, so require >= 20 to
+         * treat as populated. Captured alongside soc_temp in the same sweep
+         * — no extra API calls. */
         if (g_hw.soc_temp) {
             HW_GUARD("sceKernelGetSocSensorTemperature", {
                 for (int ch = 0; ch < 8; ch++) {
                     int st = 0;
                     if (g_hw.soc_temp(ch, &st) == 0 &&
                         st >= HW_TEMP_MIN_C && st <= HW_TEMP_MAX_C) {
-                        soc_temp = st;
-                        break;
+                        if (soc_temp == 0) soc_temp = st;
+                        if (ch == 2 && st >= 20) m2_temp = st;
+                        if (soc_temp != 0 && m2_temp != 0) break;
                     }
                 }
             });
@@ -554,6 +557,7 @@ int hw_temps_get_text_ex(int flags, char *out, size_t out_cap,
 
         g_temps_cache.cpu_temp     = cpu_temp;
         g_temps_cache.soc_temp     = soc_temp;
+        g_temps_cache.m2_temp      = m2_temp;
         g_temps_cache.cpu_freq_mhz = cpu_freq_mhz;
         g_temps_cache.last_read    = now;
         g_temps_cache.valid        = 1;
@@ -647,13 +651,14 @@ int hw_temps_get_text_ex(int flags, char *out, size_t out_cap,
     int n = snprintf(out, out_cap,
         "cpu_temp=%d\n"
         "soc_temp=%d\n"
+        "m2_temp=%d\n"
         "cpu_freq_mhz=%ld\n"
         "soc_clock_mhz=0\n"
         "soc_power_mw=%u\n"
         "cpu_usage_pct=%d\n"
         "fan_duty_pct=%d\n"
         "product_shape=%d\n",
-        cpu_temp, soc_temp, cpu_freq_mhz, power_mw,
+        cpu_temp, soc_temp, m2_temp, cpu_freq_mhz, power_mw,
         cpu_usage_pct, fan_duty_pct, product_shape);
     if (n < 0 || (size_t)n >= out_cap) {
         if (err_reason_out) *err_reason_out = "hw_temps_format_failed";

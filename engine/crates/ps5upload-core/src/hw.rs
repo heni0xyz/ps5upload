@@ -50,6 +50,11 @@ pub struct HwInfo {
 pub struct HwTemps {
     pub cpu_temp: i32,
     pub soc_temp: i32,
+    /// M.2 NVMe expansion slot temperature (°C). Channel 2 of the SoC
+    /// sensor array. `0` = no M.2 drive installed or sensor unavailable.
+    /// Requires >= 20 to be treated as valid (empty slot returns 0).
+    #[serde(default)]
+    pub m2_temp: i32,
     pub cpu_freq_mhz: i64,
     pub soc_clock_mhz: i64,
     pub soc_power_mw: u32,
@@ -196,6 +201,11 @@ fn sanitize_temps(mut t: HwTemps) -> HwTemps {
     if !(SENSOR_TEMP_MIN_C..=SENSOR_TEMP_MAX_C).contains(&t.soc_temp) {
         t.soc_temp = 0;
     }
+    // M.2 temp uses same physical range; 0 means "no drive installed" and
+    // is a valid value (don't treat it as implausible).
+    if !(0..=SENSOR_TEMP_MAX_C).contains(&t.m2_temp) {
+        t.m2_temp = 0;
+    }
     if !(0..=SENSOR_CPU_FREQ_MAX_MHZ).contains(&t.cpu_freq_mhz) {
         t.cpu_freq_mhz = 0;
     }
@@ -262,6 +272,7 @@ fn parse_hw_temps(body: &[u8]) -> HwTemps {
     HwTemps {
         cpu_temp: get("cpu_temp").and_then(|v| v.parse().ok()).unwrap_or(0),
         soc_temp: get("soc_temp").and_then(|v| v.parse().ok()).unwrap_or(0),
+        m2_temp: get("m2_temp").and_then(|v| v.parse().ok()).unwrap_or(0),
         cpu_freq_mhz: get("cpu_freq_mhz")
             .and_then(|v| v.parse().ok())
             .unwrap_or(0),
@@ -602,6 +613,7 @@ mod tests {
         let lo = sanitize_temps(HwTemps {
             cpu_temp: SENSOR_TEMP_MIN_C,
             soc_temp: SENSOR_TEMP_MAX_C,
+            m2_temp: 45,
             cpu_freq_mhz: SENSOR_CPU_FREQ_MAX_MHZ,
             soc_clock_mhz: 0,
             soc_power_mw: SENSOR_POWER_MAX_MW,
@@ -611,6 +623,7 @@ mod tests {
         });
         assert_eq!(lo.cpu_temp, SENSOR_TEMP_MIN_C);
         assert_eq!(lo.soc_temp, SENSOR_TEMP_MAX_C);
+        assert_eq!(lo.m2_temp, 45, "in-range M.2 temp passes through");
         assert_eq!(lo.cpu_freq_mhz, SENSOR_CPU_FREQ_MAX_MHZ);
         assert_eq!(lo.soc_power_mw, SENSOR_POWER_MAX_MW);
         assert_eq!(lo.cpu_usage_pct, 0, "0% usage is valid");
@@ -620,6 +633,7 @@ mod tests {
         let hi = sanitize_temps(HwTemps {
             cpu_temp: SENSOR_TEMP_MAX_C + 1,
             soc_temp: 0, // 0 = "no reading"; stays 0 (it's below MIN, already unavailable)
+            m2_temp: SENSOR_TEMP_MAX_C + 1,
             cpu_freq_mhz: SENSOR_CPU_FREQ_MAX_MHZ + 1,
             soc_clock_mhz: -1,
             soc_power_mw: SENSOR_POWER_MAX_MW + 1,
@@ -629,6 +643,7 @@ mod tests {
         });
         assert_eq!(hi.cpu_temp, 0, "one above max temp is rejected");
         assert_eq!(hi.soc_temp, 0);
+        assert_eq!(hi.m2_temp, 0, "out-of-range M.2 temp is rejected");
         assert_eq!(hi.cpu_freq_mhz, 0, "one above max freq is rejected");
         assert_eq!(hi.soc_clock_mhz, 0, "negative clock is rejected");
         assert_eq!(hi.soc_power_mw, 0, "one above max power is rejected");
@@ -660,6 +675,33 @@ mod tests {
         assert_eq!(t.cpu_usage_pct, -1, "missing usage ⇒ unavailable");
         assert_eq!(t.fan_duty_pct, -1, "missing duty ⇒ unavailable");
         assert_eq!(t.product_shape, -1, "missing shape ⇒ unavailable");
+    }
+
+    #[test]
+    fn parse_hw_temps_m2_temp() {
+        // New payload with an M.2 NVMe drive installed: channel 2 reports
+        // a valid temp alongside soc_temp.
+        let body = b"cpu_temp=42\nsoc_temp=40\nm2_temp=48\ncpu_freq_mhz=2560\nsoc_clock_mhz=0\nsoc_power_mw=18000\n";
+        let t = sanitize_temps(parse_hw_temps(body));
+        assert_eq!(t.m2_temp, 48, "M.2 temp parsed from channel 2");
+    }
+
+    #[test]
+    fn parse_hw_temps_m2_temp_absent() {
+        // No M.2 drive installed (empty slot): payload sends m2_temp=0,
+        // which is a valid "no drive" reading and must pass through.
+        let body = b"cpu_temp=42\nsoc_temp=40\nm2_temp=0\ncpu_freq_mhz=2560\nsoc_clock_mhz=0\nsoc_power_mw=18000\n";
+        let t = sanitize_temps(parse_hw_temps(body));
+        assert_eq!(t.m2_temp, 0, "0 = no M.2 drive installed");
+    }
+
+    #[test]
+    fn parse_hw_temps_m2_temp_omitted() {
+        // Older payload that doesn't send m2_temp at all: default to 0
+        // (no drive), same as absent.
+        let body = b"cpu_temp=42\nsoc_temp=40\ncpu_freq_mhz=2560\nsoc_clock_mhz=0\nsoc_power_mw=18000\n";
+        let t = sanitize_temps(parse_hw_temps(body));
+        assert_eq!(t.m2_temp, 0, "missing m2_temp ⇒ 0 (no drive)");
     }
 
     #[test]
