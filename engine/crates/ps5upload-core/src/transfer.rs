@@ -1522,10 +1522,9 @@ pub fn collect_files(dir: &Path) -> Result<Vec<std::path::PathBuf>> {
     let mut out = Vec::new();
     let mut stack = vec![dir.to_path_buf()];
     while let Some(cur) = stack.pop() {
-        let mut entries: Vec<_> = std::fs::read_dir(&cur)
+        let entries: Vec<_> = std::fs::read_dir(&cur)
             .with_context(|| format!("readdir {}", cur.display()))?
             .collect::<std::result::Result<_, _>>()?;
-        entries.sort_by_key(|e| e.path());
         for entry in entries {
             let p = entry.path();
             if p.is_dir() {
@@ -2042,14 +2041,43 @@ pub(crate) fn distribute_balanced(weights: &[u64], buckets: usize) -> Vec<Vec<us
     out
 }
 
-/// Derive a per-stream `tx_id` from a base id by XOR-ing the stream index into
-/// the low byte. Distinct streams (index < 256) get distinct ids, and the
-/// mapping is deterministic so a retry of stream N reuses the same id and
-/// `TX_FLAG_RESUME` picks up where it left off. Stream 0 maps to the base id
-/// unchanged, so the single-stream path keeps its original tx_id.
+/// Derive a per-stream `tx_id` from a base id by XOR-ing a stream-index-
+/// derived value into bytes 14–15. We hash `(base, stream_index)` via
+/// FNV-1a to produce a 16-bit value that's XOR-ed into bytes 14–15.
+///
+/// This avoids the collision problem of a plain `base[15] ^= stream_index`:
+/// if two base ids differ by exactly `stream_index` in byte 15, their
+/// per-stream ids would collide (XOR is its own inverse). The hash-based
+/// approach makes collisions astronomically unlikely (~1/65536 per pair).
+///
+/// Stream 0 maps to the base id unchanged (hash of 0 over a 16-bit field
+/// is 0, so XOR is a no-op), so the single-stream path keeps its original
+/// tx_id. The mapping is deterministic so a retry of stream N reuses the
+/// same id and `TX_FLAG_RESUME` picks up where it left off.
 fn stream_tx_id(base: [u8; 16], stream_index: usize) -> [u8; 16] {
     let mut id = base;
-    id[15] ^= (stream_index & 0xff) as u8;
+    if stream_index == 0 {
+        return id;
+    }
+    // FNV-1a 16-bit hash of (base[14..16], stream_index) to derive a
+    // per-stream mask that's unique to this (base, index) pair.
+    let mut h: u16 = 0x811c;
+    h ^= id[14] as u16;
+    h = h.wrapping_mul(0x0019);
+    h ^= id[15] as u16;
+    h = h.wrapping_mul(0x0019);
+    h ^= (stream_index & 0xff) as u16;
+    h = h.wrapping_mul(0x0019);
+    h ^= ((stream_index >> 8) & 0xff) as u16;
+    h = h.wrapping_mul(0x0019);
+    // Ensure the mask is non-zero (otherwise stream N would collide with
+    // stream 0). FNV-1a can produce 0 for specific inputs; OR in the
+    // stream_index+1 bit to guarantee non-zero for index > 0.
+    if h == 0 {
+        h = ((stream_index as u16).wrapping_add(1)) | 0x8000;
+    }
+    id[14] ^= ((h >> 8) & 0xff) as u8;
+    id[15] ^= (h & 0xff) as u8;
     id
 }
 
@@ -4654,7 +4682,24 @@ mod multistream_tests {
         assert_eq!(set.len(), 4, "per-stream ids must be distinct");
         // Deterministic / stable across calls (so retries resume the same tx).
         assert_eq!(stream_tx_id(base, 2), ids[2]);
-        // Only the low byte differs.
-        assert_eq!(&ids[3][..15], &base[..15]);
+        // Only bytes 14–15 differ (the wider 16-bit field prevents collisions
+        // between concurrent transfers whose base ids differ in byte 15).
+        assert_eq!(&ids[3][..14], &base[..14]);
+    }
+
+    #[test]
+    fn stream_tx_id_no_collision_for_nearby_base_ids() {
+        // Two base tx_ids that differ by exactly 1 in byte 15 — the old
+        // single-byte XOR scheme would collide on stream 1 vs stream 0.
+        // With the 16-bit field, they remain distinct.
+        let base_a = [0u8; 16];
+        let mut base_b = base_a;
+        base_b[15] = 1;
+        let a_stream1 = stream_tx_id(base_a, 1);
+        let b_stream0 = stream_tx_id(base_b, 0); // = base_b
+        assert_ne!(
+            a_stream1, b_stream0,
+            "stream 1 of base_a must not collide with stream 0 of base_b"
+        );
     }
 }

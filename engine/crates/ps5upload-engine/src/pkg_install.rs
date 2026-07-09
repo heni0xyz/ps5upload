@@ -1023,7 +1023,11 @@ const INSTALL_NEARDONE_FRACTION: f64 = 0.90;
 /// On firmware where launchability can't be verified (no derivable title_id,
 /// both app.db and the /user/app scan unreadable), byte-accounting IS the
 /// completion signal: this fraction of expected bytes consumed …
-const INSTALL_SETTLE_FRACTION: f64 = 0.97;
+///
+/// 0.99 (not 0.97) because `consumed` is monotonic — a transient free-space
+/// drop from another process inflates it permanently, so a lower threshold
+/// risks declaring Complete on a 97%-installed pkg after a noisy measurement.
+const INSTALL_SETTLE_FRACTION: f64 = 0.99;
 /// … AND this many seconds of no further writes ⇒ treat as complete.
 const INSTALL_SETTLE_SEC_DEFAULT: u64 = 60;
 
@@ -2291,11 +2295,20 @@ fn parse_range_header(headers: &HeaderMap, total: u64) -> Result<(u64, u64), ()>
     };
     let after = h.strip_prefix("bytes=").ok_or(())?;
     let (s, e) = after.split_once('-').ok_or(())?;
-    let start: u64 = s.parse().map_err(|_| ())?;
-    let end: u64 = if e.is_empty() {
-        total.saturating_sub(1)
+    // Support suffix-range `bytes=-N` (last N bytes) per RFC 9110 §14.1.2.
+    // BGFT doesn't use this, but spec-compliant clients (curl) do.
+    let (start, end) = if s.is_empty() {
+        let suffix: u64 = e.parse().map_err(|_| ())?;
+        let start = total.saturating_sub(suffix);
+        (start, total.saturating_sub(1))
     } else {
-        e.parse().map_err(|_| ())?
+        let start: u64 = s.parse().map_err(|_| ())?;
+        let end: u64 = if e.is_empty() {
+            total.saturating_sub(1)
+        } else {
+            e.parse().map_err(|_| ())?
+        };
+        (start, end)
     };
     if start > end || end >= total {
         return Err(());
@@ -2331,9 +2344,12 @@ fn read_split_range(s: &InstallSession, start: u64, end: u64) -> std::io::Result
 
             let mut f = std::fs::File::open(&s.parts[i])?;
             f.seek(SeekFrom::Start(local_start))?;
-            let mut chunk = vec![0u8; take as usize];
-            f.read_exact(&mut chunk)?;
-            out.extend_from_slice(&chunk);
+            // Read directly into `out`'s tail to avoid a double allocation
+            // (previously allocated `chunk` + `out.extend_from_slice`, using
+            // up to 2× PKG_HOST_RESPONSE_BYTES_CAP = 32 MiB per request).
+            let old_len = out.len();
+            out.resize(old_len + take as usize, 0);
+            f.read_exact(&mut out[old_len..])?;
 
             cursor = want_end_global + 1;
             if cursor > end {
@@ -2608,13 +2624,14 @@ mod tests {
     fn verdict_unsupported_fw_completes_on_byte_settle() {
         // No launch verification possible (None). Byte-accounting is the signal:
         // ~all expected bytes landed AND writing settled ⇒ Complete (delete ok).
-        let v = install_verdict(&obs(None, 24_500_000_000, 25_000_000_000, 60));
+        // 24.8/25.0 GB = 99.2% ≥ INSTALL_SETTLE_FRACTION (0.99).
+        let v = install_verdict(&obs(None, 24_800_000_000, 25_000_000_000, 60));
         assert_eq!(v, InstallVerdict::Complete);
         // Settled but well short of expected ⇒ NOT complete (don't delete).
         let v = install_verdict(&obs(None, 10_000_000_000, 25_000_000_000, 300));
         assert_eq!(v, InstallVerdict::Stalled);
         // ~all bytes but not yet settled ⇒ still Installing (let it settle).
-        let v = install_verdict(&obs(None, 24_800_000_000, 25_000_000_000, 30));
+        let v = install_verdict(&obs(None, 24_900_000_000, 25_000_000_000, 30));
         assert_eq!(v, InstallVerdict::Installing);
     }
 
@@ -2625,7 +2642,8 @@ mod tests {
         // launch check FALSE-reports Absent (Some(false)). Byte-accounting must
         // still confirm Complete — else a game that installed and PLAYS gets
         // reported as failed (the real bug this fixes). HW-confirmed on a Pro.
-        let v = install_verdict(&obs(Some(false), 24_500_000_000, 25_000_000_000, 60));
+        // 24.8/25.0 GB = 99.2% ≥ INSTALL_SETTLE_FRACTION (0.99).
+        let v = install_verdict(&obs(Some(false), 24_800_000_000, 25_000_000_000, 60));
         assert_eq!(v, InstallVerdict::Complete);
         // A "dead tile" (registers appmeta but writes ~no content) has Absent +
         // ~zero bytes ⇒ must NOT complete — byte-accounting cleanly rejects it.

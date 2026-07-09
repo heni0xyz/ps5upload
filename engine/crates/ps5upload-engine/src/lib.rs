@@ -150,7 +150,7 @@ use std::{
     convert::Infallible,
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
-        Arc, Mutex, OnceLock,
+        Arc, Mutex, OnceLock, Weak,
     },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -827,13 +827,14 @@ struct AppState {
 /// (same as a dropped connection). A static avoids threading `AppState` into
 /// the blocking transfer closures (which only capture `job_id`).
 ///
-/// Self-pruning: while a transfer runs, the core holds clone(s) of the flag, so
-/// `Arc::strong_count > 1`; once it finishes those drop and only the registry's
-/// clone remains (count 1). `register` drops every count-1 entry before
-/// inserting, so the map stays ≈ the live-transfer count with no terminal
-/// bookkeeping.
-fn cancel_registry() -> &'static Mutex<HashMap<Uuid, Arc<AtomicBool>>> {
-    static REG: OnceLock<Mutex<HashMap<Uuid, Arc<AtomicBool>>>> = OnceLock::new();
+/// Self-pruning: the transfer thread holds the only strong `Arc` clone; the
+/// registry keeps a `Weak`. When the transfer finishes, the `Arc` drops and
+/// the `Weak` upgrades to `None` — so `register` can prune dead entries
+/// without the `Arc::strong_count` race (strong_count is not synchronization-
+/// safe and could prune a still-running transfer if the count transiently
+/// dipped between retain and insert).
+fn cancel_registry() -> &'static Mutex<HashMap<Uuid, Weak<AtomicBool>>> {
+    static REG: OnceLock<Mutex<HashMap<Uuid, Weak<AtomicBool>>>> = OnceLock::new();
     REG.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -842,8 +843,8 @@ fn cancel_registry() -> &'static Mutex<HashMap<Uuid, Arc<AtomicBool>>> {
 fn register_transfer_cancel(job_id: Uuid) -> Arc<AtomicBool> {
     let flag = Arc::new(AtomicBool::new(false));
     let mut g = cancel_registry().lock().unwrap_or_else(|e| e.into_inner());
-    g.retain(|_, v| Arc::strong_count(v) > 1);
-    g.insert(job_id, Arc::clone(&flag));
+    g.retain(|_, v| v.strong_count() > 0);
+    g.insert(job_id, Arc::downgrade(&flag));
     flag
 }
 
@@ -852,10 +853,13 @@ fn register_transfer_cancel(job_id: Uuid) -> Arc<AtomicBool> {
 fn signal_transfer_cancel(job_id: Uuid) -> bool {
     let g = cancel_registry().lock().unwrap_or_else(|e| e.into_inner());
     match g.get(&job_id) {
-        Some(flag) => {
-            flag.store(true, Ordering::Relaxed);
-            true
-        }
+        Some(weak) => match weak.upgrade() {
+            Some(flag) => {
+                flag.store(true, Ordering::Relaxed);
+                true
+            }
+            None => false,
+        },
         None => false,
     }
 }
@@ -3546,10 +3550,13 @@ async fn zip_inspect_stream_handler(Json(req): Json<ZipInspectReq>) -> impl Into
             move |n| {
                 // `blocking_send` is the right primitive from inside
                 // `spawn_blocking`: it blocks the worker thread (not a
-                // tokio task) until the receiver has room. Dropped on
-                // client disconnect — the parser keeps running but its
-                // sends become no-ops, so the orphaned worker drains
-                // quickly without blocking forever.
+                // tokio task) until the receiver has room. On client
+                // disconnect the receiver drops and `blocking_send`
+                // returns `Err` immediately — the send is a no-op and
+                // the parse continues to completion (the inspect API
+                // doesn't support cancellation). The final `Done`/`Error`
+                // event below also fails to send, so the worker exits
+                // cleanly after parsing finishes.
                 let _ = tx_progress.blocking_send(InspectStreamEvent::Progress(n));
             },
         );
