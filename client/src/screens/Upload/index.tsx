@@ -21,6 +21,7 @@ import { isAndroid } from "../../lib/platform";
 import { pickLocalPath } from "../../state/localPicker";
 import { isTauriEnv, safeUnlisten } from "../../lib/tauriEnv";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { useShallow } from "zustand/react/shallow";
 
 import {
   useUploadStore,
@@ -129,7 +130,6 @@ function detectedLabel(
 
 export default function UploadScreen() {
   const tr = useTr();
-  const store = useUploadStore();
   const {
     source,
     detecting,
@@ -142,6 +142,7 @@ export default function UploadScreen() {
     destinationSubpath,
     excludeMode,
     excludes,
+    rarPassword,
     pickFile,
     pickFolder,
     reset,
@@ -153,7 +154,33 @@ export default function UploadScreen() {
     toggleExclude,
     addExclude,
     removeExclude,
-  } = store;
+  } = useUploadStore(
+    useShallow((s) => ({
+      source: s.source,
+      detecting: s.detecting,
+      detectError: s.detectError,
+      zipInspectEntries: s.zipInspectEntries,
+      mountAfterUpload: s.mountAfterUpload,
+      mountReadOnly: s.mountReadOnly,
+      registerAfterUpload: s.registerAfterUpload,
+      destinationVolume: s.destinationVolume,
+      destinationSubpath: s.destinationSubpath,
+      excludeMode: s.excludeMode,
+      excludes: s.excludes,
+      rarPassword: s.rarPassword,
+      pickFile: s.pickFile,
+      pickFolder: s.pickFolder,
+      reset: s.reset,
+      setMountAfterUpload: s.setMountAfterUpload,
+      setMountReadOnly: s.setMountReadOnly,
+      setRegisterAfterUpload: s.setRegisterAfterUpload,
+      setDestination: s.setDestination,
+      setExcludeMode: s.setExcludeMode,
+      toggleExclude: s.toggleExclude,
+      addExclude: s.addExclude,
+      removeExclude: s.removeExclude,
+    })),
+  );
 
   const [dropActive, setDropActive] = useState(false);
 
@@ -343,7 +370,7 @@ export default function UploadScreen() {
       excludes: activeExcludes,
       // Capture the .rar password (if any) into the queued item; the direct
       // startTransfer paths read it from the store instead.
-      rarPassword: source.kind === "archive" ? store.rarPassword : null,
+      rarPassword: source.kind === "archive" ? rarPassword : null,
       mountAfterUpload: source.kind === "image" && mountAfterUpload,
       mountReadOnly,
       registerAfterUpload: source.kind === "game-folder" && registerAfterUpload,

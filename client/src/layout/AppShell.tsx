@@ -36,6 +36,7 @@ import {
 } from "../state/notifications";
 import { ensureOsNotificationPermission } from "../lib/osNotify";
 import { powerTick } from "../api/ps5";
+import { transferScreenBusy } from "../lib/ps5Transfers";
 import { CommandPalette } from "../components/CommandPalette";
 import { ShortcutsOverlay } from "../components/ShortcutsOverlay";
 import { LocalPathPicker } from "../components/LocalPathPicker";
@@ -274,6 +275,14 @@ function useStatusPolling() {
         // "upload refused" issue. Skipped entirely when mgmt is down —
         // no point probing :9113 when :9114 is already dark.
         if (s.reachable && newStatus === "up") {
+          // Skip the transfer-port liveness probe while an upload to THIS
+          // console is running: portCheck opens a TCP connection to :9113,
+          // the same port the transfer is bursting data over. Even a bare
+          // connect adds contention during a large upload (issue #164:
+          // "upload speed drops until it fails"). The liveness state from
+          // the last poll is retained; it refreshes on the next poll after
+          // the transfer finishes.
+          if (transferScreenBusy(probedHost)) return;
           try {
             const alive = await portCheck(probedHost, PS5_PAYLOAD_PORT);
             if (cancelled) return;

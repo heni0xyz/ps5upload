@@ -24,6 +24,7 @@ import { PageHeader, ConnectionGate, ConsoleChip } from "../../components";
 import { useTr } from "../../state/lang";
 import { useDocumentVisible } from "../../lib/visibility";
 import { transferAddr } from "../../lib/addr";
+import { transferScreenBusy } from "../../lib/ps5Transfers";
 
 /**
  * Live status dashboard. One-pane summary of every signal the app
@@ -78,6 +79,14 @@ export default function DashboardScreen() {
     if (!visible || !host?.trim() || payloadStatus !== "up") return;
     let cancelled = false;
     const tick = async () => {
+      // Skip the sensor/power poll while an upload to THIS console is
+      // running: fetchHwTemps/fetchHwPower hit the transfer port (:9113),
+      // the same port the upload is bursting data over. A 5s cadence poll
+      // during a large multi-GB upload adds per-request contention that
+      // can collapse effective throughput — the exact "upload speed drops
+      // until it fails" symptom from issue #164. The sensors can wait
+      // until the transfer finishes.
+      if (transferScreenBusy(host)) return;
       const addr = transferAddr(host.trim());
       try {
         const [t, p] = await Promise.all([
