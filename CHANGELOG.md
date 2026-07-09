@@ -4,6 +4,58 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 3.4.0
+
+A reliability and feature release. The big themes: transfer and install
+robustness on all firmwares, a new hardware sensor, the web UI engine image,
+and a payload code consolidation.
+
+- **New: M.2 NVMe temperature sensor.** The Dashboard and Hardware screens now
+  show the temperature of an installed M.2 SSD expansion drive, alongside the
+  existing CPU and SoC readings. The value is read from the same SoC sensor
+  sweep that already feeds the SoC temp — zero extra API calls. An empty slot
+  simply shows no reading.
+- **Fixed: transfer stream ID collisions.** The FNV-1a hash used to identify
+  active transfer streams could collide across concurrent jobs, causing one
+  transfer to accidentally cancel another. The hash is now correctly computed
+  and the cancel registry hardened so a dead stream's cancel signal can never
+  fire. *(Issue #164.)*
+- **Fixed: RFC 9110 suffix byte-ranges.** Range requests of the form
+  `bytes=-N` (last N bytes) were rejected; now handled correctly per spec,
+  so more HTTP clients can resume partial downloads from the engine.
+- **Fixed: dashboard polling starved transfers.** The Dashboard's 5-second
+  auto-poll was never paused during an active upload, adding unnecessary load
+  and occasionally slowing transfers on slower connections. Polling now
+  pauses while any transfer is in flight and resumes on completion.
+- **Fixed: package install settle fraction too aggressive.** The install
+  progress tracker considered an install "settled" at 97%; raised to 99% so
+  the UI doesn't report success before Sony's installer has actually finished
+  writing data.
+- **Fixed: DPI daemon authid on FW 11+.** The fallback install daemon now
+  correctly acquires ShellCore credentials on firmware 11 and above (not just
+  below 11), using a shared two-tier firmware detection routine. *(Issues #152
+  and #164.)*
+- **Fixed: a batch of payload hardening fixes.** Profile loading now rejects
+  symlinks (`O_NOFOLLOW`), `sys_time` uses `pthread_once` for thread-safe
+  one-time init, and the shellui RPC handler fixed for copyout overflow and
+  stack buffer issues.
+- **New: `ps5upload-engine-webui` Docker image.** The engine + full React web
+  UI is now published as a separate multi-arch (amd64 + arm64) image on GHCR,
+  in lockstep with the plain engine image on every release. No manual
+  `Dockerfile.webui` build needed.
+- **Internal: authid/firmware code consolidated.** The ShellCore/System-Install/
+  JB authid constants and the firmware-major detection logic — previously
+  triplicated across bgft.c, register.c, and the DPI daemon — are now in a
+  single shared header (`payload/include/authid.h`). The DPI daemon now uses
+  the full two-tier firmware parser, matching the rest of the codebase.
+- **Internal: removed unused frontend dependencies.** `@tauri-apps/plugin-fs`
+  and `@tauri-apps/plugin-shell` npm packages were never imported by any
+  frontend code; removed to shrink the install footprint. (The Rust plugins
+  remain registered.)
+- **Internal: engine URL lock poison recovery.** The RwLock guarding the
+  runtime-configurable engine URL now recovers from poison instead of
+  propagating a panic, so a thread failure elsewhere can't wedge the settings.
+
 ## 3.3.26
 
 A reliability release focused on fixing package installs on older firmware (FW < 11).
