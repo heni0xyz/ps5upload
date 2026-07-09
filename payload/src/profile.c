@@ -176,9 +176,9 @@ static void ensure_dir(const char *path) {
 }
 
 static int copy_file(const char *src, const char *dst) {
-    int in = open(src, O_RDONLY);
+    int in = open(src, O_RDONLY | O_NOFOLLOW);
     if (in < 0) return -1;
-    int out = open(dst, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    int out = open(dst, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0644);
     if (out < 0) {
         close(in);
         return -1;

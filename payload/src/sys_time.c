@@ -11,32 +11,29 @@
 typedef int (*set_dt_fn)(const sce_datetime_t *);
 typedef int (*get_dt_fn)(sce_datetime_t *);
 
-/* dlsym cache. Resolved once on first call; subsequent calls hit the
- * cache. NULL = not-yet-resolved AND symbol absent both look the same
- * from the cache layer, which is why we keep a separate `g_resolved`
- * flag — `g_set == NULL` after a resolution attempt means the symbol
- * is genuinely missing on this firmware. */
+/* dlsym cache. Resolved once on first call via pthread_once; subsequent
+ * calls hit the cached pointers. NULL = symbol genuinely absent on this
+ * firmware. The previous hand-rolled double-checked lock had a C11 data
+ * race (unsynchronized read of g_resolved); pthread_once gives the same
+ * fast path with defined semantics, matching sys_registry.c's pattern. */
 static set_dt_fn       g_set       = NULL;
 static get_dt_fn       g_get       = NULL;
-static int             g_resolved  = 0;
-static pthread_mutex_t g_init_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_once_t  g_resolve_once = PTHREAD_ONCE_INIT;
+
+static void resolve_impl(void) {
+    /* RTLD_DEFAULT searches every loaded library, matching the
+     * pattern in hw_info.c / register.c. The whole point is that
+     * the lookup doesn't fail at payload init when the SDK stub
+     * is link-time-bound but the runtime SPRX is missing the
+     * NID — we want to find out at first call, not at boot. */
+    g_set = (set_dt_fn)dlsym(RTLD_DEFAULT,
+                              "sceSystemServiceSetCurrentDateTime");
+    g_get = (get_dt_fn)dlsym(RTLD_DEFAULT,
+                              "sceSystemServiceGetCurrentDateTime");
+}
 
 static void resolve_once(void) {
-    if (g_resolved) return;
-    pthread_mutex_lock(&g_init_lock);
-    if (!g_resolved) {
-        /* RTLD_DEFAULT searches every loaded library, matching the
-         * pattern in hw_info.c / register.c. The whole point is that
-         * the lookup doesn't fail at payload init when the SDK stub
-         * is link-time-bound but the runtime SPRX is missing the
-         * NID — we want to find out at first call, not at boot. */
-        g_set = (set_dt_fn)dlsym(RTLD_DEFAULT,
-                                  "sceSystemServiceSetCurrentDateTime");
-        g_get = (get_dt_fn)dlsym(RTLD_DEFAULT,
-                                  "sceSystemServiceGetCurrentDateTime");
-        g_resolved = 1;
-    }
-    pthread_mutex_unlock(&g_init_lock);
+    pthread_once(&g_resolve_once, resolve_impl);
 }
 
 /* Convert a Sony date/time (UTC) to a unix epoch in seconds, or -1

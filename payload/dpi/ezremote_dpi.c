@@ -76,6 +76,7 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <sys/types.h>
+#include <sys/sysctl.h>
 
 #include <ps5/kernel.h>
 
@@ -93,8 +94,38 @@
  * it, InstallByPackage returns 0x80431068 (BGFT download error) for
  * http:// URLs and 0x80B21106 for file:// URLs. We self-escalate to
  * SYSTEM_AUTHID for init (above), then swap to ShellCore just for the
- * InstallByPackage call. Mirrors bgft.c:authid_acquire_shellcore(). */
+ * InstallByPackage call ON FW < 11. On FW 11+ the content-copy step
+ * is gated behind SYSTEM_AUTHID — swapping down to ShellCore registers
+ * the title but lands NO content (the "hollow dead-tile" bug). This
+ * mirrors bgft.c's firmware gate exactly. */
 #define DPI_SHELLCORE_AUTHID 0x3800000000000010ULL
+
+/* ── Firmware detection (mirrors register.c::detect_firmware_major) ──────
+ * The DPI daemon is a standalone process that doesn't link against
+ * register.c, so we inline a minimal sysctl-based version. Returns the
+ * PS5 firmware major (e.g. 12 for 12.40) or 0 if unknown. 0 errs
+ * toward ShellCore — the proven default for FW < 11 where most DPI
+ * installs happen. */
+static int dpi_detect_firmware_major(void) {
+    char buf[256];
+    size_t sz = sizeof(buf);
+    if (sysctlbyname("kern.version", buf, &sz, NULL, 0) != 0)
+        return 0;
+    buf[sizeof(buf) - 1] = '\0';
+    const char *p = strstr(buf, "releases/");
+    if (p) {
+        p += strlen("releases/");
+        int major = 0;
+        int consumed = 0;
+        while (*p >= '0' && *p <= '9') {
+            major = major * 10 + (*p - '0');
+            consumed++;
+            p++;
+        }
+        if (consumed > 0) return major;
+    }
+    return 0;
+}
 
 /* ── jb_escalate_pid (ported from elf-arsenal's jb.c) ──────────────────
  * Rewrites the target pid's ucred to full root + SYSTEM_AUTHID + all
@@ -410,21 +441,33 @@ int main(void) {
             metainfo.content_name       = fixed;
             metainfo.icon_url           = "";
 
-            /* Swap to ShellCore authid for the InstallByPackage call.
-             * init() runs under SYSTEM_AUTHID (set at boot), but
-             * InstallByPackage's URL pre-flight requires ShellCore's
-             * authid (0x3800000000000010) on FW < 11. Without the swap,
-             * InstallByPackage returns 0x80431068 (BGFT download error).
-             * After the call we restore SYSTEM_AUTHID so subsequent
-             * inits/calls stay in the privileged context. This mirrors
-             * bgft.c:authid_acquire_shellcore() exactly. */
+            /* Firmware-gated install authid — mirrors bgft.c's FW-11
+             * "authority cliff" exactly. BELOW FW 11 (5.10/9.60,
+             * HW-proven): ShellCore authid is the gate
+             * InstallByPackage's URL pre-flight requires. AT/ABOVE
+             * FW 11: the content-copy step is gated behind SYSTEM
+             * authid; swapping down to ShellCore registers the title
+             * but lands NO content (the "hollow dead-tile" bug —
+             * appmeta present, /user/app empty). So on FW 11+ we
+             * STAY at SYSTEM_AUTHID (set at boot escalation) and
+             * don't swap. fw==0 (unknown) → ShellCore, the proven
+             * default for the FW < 11 regime where DPI is most used. */
+            int fw_major = dpi_detect_firmware_major();
+            int need_swap = (fw_major < 11);
             pid_t me = getpid();
-            uint64_t saved_authid = kernel_get_ucred_authid(me);
-            if (saved_authid != 0) {
-                kernel_set_ucred_authid(me, DPI_SHELLCORE_AUTHID);
+            uint64_t saved_authid = 0;
+            if (need_swap) {
+                saved_authid = kernel_get_ucred_authid(me);
+                if (saved_authid != 0) {
+                    kernel_set_ucred_authid(me, DPI_SHELLCORE_AUTHID);
+                }
             }
+            fprintf(stderr,
+                    "[dpi] InstallByPackage: fw_major=%d authid=%s\n",
+                    fw_major,
+                    need_swap ? "ShellCore" : "SYSTEM (no swap)");
             ret = sceAppInstUtilInstallByPackage(&metainfo, &pkg_info, &playgo_info);
-            if (saved_authid != 0) {
+            if (need_swap && saved_authid != 0) {
                 kernel_set_ucred_authid(me, saved_authid);
             }
             if (ret != 0) {

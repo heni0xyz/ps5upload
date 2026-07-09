@@ -443,13 +443,15 @@ static int remote_get_foreground_user(int *out_user) {
     long rc = pt_call(g_shellui_pid, fn_addr,
                        (uint64_t)scratch, 0, 0, 0, 0, 0);
     int user_id = 0;
+    int copy_ok = 0;
     if (rc == 0) {
-        (void)pt_copyout(g_shellui_pid, scratch, &user_id, sizeof(user_id));
+        copy_ok = (pt_copyout(g_shellui_pid, scratch, &user_id, sizeof(user_id)) == 0);
     }
     (void)pt_munmap(g_shellui_pid, scratch, 0x1000);
     (void)pt_detach_tracked(g_shellui_pid, 0);
     pthread_mutex_unlock(&g_rpc_mtx);
     if (rc != 0) return -1;
+    if (!copy_ok) return -1;
     *out_user = user_id;
     return 0;
 }
@@ -753,6 +755,27 @@ int shellui_rpc_install_pkg(const char *url,
         return -1;
     }
 
+    /* Pre-validate that the string layout will fit in the scratch buffer
+     * BEFORE writing any bytes. The input bounds above cap the sizes, but
+     * a post-write check (as the previous code had) would only detect an
+     * overflow after memory is already corrupted. This check is the true
+     * safety net: url + ex_uri + scenario + cid + title + icon + NULs
+     * = url_len + 1 + 1 + 1 + cid_len + 1 + max(title_len, fl) + 1 + 1. */
+    {
+        size_t title_or_fallback = title_len > 0 ? title_len : sizeof("ps5upload") - 1;
+        size_t needed = APPINST_OFF_STRINGS
+                      + url_len + 1      /* uri + NUL */
+                      + 1                /* ex_uri NUL */
+                      + 1                /* scenario NUL */
+                      + cid_len + 1      /* cid + NUL */
+                      + title_or_fallback + 1 /* title + NUL */
+                      + 1;               /* icon NUL */
+        if (needed > APPINST_SCRATCH_SIZE) {
+            if (out_err_code) *out_err_code = 0xE0000011u;  /* layout overflow */
+            return -1;
+        }
+    }
+
     pthread_mutex_lock(&g_rpc_mtx);
     if (attach_with_refresh_locked() != 0) {
         pthread_mutex_unlock(&g_rpc_mtx);
@@ -771,7 +794,10 @@ int shellui_rpc_install_pkg(const char *url,
     /* Build the scratch image in our local memory, then copy in.
      * Strings are concatenated tightly after the playgo struct;
      * MetaInfo pointers are set to absolute target addresses. */
-    static char local_buf[APPINST_SCRATCH_SIZE];
+    /* Stack-allocated (not static) to avoid latent thread-safety risk if
+     * a future caller invokes this outside g_rpc_mtx. 16 KiB on the mgmt
+     * thread's stack is fine (default 1 MiB). */
+    char local_buf[APPINST_SCRATCH_SIZE];
     memset(local_buf, 0, sizeof(local_buf));
 
     appinst_meta_t *meta = (appinst_meta_t *)(local_buf + APPINST_OFF_META);
