@@ -4008,6 +4008,22 @@ struct ProfilePreviewReq {
     mode: Option<String>,
 }
 
+// ─── User create / delete ───────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct UserCreateReq {
+    addr: Option<String>,
+    name: String,
+}
+
+#[derive(Deserialize)]
+struct UserDeleteReq {
+    addr: Option<String>,
+    uid: i32,
+    #[serde(default)]
+    wipe_saves: bool,
+}
+
 async fn profile_info_handler(
     State(state): State<AppState>,
     Query(q): Query<AddrQuery>,
@@ -4100,6 +4116,60 @@ async fn profile_clear_slot_handler(
     .and_then(|r| r);
     match r {
         Ok(()) => (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response(),
+        Err(e) => json_err(StatusCode::BAD_GATEWAY, format!("{e:#}")).into_response(),
+    }
+}
+
+/// POST /api/ps5/users/create — create a new local user account.
+async fn user_create_handler(
+    State(state): State<AppState>,
+    Json(req): Json<UserCreateReq>,
+) -> impl IntoResponse {
+    let addr = mgmt_addr_or_default(req.addr, &state.default_ps5_addr);
+    let name = req.name;
+    crate::log_info!("user_create: addr={addr} name={name}");
+    let r = tokio::task::spawn_blocking(move || ps5upload_core::users::user_create(&addr, &name))
+        .await
+        .map_err(anyhow::Error::from)
+        .and_then(|r| r);
+    match r {
+        Ok(result) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "ok": true,
+                "uid": result.uid,
+                "name": result.name,
+            })),
+        )
+            .into_response(),
+        Err(e) => json_err(StatusCode::BAD_GATEWAY, format!("{e:#}")).into_response(),
+    }
+}
+
+/// POST /api/ps5/users/delete — delete a local user account.
+async fn user_delete_handler(
+    State(state): State<AppState>,
+    Json(req): Json<UserDeleteReq>,
+) -> impl IntoResponse {
+    let addr = mgmt_addr_or_default(req.addr, &state.default_ps5_addr);
+    let uid = req.uid;
+    let wipe_saves = req.wipe_saves;
+    crate::log_info!("user_delete: addr={addr} uid={uid} wipe_saves={wipe_saves}");
+    let r = tokio::task::spawn_blocking(move || {
+        ps5upload_core::users::user_delete(&addr, uid, wipe_saves)
+    })
+    .await
+    .map_err(anyhow::Error::from)
+    .and_then(|r| r);
+    match r {
+        Ok(()) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "ok": true,
+                "uid": uid,
+            })),
+        )
+            .into_response(),
         Err(e) => json_err(StatusCode::BAD_GATEWAY, format!("{e:#}")).into_response(),
     }
 }
@@ -6075,6 +6145,8 @@ async fn run(cfg: EngineConfig) -> anyhow::Result<()> {
         .route("/api/ps5/power/control", post(ps5_power_control))
         .route("/api/ps5/power/telemetry", get(ps5_power_telemetry))
         .route("/api/ps5/users/list", get(ps5_users_list))
+        .route("/api/ps5/users/create", post(user_create_handler))
+        .route("/api/ps5/users/delete", post(user_delete_handler))
         .route("/api/ps5/saves/list", get(ps5_saves_list))
         .route("/api/ps5/screenshots/list", get(ps5_screenshots_list))
         .route("/api/ps5/videos/list", get(ps5_videos_list))

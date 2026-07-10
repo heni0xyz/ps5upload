@@ -560,6 +560,22 @@ pub struct ProfileSlotReq {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct UserCreateReq {
+    #[serde(default)]
+    pub addr: Option<String>,
+    pub name: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UserDeleteReq {
+    #[serde(default)]
+    pub addr: Option<String>,
+    pub uid: i32,
+    #[serde(default)]
+    pub wipe_saves: bool,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct ProfileAvatarReq {
     #[serde(default)]
     pub addr: Option<String>,
@@ -642,6 +658,26 @@ pub async fn profile_clear_slot(req: ProfileSlotReq) -> Result<JsonValue, String
     let base = engine::url();
     let url = format!("{base}/api/profile/clear-slot");
     let body = serde_json::json!({ "addr": req.addr, "slot": req.slot });
+    post_json(&url, &body).await
+}
+
+/// Create a new local user account.
+/// Proxies `/api/ps5/users/create`.
+#[tauri::command]
+pub async fn user_create(req: UserCreateReq) -> Result<JsonValue, String> {
+    let base = engine::url();
+    let url = format!("{base}/api/ps5/users/create");
+    let body = serde_json::json!({ "addr": req.addr, "name": req.name });
+    post_json(&url, &body).await
+}
+
+/// Delete a local user account.
+/// Proxies `/api/ps5/users/delete`.
+#[tauri::command]
+pub async fn user_delete(req: UserDeleteReq) -> Result<JsonValue, String> {
+    let base = engine::url();
+    let url = format!("{base}/api/ps5/users/delete");
+    let body = serde_json::json!({ "addr": req.addr, "uid": req.uid, "wipe_saves": req.wipe_saves });
     post_json(&url, &body).await
 }
 

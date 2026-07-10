@@ -9,6 +9,8 @@ import {
   Check,
   Info,
   Loader2,
+  UserPlus,
+  Trash2,
 } from "lucide-react";
 
 import {
@@ -31,6 +33,8 @@ import {
   profileAvatarCurrent,
   profileSetUsername,
   profileRenameUser,
+  userCreate,
+  userDelete,
   type ProfileInfo,
   type SquareMode,
 } from "../../api/ps5";
@@ -433,6 +437,8 @@ function UsernameSection({
   const users = info?.users ?? [];
   const slots = info?.slots ?? [];
 
+  const [showCreate, setShowCreate] = useState(false);
+
   return (
     <Card>
       <div className="mb-1 flex items-center gap-2">
@@ -476,6 +482,31 @@ function UsernameSection({
               onChanged={onChanged}
             />
           ))}
+        </div>
+      )}
+
+      {/* Create user */}
+      {info !== null && (
+        <div className="mt-4">
+          {showCreate ? (
+            <CreateUserRow
+              addr={addr}
+              onDone={() => {
+                setShowCreate(false);
+                onChanged();
+              }}
+              onCancel={() => setShowCreate(false)}
+            />
+          ) : (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setShowCreate(true)}
+            >
+              <UserPlus size={14} className="mr-1" />
+              {tr("profile.username.createUser", "Create User")}
+            </Button>
+          )}
         </div>
       )}
 
@@ -523,6 +554,7 @@ function UserRow({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedOk, setSavedOk] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     setDraft(name);
@@ -545,6 +577,28 @@ function UserRow({
       setError(`${e}`);
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function doDelete() {
+    const confirmed = await confirm(
+      tr(
+        "profile.username.deleteConfirm",
+        { name, uid },
+        `Delete user "${name}" (uid ${uid})? This cannot be undone.`,
+      ),
+      { title: tr("profile.username.deleteTitle", "Delete User"), kind: "warning" },
+    );
+    if (!confirmed) return;
+    setDeleting(true);
+    setError(null);
+    try {
+      await userDelete(uid, true, addr);
+      onChanged();
+    } catch (e) {
+      setError(`${e}`);
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -579,6 +633,19 @@ function UserRow({
         >
           {tr("profile.username.save", "Save")}
         </Button>
+        <button
+          type="button"
+          onClick={doDelete}
+          disabled={deleting}
+          title={tr("profile.username.deleteTitle", "Delete User")}
+          className="shrink-0 rounded-md border border-[var(--color-border)] p-1.5 text-[var(--color-warn)] hover:bg-[var(--color-surface-3)] disabled:opacity-50"
+        >
+          {deleting ? (
+            <Loader2 size={14} className="animate-spin" />
+          ) : (
+            <Trash2 size={14} />
+          )}
+        </button>
       </div>
       {error && <p className="mt-1 text-xs text-[var(--color-warn)]">{error}</p>}
       {savedOk && (
@@ -589,6 +656,77 @@ function UserRow({
           )}
         </p>
       )}
+    </div>
+  );
+}
+
+function CreateUserRow({
+  addr,
+  onDone,
+  onCancel,
+}: {
+  addr: string;
+  onDone: () => void;
+  onCancel: () => void;
+}) {
+  const tr = useTr();
+  const [name, setName] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function create() {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setCreating(true);
+    setError(null);
+    try {
+      await userCreate(trimmed, addr);
+      onDone();
+    } catch (e) {
+      setError(`${e}`);
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  return (
+    <div className="rounded-md border border-[var(--color-accent)]/40 bg-[var(--color-surface)] p-2">
+      <div className="flex items-center gap-2">
+        <UserPlus size={14} className="shrink-0 text-[var(--color-accent)]" />
+        <input
+          autoFocus
+          className="min-w-0 flex-1 rounded-md border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2 py-1 text-sm"
+          value={name}
+          maxLength={16}
+          placeholder={tr(
+            "profile.username.newPlaceholder",
+            "New user name",
+          )}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void create();
+            if (e.key === "Escape") onCancel();
+          }}
+        />
+        <Button
+          variant="primary"
+          size="sm"
+          disabled={!name.trim() || creating}
+          loading={creating}
+          onClick={create}
+        >
+          {tr("profile.username.createBtn", "Create")}
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={creating}
+          onClick={onCancel}
+        >
+          {tr("profile.username.cancel", "Cancel")}
+        </Button>
+      </div>
+      {error && <p className="mt-1 text-xs text-[var(--color-warn)]">{error}</p>}
     </div>
   );
 }

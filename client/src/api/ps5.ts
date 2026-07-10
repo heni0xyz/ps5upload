@@ -237,6 +237,27 @@ export async function profileClearSlot(
   await invoke("profile_clear_slot", { req: { addr: addr ?? null, slot } });
 }
 
+/** Create a new local user account. Returns the new user's uid. */
+export async function userCreate(
+  name: string,
+  addr?: string,
+): Promise<{ ok: boolean; uid: number; name: string }> {
+  return invoke("user_create", {
+    req: { addr: addr ?? null, name },
+  });
+}
+
+/** Delete a local user account. */
+export async function userDelete(
+  uid: number,
+  wipeSaves: boolean,
+  addr?: string,
+): Promise<{ ok: boolean; uid: number }> {
+  return invoke("user_delete", {
+    req: { addr: addr ?? null, uid, wipe_saves: wipeSaves },
+  });
+}
+
 /** Render a 440² crop/fit preview of `imagePath`. Returns a PNG data URL. */
 export async function profileAvatarPreview(
   imagePath: string,

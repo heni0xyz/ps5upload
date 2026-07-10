@@ -193,6 +193,8 @@ pub fn run() {
             commands::profile_rename_user,
             commands::profile_activate,
             commands::profile_clear_slot,
+            commands::user_create,
+            commands::user_delete,
             commands::profile_avatar_preview,
             commands::profile_avatar_current,
             commands::profile_apply_avatar,

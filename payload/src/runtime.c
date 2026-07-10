@@ -359,6 +359,10 @@ extern int posix_fallocate(int fd, off_t offset, off_t len);
  * array (internal SSD + M.2 summaries). Read-only, no elevation needed. */
 #define FTX2_FRAME_HW_DRIVE_SENSORS      168u
 #define FTX2_FRAME_HW_DRIVE_SENSORS_ACK  169u
+#define FTX2_FRAME_USER_CREATE           170u
+#define FTX2_FRAME_USER_CREATE_ACK       171u
+#define FTX2_FRAME_USER_DELETE           172u
+#define FTX2_FRAME_USER_DELETE_ACK       173u
 /* Where we place mount points. Scoped under /mnt/ps5upload/ so it
  * never collides with mount paths owned by other utilities. */
 #define FS_MOUNT_BASE "/mnt/ps5upload"
@@ -9415,6 +9419,8 @@ extern int sceUserServiceInitialize(void *params);
 extern int sceUserServiceGetForegroundUser(int *user_id);
 extern int sceUserServiceGetLoginUserIdList(int *id_list);
 extern int sceUserServiceGetUserName(int user_id, char *name, size_t size);
+extern int sceUserServiceCreateUser(int *out_user_id);
+extern int sceUserServiceDeleteUser(int user_id);
 #define USER_SERVICE_MAX_USERS 16
 
 /* App lifecycle — libSceSysCore exports. ApplicationGetProcs returns
@@ -9812,6 +9818,100 @@ static int handle_user_list(runtime_state_t *state, int client_fd,
     pthread_mutex_unlock(&state->state_mtx);
     return send_frame(client_fd, FTX2_FRAME_USER_LIST_ACK, 0, trace_id,
                       body, (uint64_t)n);
+}
+
+/* ── User create / delete ──────────────────────────────────────────────
+ * sceUserServiceCreateUser allocates a new local user account and
+ * returns its user_id. The initial name is set via SetUserName after
+ * creation. sceUserServiceDeleteUser removes the account; Sony cleans
+ * up home dir content but we offer an optional pre-wipe of savedata. */
+
+static int handle_user_create(runtime_state_t *state, int client_fd,
+                              uint64_t trace_id, const char *body) {
+    if (!state) return -1;
+    char name[64] = {0};
+    extract_json_string_field(body, "name", name, sizeof(name));
+    int rc = -1;
+    int new_uid = -1;
+    const char *err_msg = "";
+    if (name[0]) {
+        sceUserServiceInitialize(NULL);
+        pthread_mutex_lock(&sony_api_lock);
+        int raw_uid = -1;
+        int create_rc = sceUserServiceCreateUser(&raw_uid);
+        if (create_rc == 0 && raw_uid >= 0) {
+            int name_rc = sceUserServiceSetUserName(raw_uid, name);
+            if (name_rc != 0) {
+                err_msg = "user created but SetUserName failed";
+            }
+            new_uid = raw_uid;
+            rc = 0;
+        } else {
+            err_msg = "sceUserServiceCreateUser failed";
+        }
+        usleep(SONY_API_POST_SLEEP_US);
+        pthread_mutex_unlock(&sony_api_lock);
+    } else {
+        err_msg = "empty name";
+    }
+    char nesc[128];
+    json_escape_into(name, nesc, sizeof(nesc));
+    char eesc[256];
+    json_escape_into(err_msg, eesc, sizeof(eesc));
+    char resp[384];
+    int len = snprintf(resp, sizeof(resp),
+        "{\"ok\":%s,\"uid\":%d,\"name\":\"%s\",\"err\":\"%s\"}",
+        rc == 0 ? "true" : "false", new_uid, nesc, eesc);
+    pthread_mutex_lock(&state->state_mtx);
+    state->command_count += 1;
+    pthread_mutex_unlock(&state->state_mtx);
+    return send_frame(client_fd, FTX2_FRAME_USER_CREATE_ACK, 0, trace_id,
+                      resp, (uint64_t)len);
+}
+
+static int handle_user_delete(runtime_state_t *state, int client_fd,
+                              uint64_t trace_id, const char *body) {
+    if (!state) return -1;
+    int uid = (int)extract_json_uint64_field(body, "uid");
+    int wipe_saves = (int)extract_json_uint64_field(body, "wipe_saves");
+    int rc = -1;
+    const char *err_msg = "";
+    if (uid > 0) {
+        /* Optional: wipe savedata before deleting the user account so
+         * Sony's cleanup doesn't leave orphaned sealed saves. */
+        if (wipe_saves) {
+            char sd_path[512];
+            snprintf(sd_path, sizeof(sd_path),
+                     "/user/home/%d/savedata", uid);
+            remove_recursive_path(sd_path, NULL, NULL);
+            snprintf(sd_path, sizeof(sd_path),
+                     "/user/home/%d/savedata_prospero", uid);
+            remove_recursive_path(sd_path, NULL, NULL);
+        }
+        sceUserServiceInitialize(NULL);
+        pthread_mutex_lock(&sony_api_lock);
+        int del_rc = sceUserServiceDeleteUser(uid);
+        usleep(SONY_API_POST_SLEEP_US);
+        pthread_mutex_unlock(&sony_api_lock);
+        if (del_rc == 0) {
+            rc = 0;
+        } else {
+            err_msg = "sceUserServiceDeleteUser failed";
+        }
+    } else {
+        err_msg = "invalid uid";
+    }
+    char eesc[256];
+    json_escape_into(err_msg, eesc, sizeof(eesc));
+    char resp[256];
+    int len = snprintf(resp, sizeof(resp),
+        "{\"ok\":%s,\"uid\":%d,\"err\":\"%s\"}",
+        rc == 0 ? "true" : "false", uid, eesc);
+    pthread_mutex_lock(&state->state_mtx);
+    state->command_count += 1;
+    pthread_mutex_unlock(&state->state_mtx);
+    return send_frame(client_fd, FTX2_FRAME_USER_DELETE_ACK, 0, trace_id,
+                      resp, (uint64_t)len);
 }
 
 /* ── Save-data listing ───────────────────────────────────────────────── */
@@ -16772,6 +16872,14 @@ abort_done:
     }
     if (hdr.frame_type == FTX2_FRAME_USER_LIST) {
         return handle_user_list(state, client_fd, hdr.trace_id);
+    }
+    if (hdr.frame_type == FTX2_FRAME_USER_CREATE) {
+        return handle_user_create(state, client_fd, hdr.trace_id,
+                                  request_body);
+    }
+    if (hdr.frame_type == FTX2_FRAME_USER_DELETE) {
+        return handle_user_delete(state, client_fd, hdr.trace_id,
+                                  request_body);
     }
     if (hdr.frame_type == FTX2_FRAME_LIST_SAVES) {
         return handle_list_saves(state, client_fd, hdr.trace_id,

@@ -524,6 +524,16 @@ pub enum FrameType {
     /// "fsTotalBytes":N,...}]}`. Read-only, no elevation needed.
     HwDriveSensors = 168,
     HwDriveSensorsAck = 169,
+    /// Create a new local user account.
+    /// Req: `{"name":"Player 2"}`.
+    /// Ack: `{"ok":bool,"uid":N,"name":"..","err":".."}`.
+    UserCreate = 170,
+    UserCreateAck = 171,
+    /// Delete a local user account.
+    /// Req: `{"uid":N,"wipe_saves":bool}`.
+    /// Ack: `{"ok":bool,"uid":N,"err":".."}`.
+    UserDelete = 172,
+    UserDeleteAck = 173,
 }
 
 impl FrameType {
@@ -683,6 +693,10 @@ impl FrameType {
             167 => Ok(Self::ListVideosAck),
             168 => Ok(Self::HwDriveSensors),
             169 => Ok(Self::HwDriveSensorsAck),
+            170 => Ok(Self::UserCreate),
+            171 => Ok(Self::UserCreateAck),
+            172 => Ok(Self::UserDelete),
+            173 => Ok(Self::UserDeleteAck),
             _ => Err(DecodeError::UnknownFrameType(v)),
         }
     }
@@ -1192,6 +1206,10 @@ mod tests {
             FrameType::ListVideosAck,
             FrameType::HwDriveSensors,
             FrameType::HwDriveSensorsAck,
+            FrameType::UserCreate,
+            FrameType::UserCreateAck,
+            FrameType::UserDelete,
+            FrameType::UserDeleteAck,
         ];
         for ft in variants {
             assert_eq!(FrameType::try_from_u16(ft as u16).unwrap(), ft);
