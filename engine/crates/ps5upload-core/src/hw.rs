@@ -73,6 +73,13 @@ pub struct HwTemps {
     /// primary identifier. Read on demand only.
     #[serde(default = "default_sensor_unavailable")]
     pub product_shape: i32,
+    /// User-pinned fan threshold (°C). `0` = no custom threshold set
+    /// (fan runs at firmware default). A positive value means the user
+    /// has set a permanent fan speed that is auto-reapplied every 15s.
+    /// Always available (even on basic read) since it's an in-process
+    /// value, not a sensor syscall.
+    #[serde(default)]
+    pub fan_pinned_c: i32,
 }
 
 fn default_sensor_unavailable() -> i32 {
@@ -294,6 +301,9 @@ fn parse_hw_temps(body: &[u8]) -> HwTemps {
         product_shape: get("product_shape")
             .and_then(|v| v.parse().ok())
             .unwrap_or(-1),
+        fan_pinned_c: get("fan_pinned_c")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0),
     }
 }
 
@@ -434,6 +444,74 @@ pub fn app_launch_browser(addr: &str) -> Result<()> {
         bail!("expected APP_LAUNCH_BROWSER_ACK, got {:?}", ft);
     }
     Ok(())
+}
+
+// ─── Drive SMART / temperature sensors ─────────────────────────────────────
+
+/// One physical disk discovered on `/dev/daN`. Temp and usage fields are
+/// optional because not all drives support LOG SENSE and not all are
+/// mounted. `access_denied` is surfaced when the device node exists but
+/// the payload can't open it (rare, only seen on very locked-down FW).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DriveSensor {
+    pub device: String,
+    #[serde(default)]
+    pub size_bytes: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ident: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub temp_c: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub temp_err: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fs_total_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fs_used_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fs_free_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mount_point: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub access_denied: bool,
+}
+
+/// A fixed-storage partition entry (internal SSD, M.2) returned alongside
+/// the hot-pluggable drives. No temperature here — the internal SSD temp
+/// is already surfaced via the SoC sensor channels.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct FixedStorageEntry {
+    pub label: String,
+    #[serde(default)]
+    pub fs_total_bytes: u64,
+    #[serde(default)]
+    pub fs_used_bytes: u64,
+    #[serde(default)]
+    pub fs_free_bytes: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DriveSensorList {
+    pub drives: Vec<DriveSensor>,
+    pub storage: Vec<FixedStorageEntry>,
+}
+
+/// Enumerate all `/dev/daN` disks and read SMART temp, capacity, ident,
+/// and filesystem usage. Also returns fixed-storage summaries (internal
+/// SSD + M.2) for a complete storage-health picture.
+///
+/// Read-only — no elevation needed. The payload opens each device node
+/// with `O_RDONLY | O_NONBLOCK`, confirms it's a real block device, then
+/// issues a SCSI LOG SENSE (page 0x0D) via CAM pass-through.
+pub fn drive_sensors(addr: &str) -> Result<DriveSensorList> {
+    let body = round_trip(
+        addr,
+        FrameType::HwDriveSensors,
+        FrameType::HwDriveSensorsAck,
+        "HW_DRIVE_SENSORS",
+    )?;
+    let parsed: DriveSensorList = serde_json::from_slice(&body)
+        .map_err(|e| anyhow::anyhow!("drive_sensors returned non-JSON: {e}"))?;
+    Ok(parsed)
 }
 
 // ─── Process listing ─────────────────────────────────────────────────────
@@ -620,6 +698,7 @@ mod tests {
             cpu_usage_pct: 0,
             fan_duty_pct: 100,
             product_shape: 3,
+            fan_pinned_c: 0,
         });
         assert_eq!(lo.cpu_temp, SENSOR_TEMP_MIN_C);
         assert_eq!(lo.soc_temp, SENSOR_TEMP_MAX_C);
@@ -640,6 +719,7 @@ mod tests {
             cpu_usage_pct: 101,
             fan_duty_pct: -5,
             product_shape: -1,
+            fan_pinned_c: 0,
         });
         assert_eq!(hi.cpu_temp, 0, "one above max temp is rejected");
         assert_eq!(hi.soc_temp, 0);
@@ -656,12 +736,13 @@ mod tests {
         // A new-payload reading that carries the extra telemetry. Power is
         // now a real value, usage/duty are valid percentages, and product
         // shape is a raw code that passes through untouched.
-        let body = b"cpu_temp=42\nsoc_temp=40\ncpu_freq_mhz=2560\nsoc_clock_mhz=0\nsoc_power_mw=18000\ncpu_usage_pct=37\nfan_duty_pct=55\nproduct_shape=2\n";
+        let body = b"cpu_temp=42\nsoc_temp=40\ncpu_freq_mhz=2560\nsoc_clock_mhz=0\nsoc_power_mw=18000\ncpu_usage_pct=37\nfan_duty_pct=55\nproduct_shape=2\nfan_pinned_c=65\n";
         let t = sanitize_temps(parse_hw_temps(body));
         assert_eq!(t.soc_power_mw, 18000);
         assert_eq!(t.cpu_usage_pct, 37);
         assert_eq!(t.fan_duty_pct, 55);
         assert_eq!(t.product_shape, 2);
+        assert_eq!(t.fan_pinned_c, 65, "pinned fan threshold passes through");
     }
 
     #[test]
@@ -675,6 +756,7 @@ mod tests {
         assert_eq!(t.cpu_usage_pct, -1, "missing usage ⇒ unavailable");
         assert_eq!(t.fan_duty_pct, -1, "missing duty ⇒ unavailable");
         assert_eq!(t.product_shape, -1, "missing shape ⇒ unavailable");
+        assert_eq!(t.fan_pinned_c, 0, "missing fan_pinned_c ⇒ 0 (no pin)");
     }
 
     #[test]

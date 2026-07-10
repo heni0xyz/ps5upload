@@ -1276,6 +1276,10 @@ export interface HwTemps {
    *  families). `-1` = unavailable. The model string stays the primary
    *  identifier; this is a cross-check. Extended read only. */
   product_shape: number;
+  /** User-pinned fan threshold in °C. `0` = no custom threshold (firmware
+   *  default). A positive value means a permanent fan speed is active and
+   *  auto-reapplied every 15s. Always present (even on basic read). */
+  fan_pinned_c: number;
 }
 
 export interface HwPower {
@@ -1338,6 +1342,43 @@ export interface HwStorage {
 export async function fetchHwStorage(transferAddr: string): Promise<HwStorage> {
   const addr = toMgmtAddr(transferAddr);
   return invoke<HwStorage>("ps5_hw_storage", { addr });
+}
+
+/** One physical disk on `/dev/daN`. Optional fields are absent when the
+ *  drive doesn't support that capability or the read failed. */
+export interface DriveSensor {
+  device: string;
+  size_bytes: number;
+  ident?: string;
+  /** Celsius. Absent if the drive doesn't support LOG SENSE temp. */
+  temp_c?: number;
+  /** Negative error code from the SCSI LOG SENSE attempt. */
+  temp_err?: number;
+  fs_total_bytes?: number;
+  fs_used_bytes?: number;
+  fs_free_bytes?: number;
+  mount_point?: string;
+  access_denied?: boolean;
+}
+
+/** A fixed-storage partition (internal SSD, M.2 expansion). */
+export interface FixedStorageEntry {
+  label: string;
+  fs_total_bytes: number;
+  fs_used_bytes: number;
+  fs_free_bytes: number;
+}
+
+export interface DriveSensorList {
+  drives: DriveSensor[];
+  storage: FixedStorageEntry[];
+}
+
+/** Read drive temperatures and filesystem usage for all `/dev/daN` disks.
+ *  Also returns fixed-storage summaries (internal SSD + M.2 expansion). */
+export async function fetchDriveSensors(transferAddr: string): Promise<DriveSensorList> {
+  const addr = toMgmtAddr(transferAddr);
+  return invoke<DriveSensorList>("ps5_hw_drive_sensors", { addr });
 }
 
 // ─── Scene-tool companion probe ───────────────────────────────────────

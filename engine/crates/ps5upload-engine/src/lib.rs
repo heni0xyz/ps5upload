@@ -64,8 +64,8 @@ use ps5upload_core::{
     },
     game_meta::parse_param_json_bytes,
     hw::{
-        hw_info, hw_power, hw_set_fan_threshold, hw_storage, hw_temps, proc_list, HwInfo, HwPower,
-        HwStorage, HwTemps, ProcList,
+        drive_sensors, hw_info, hw_power, hw_set_fan_threshold, hw_storage, hw_temps, proc_list,
+        DriveSensorList, HwInfo, HwPower, HwStorage, HwTemps, ProcList,
     },
     process_mgr::{process_kill, process_list, ProcessKillAck, ProcessListResult},
     saves::{list_saves, list_screenshots, list_videos, SaveList, ScreenshotList},
@@ -2082,6 +2082,26 @@ async fn ps5_hw_storage(
     let addr = mgmt_addr_or_default(q.addr, &state.default_ps5_addr);
     let r: Result<HwStorage, anyhow::Error> =
         tokio::task::spawn_blocking(move || hw_storage(&addr))
+            .await
+            .map_err(anyhow::Error::from)
+            .and_then(|r| r);
+    match r {
+        Ok(v) => (StatusCode::OK, Json(v)).into_response(),
+        Err(e) => json_err(StatusCode::BAD_GATEWAY, format!("{e:#}")).into_response(),
+    }
+}
+
+/// Drive SMART / temperature sensors. Enumerates `/dev/daN` disks via
+/// CAM pass-through (SCSI LOG SENSE page 0x0D) and returns per-drive
+/// temp, capacity, ident, and filesystem usage. Also includes fixed-
+/// storage summaries (internal SSD + M.2 expansion).
+async fn ps5_hw_drive_sensors(
+    State(state): State<AppState>,
+    Query(q): Query<AddrQuery>,
+) -> impl IntoResponse {
+    let addr = mgmt_addr_or_default(q.addr, &state.default_ps5_addr);
+    let r: Result<DriveSensorList, anyhow::Error> =
+        tokio::task::spawn_blocking(move || drive_sensors(&addr))
             .await
             .map_err(anyhow::Error::from)
             .and_then(|r| r);
@@ -6048,6 +6068,7 @@ async fn run(cfg: EngineConfig) -> anyhow::Result<()> {
         .route("/api/ps5/smp-meta/stats", get(ps5_smp_meta_stats_route))
         .route("/api/ps5/hw/power", get(ps5_hw_power))
         .route("/api/ps5/hw/storage", get(ps5_hw_storage))
+        .route("/api/ps5/hw/drive-sensors", get(ps5_hw_drive_sensors))
         .route("/api/ps5/proc/list", get(ps5_proc_list))
         .route("/api/ps5/process/list", get(ps5_process_list))
         .route("/api/ps5/process/kill", post(ps5_process_kill))

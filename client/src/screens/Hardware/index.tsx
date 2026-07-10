@@ -35,6 +35,7 @@ import {
   fetchHwPower,
   fetchHwStorage,
   fetchHwTemps,
+  fetchDriveSensors,
   setFanThreshold,
   smpMetaControl,
   smpMetaStats,
@@ -44,6 +45,7 @@ import {
   type HwPower,
   type HwStorage,
   type HwTemps,
+  type DriveSensorList,
   type SmpMetaStats,
 } from "../../api/ps5";
 
@@ -193,6 +195,7 @@ export default function HardwareScreen() {
   const [temps, setTemps] = useState<HwTemps | null>(null);
   const [power, setPower] = useState<HwPower | null>(null);
   const [storage, setStorage] = useState<HwStorage | null>(null);
+  const [drives, setDrives] = useState<DriveSensorList | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -229,6 +232,7 @@ export default function HardwareScreen() {
     setTemps(null);
     setPower(null);
     setStorage(null);
+    setDrives(null);
     setError(null);
     setSensorReadAt(null);
   }, [host]);
@@ -311,9 +315,13 @@ export default function HardwareScreen() {
       // to trigger the on-demand telemetry (SoC power / CPU usage / fan duty
       // / product shape) on the payload. The Dashboard's auto-poll calls
       // fetchHwTemps without extended, so its timer never fires those.
-      const next = await fetchHwTemps(addr, true);
+      const [next, nextDrives] = await Promise.all([
+        fetchHwTemps(addr, true),
+        fetchDriveSensors(addr).catch(() => null),
+      ]);
       if (probe.isStale()) return;
       setTemps(next);
+      if (nextDrives) setDrives(nextDrives);
       setSensorReadAt(Date.now());
     } catch (e) {
       if (probe.isStale()) return;
@@ -633,6 +641,43 @@ export default function HardwareScreen() {
             </SensorCard>
           )}
 
+          {/* Drive sensors — USB / extended storage temperatures and
+              capacity via SCSI LOG SENSE. Read on demand alongside temps
+              (same "Read sensors" click); shows nothing until then. The
+              internal SSD + M.2 summaries below come from the same call's
+              `storage` array (statvfs, always safe) so they're available
+              even without a Read sensors click if the payload responds. */}
+          {drives && drives.drives.length > 0 && (
+            <SensorCard
+              icon={<HardDrive size={14} />}
+              title={tr("hw_drives_title", undefined, "Drives")}
+            >
+              {drives.drives.map((d) => (
+                <div key={d.device} className="py-1">
+                  <StatRow
+                    label={d.ident || d.device}
+                    value={
+                      d.access_denied
+                        ? tr("hw_drive_access_denied", undefined, "Access denied")
+                        : d.temp_c != null
+                          ? formatTemp(d.temp_c)
+                          : d.temp_err != null
+                            ? tr("hw_drive_no_temp", undefined, "No temp sensor")
+                            : "—"
+                    }
+                    hint={d.size_bytes > 0 ? formatStorageGB(d.size_bytes) : undefined}
+                  />
+                  {d.fs_total_bytes != null && d.fs_total_bytes > 0 && (
+                    <StatRow
+                      label={tr("hw_drive_free", undefined, "Free")}
+                      value={formatStorageGB(d.fs_free_bytes ?? 0)}
+                    />
+                  )}
+                </div>
+              ))}
+            </SensorCard>
+          )}
+
           <FanThresholdCard
             // key on host so the card's session-local state (lastSetC/draftC,
             // active preset, busy/error) resets on console switch — otherwise
@@ -640,6 +685,7 @@ export default function HardwareScreen() {
             key={host ?? ""}
             host={host ?? ""}
             payloadUp={payloadStatus === "up"}
+            pinnedC={temps?.fan_pinned_c ?? 0}
           />
 
           <SmpMetaCard host={host ?? ""} payloadUp={payloadStatus === "up"} />
@@ -741,15 +787,20 @@ const FAN_PRESETS: ReadonlyArray<{ label: string; c: number; hint: string }> = [
 function FanThresholdCard({
   host,
   payloadUp,
+  pinnedC,
 }: {
   host: string;
   payloadUp: boolean;
+  pinnedC: number;
 }) {
   const tr = useTr();
-  /* No read-back is possible (see FTX2 protocol note on
-   * HwSetFanThreshold). This component only reflects values the
-   * user has set via this UI during the current session — after a
-   * reboot or app restart, we don't know what's actually in effect. */
+  /* pinnedC comes from the payload's hw_fan_pinned_threshold() — an
+   * in-process value that reflects the last threshold set this session
+   * OR loaded from /data/ps5upload/fan_threshold.conf at boot. It's
+   * always available (even on a basic auto-poll read) and tells us
+   * whether a permanent fan speed is active. lastSetC tracks what the
+   * user has set via THIS UI during this session, so the preset
+   * highlight stays in sync with the user's own actions. */
   const [draftC, setDraftC] = useState<number>(65);
   const [lastSetC, setLastSetC] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
@@ -860,6 +911,11 @@ function FanThresholdCard({
           <>
             {tr("hardware_fan_set_to", "Set to")}{" "}
             <span className="font-mono">{lastSetC}°C</span>.{" "}
+          </>
+        ) : pinnedC > 0 ? (
+          <>
+            {tr("hardware_fan_active", undefined, "Permanent fan speed active at")}{" "}
+            <span className="font-mono">{pinnedC}°C</span>.{" "}
           </>
         ) : null}
         {tr(

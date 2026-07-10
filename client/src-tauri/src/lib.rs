@@ -214,6 +214,7 @@ pub fn run() {
             commands::ps5_hw_power,
             commands::ps5_syslog_tail,
             commands::ps5_hw_storage,
+            commands::ps5_hw_drive_sensors,
             commands::ps5_time_get,
             commands::ps5_time_sync,
             commands::ps5_time_state_get,

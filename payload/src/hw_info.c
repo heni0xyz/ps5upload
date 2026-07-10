@@ -648,6 +648,8 @@ int hw_temps_get_text_ex(int flags, char *out, size_t out_cap,
         }
     }
 
+    int fan_pinned_c = hw_fan_pinned_threshold();
+
     int n = snprintf(out, out_cap,
         "cpu_temp=%d\n"
         "soc_temp=%d\n"
@@ -657,9 +659,10 @@ int hw_temps_get_text_ex(int flags, char *out, size_t out_cap,
         "soc_power_mw=%u\n"
         "cpu_usage_pct=%d\n"
         "fan_duty_pct=%d\n"
-        "product_shape=%d\n",
+        "product_shape=%d\n"
+        "fan_pinned_c=%d\n",
         cpu_temp, soc_temp, m2_temp, cpu_freq_mhz, power_mw,
-        cpu_usage_pct, fan_duty_pct, product_shape);
+        cpu_usage_pct, fan_duty_pct, product_shape, fan_pinned_c);
     if (n < 0 || (size_t)n >= out_cap) {
         if (err_reason_out) *err_reason_out = "hw_temps_format_failed";
         return -1;

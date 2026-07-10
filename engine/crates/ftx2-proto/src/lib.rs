@@ -516,6 +516,14 @@ pub enum FrameType {
     /// under `/user/av_contents/video` (recursive, 5 levels deep).
     ListVideos = 166,
     ListVideosAck = 167,
+    /// Read drive temperature and SMART info via SCSI LOG SENSE
+    /// (CAM pass-through on `/dev/daN`). Body empty. ACK body: JSON
+    /// `{"drives":[{"device":"/dev/da0","sizeBytes":N,"ident":"..",
+    /// "tempC":N,"tempErr":N,"fsTotalBytes":N,"fsUsedBytes":N,
+    /// "fsFreeBytes":N,"mountPoint":".."}],"storage":[{"label":"..",
+    /// "fsTotalBytes":N,...}]}`. Read-only, no elevation needed.
+    HwDriveSensors = 168,
+    HwDriveSensorsAck = 169,
 }
 
 impl FrameType {
@@ -673,6 +681,8 @@ impl FrameType {
             165 => Ok(Self::ProcessKillAck),
             166 => Ok(Self::ListVideos),
             167 => Ok(Self::ListVideosAck),
+            168 => Ok(Self::HwDriveSensors),
+            169 => Ok(Self::HwDriveSensorsAck),
             _ => Err(DecodeError::UnknownFrameType(v)),
         }
     }
@@ -1162,6 +1172,26 @@ mod tests {
             FrameType::SyslogTail,
             FrameType::SyslogTailAck,
             FrameType::ApplyProgress,
+            FrameType::ProfileInfo,
+            FrameType::ProfileInfoAck,
+            FrameType::ProfileSetUsername,
+            FrameType::ProfileSetUsernameAck,
+            FrameType::ProfileActivate,
+            FrameType::ProfileActivateAck,
+            FrameType::ProfileApplyAvatar,
+            FrameType::ProfileApplyAvatarAck,
+            FrameType::ProfileClearSlot,
+            FrameType::ProfileClearSlotAck,
+            FrameType::ProfileSetLocalUsername,
+            FrameType::ProfileSetLocalUsernameAck,
+            FrameType::ProcessList,
+            FrameType::ProcessListAck,
+            FrameType::ProcessKill,
+            FrameType::ProcessKillAck,
+            FrameType::ListVideos,
+            FrameType::ListVideosAck,
+            FrameType::HwDriveSensors,
+            FrameType::HwDriveSensorsAck,
         ];
         for ft in variants {
             assert_eq!(FrameType::try_from_u16(ft as u16).unwrap(), ft);

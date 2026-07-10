@@ -33,6 +33,7 @@
 #include "runtime.h"
 #include "register.h"
 #include "hw_info.h"
+#include "drive_sensors.h"
 #include "sys_time.h"
 #include "sys_registry.h"
 #include "profile.h"
@@ -352,6 +353,12 @@ extern int posix_fallocate(int fd, off_t offset, off_t len);
 /* Video-clip listing (parallels screenshot listing at 94/95). */
 #define FTX2_FRAME_LIST_VIDEOS       166u
 #define FTX2_FRAME_LIST_VIDEOS_ACK   167u
+/* Drive SMART / temperature sensors via SCSI LOG SENSE (CAM pass-through
+ * on /dev/daN). Request body empty. ACK body: JSON with per-drive info
+ * (device, sizeBytes, ident, tempC, tempErr, fs*) and a fixed-storage
+ * array (internal SSD + M.2 summaries). Read-only, no elevation needed. */
+#define FTX2_FRAME_HW_DRIVE_SENSORS      168u
+#define FTX2_FRAME_HW_DRIVE_SENSORS_ACK  169u
 /* Where we place mount points. Scoped under /mnt/ps5upload/ so it
  * never collides with mount paths owned by other utilities. */
 #define FS_MOUNT_BASE "/mnt/ps5upload"
@@ -14348,6 +14355,11 @@ static int handle_hw_storage(runtime_state_t *state, int client_fd, uint64_t tra
                               FTX2_FRAME_HW_STORAGE_ACK, "hw_storage_failed");
 }
 
+static int handle_hw_drive_sensors(runtime_state_t *state, int client_fd, uint64_t trace_id) {
+    return handle_hw_text_op(state, client_fd, trace_id, drive_sensors_get_json,
+                              FTX2_FRAME_HW_DRIVE_SENSORS_ACK, "hw_drive_sensors_failed");
+}
+
 /* Parse body as "NN" (ASCII decimal). Accepts an empty-body shortcut
  * meaning "reset to default 65 °C" so future UI can send a zero-body
  * frame as a quick reset. Leading whitespace and a trailing newline
@@ -16770,6 +16782,9 @@ abort_done:
     }
     if (hdr.frame_type == FTX2_FRAME_LIST_VIDEOS) {
         return handle_list_videos(state, client_fd, hdr.trace_id);
+    }
+    if (hdr.frame_type == FTX2_FRAME_HW_DRIVE_SENSORS) {
+        return handle_hw_drive_sensors(state, client_fd, hdr.trace_id);
     }
     if (hdr.frame_type == FTX2_FRAME_INDEX_START) {
         return handle_index_start(state, client_fd, hdr.trace_id,

@@ -60,6 +60,7 @@ LIBS := -lSceSystemService -lSceUserService -lSceAppInstUtil -lSceNotification \
         -lkernel_sys
 
 SRCS := src/main.c src/runtime.c src/takeover.c src/register.c src/hw_info.c \
+        src/drive_sensors.c \
         src/proc_list.c src/ptrace_remote.c src/shellui_rpc.c src/bgft.c \
         src/sony_api_lock.c src/kernel_rw_lock.c src/sys_time.c \
         src/sys_registry.c src/smp_meta.c src/profile.c \

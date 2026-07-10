@@ -1359,6 +1359,14 @@ pub async fn ps5_hw_storage(addr: Option<String>) -> Result<JsonValue, String> {
     get_json(&addr_url("/api/ps5/hw/storage", addr.as_deref())).await
 }
 
+/// Drive SMART / temperature sensors. Returns per-drive temp, capacity,
+/// ident, and filesystem usage for `/dev/daN` disks, plus fixed-storage
+/// summaries (internal SSD + M.2 expansion).
+#[tauri::command]
+pub async fn ps5_hw_drive_sensors(addr: Option<String>) -> Result<JsonValue, String> {
+    get_json(&addr_url("/api/ps5/hw/drive-sensors", addr.as_deref())).await
+}
+
 /// Write the PS5 fan-turbo threshold. `threshold_c` is clamped on the
 /// engine side (returns 400 BAD_REQUEST if out of the safe [45, 80]
 /// range) before ever reaching the payload, so the UI gets a clear
