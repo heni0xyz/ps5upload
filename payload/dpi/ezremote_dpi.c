@@ -135,11 +135,12 @@ static int jb_escalate_pid(pid_t pid) {
     if (kernel_set_ucred_caps(pid, caps) != 0) rc = -1;
 
     /* cr_sceAttr high-attr flag. Mirrors elf-arsenal's backup-helper
-     * exactly (attrs = 0x80). Our main payload uses 0x80000000 — a
-     * different byte in the 8-byte attrs field — but the backup-helper
-     * pattern is the proven one for standalone self-escalating ELFs
-     * that pass BGFT's auth gate, so we follow it verbatim. */
-    if (kernel_set_ucred_attrs(pid, 0x80) != 0) rc = -1;
+     * exactly (attrs = 0x80 in byte 0). SDK v0.41 changed the prototype
+     * to a 32-byte array — construct it with byte 0 = 0x80. */
+    uint8_t attrs[32];
+    memset(attrs, 0, sizeof(attrs));
+    attrs[0] = 0x80;
+    if (kernel_set_ucred_attrs(pid, attrs) != 0) rc = -1;
 
     return rc;
 }

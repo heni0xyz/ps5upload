@@ -258,6 +258,76 @@ export async function userDelete(
   });
 }
 
+// ─── Backup & restore ───────────────────────────────────────────────────
+
+export interface BackupEntry {
+  tag: string;
+  timestamp: number;
+  files: number;
+  bytes: number;
+}
+
+export interface BackupList {
+  snapshots: BackupEntry[];
+}
+
+export interface BackupSnapshotResult {
+  ok: boolean;
+  tag: string;
+  timestamp: number;
+  files: number;
+  bytes: number;
+}
+
+export interface BackupRestoreResult {
+  ok: boolean;
+  tag: string;
+  restored: number;
+}
+
+/** Snapshot a file or directory tree under a backup tag. */
+export async function backupSnapshot(
+  tag: string,
+  path: string,
+  addr?: string,
+): Promise<BackupSnapshotResult> {
+  return invoke("backup_snapshot", {
+    req: { addr: addr ?? null, tag, path },
+  });
+}
+
+/** List snapshots, optionally filtered by tag. */
+export async function backupList(
+  addr?: string,
+  tag?: string,
+): Promise<BackupList> {
+  return invoke("backup_list", {
+    req: { addr: addr ?? null, tag: tag ?? null },
+  });
+}
+
+/** Restore a snapshot by tag + timestamp. */
+export async function backupRestore(
+  tag: string,
+  timestamp: number,
+  addr?: string,
+): Promise<BackupRestoreResult> {
+  return invoke("backup_restore", {
+    req: { addr: addr ?? null, tag, timestamp },
+  });
+}
+
+/** Delete a snapshot by tag + timestamp. */
+export async function backupDelete(
+  tag: string,
+  timestamp: number,
+  addr?: string,
+): Promise<{ ok: boolean; tag: string; timestamp: number }> {
+  return invoke("backup_delete", {
+    req: { addr: addr ?? null, tag, timestamp },
+  });
+}
+
 /** Render a 440² crop/fit preview of `imagePath`. Returns a PNG data URL. */
 export async function profileAvatarPreview(
   imagePath: string,
@@ -3685,3 +3755,60 @@ export async function payloadCheck(
     error: resp?.reachable ? null : resp?.error ?? null,
   };
 }
+
+// ── Remote Play ───────────────────────────────────────────────────────
+export interface RemotePlayStatus {
+  state: string;
+  pin: string;
+  account_id: string;
+  seconds_left: number;
+}
+
+export async function remoteplayRequest(
+  manualAccountId?: string,
+  addr?: string,
+): Promise<{ ok: boolean }> {
+  return invoke("remoteplay_request", {
+    req: { addr: addr ?? null, manual_account_id: manualAccountId ?? null },
+  });
+}
+
+export async function remoteplayStatus(addr?: string): Promise<RemotePlayStatus> {
+  return invoke("remoteplay_status", { addr: addr ?? null });
+}
+
+export async function remoteplayCancel(addr?: string): Promise<{ ok: boolean }> {
+  return invoke("remoteplay_cancel", { addr: addr ?? null });
+}
+
+// ── Fan Curve ─────────────────────────────────────────────────────────
+export interface FanCurvePoint {
+  temp_c: number;
+  duty_pct: number;
+}
+
+export async function fanCurveSet(points: FanCurvePoint[], addr?: string): Promise<{ ok: boolean }> {
+  return invoke("fan_curve_set", {
+    req: { addr: addr ?? null, points },
+  });
+}
+
+// ── Notifications ─────────────────────────────────────────────────────
+export interface Notification {
+  seq: number;
+  ts: number;
+  msg: string;
+  level: string;
+  read: boolean;
+}
+
+export interface NotificationList {
+  notifications: Notification[];
+}
+
+export async function notifList(sinceSeq = 0, addr?: string): Promise<NotificationList> {
+  return invoke("notif_list", {
+    req: { addr: addr ?? null, since_seq: sinceSeq },
+  });
+}
+

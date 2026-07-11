@@ -9,6 +9,7 @@
 //! diagnostic endpoints that don't.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::Duration;
 
@@ -26,6 +27,14 @@ const READINESS_POLL: Duration = Duration::from_millis(200);
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 
 static CHILD: OnceCell<tokio::sync::Mutex<Option<Child>>> = OnceCell::const_new();
+
+/// True while our spawned sidecar child is (believed to be) alive. A
+/// sync mirror of "the CHILD slot is occupied", set right after spawn and
+/// cleared on stop/exit/teardown, so `set_url` — which is sync and can't
+/// await the async CHILD lock — can cheaply tell whether a local sidecar
+/// is running. Used to stop a settings-sync from relocating a running
+/// sidecar off its (possibly fallback) port.
+static LOCAL_CHILD_RUNNING: AtomicBool = AtomicBool::new(false);
 
 async fn child_lock() -> &'static tokio::sync::Mutex<Option<Child>> {
     CHILD
@@ -234,6 +243,45 @@ async fn reap_orphan_listener_on(port: u16) {
     sleep(Duration::from_millis(300)).await;
 }
 
+/// True if loopback `port` can be bound right now (nothing is holding
+/// it). Binds and immediately drops, so there's a tiny TOCTOU window
+/// before the engine itself binds — acceptable here: the only racer on
+/// the preferred port is a process we'd want to fall back away from
+/// anyway, and the engine's own bind failure is surfaced by the
+/// readiness path.
+fn loopback_port_free(port: u16) -> bool {
+    std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port)).is_ok()
+}
+
+/// Ask the OS for a free loopback port (bind :0, read the assigned
+/// port, drop the listener). Used as a fallback when the preferred
+/// engine port is occupied by something we couldn't reclaim, so the
+/// desktop can still bring up its own engine instead of failing to
+/// start at all.
+fn pick_free_loopback_port() -> Option<u16> {
+    std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+        .ok()
+        .and_then(|l| l.local_addr().ok())
+        .map(|a| a.port())
+}
+
+/// Extract the TCP port from a `http://host:port` URL, defaulting to
+/// 19113 when it can't be parsed. The local sidecar is always
+/// `127.0.0.1`/`localhost` (no IPv6 literal), so a trailing-colon split
+/// is enough.
+fn port_of(url: &str) -> u16 {
+    url.split("://")
+        .nth(1)
+        .unwrap_or(url)
+        .split('/')
+        .next()
+        .unwrap_or("")
+        .rsplit(':')
+        .next()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(19113)
+}
+
 /// Probe the readiness endpoint. Returns true if the engine answers 200.
 async fn probe(url: &str, client: &reqwest::Client) -> bool {
     let u = format!("{url}{READINESS_PROBE}");
@@ -363,6 +411,12 @@ pub async fn start(app: &AppHandle) -> Result<String> {
         ));
     }
 
+    // Preferred local engine location: the configured loopback URL
+    // (default 127.0.0.1:19113). We try this first and only move off it
+    // if it turns out to be occupied by something we can't reclaim.
+    let preferred_url = configured.clone();
+    let preferred_port = port_of(&preferred_url);
+
     // Fast-path: already running. We HOLD the child_lock across the
     // probe await so a concurrent start() can't both observe the
     // existing-child state, race past, and end up double-spawning.
@@ -378,7 +432,7 @@ pub async fn start(app: &AppHandle) -> Result<String> {
     {
         let mut guard = child_lock().await.lock().await;
         let client = reqwest::Client::new();
-        let port_responds = probe(DEFAULT_ENGINE_URL, &client).await;
+        let port_responds = probe(&preferred_url, &client).await;
 
         if guard.is_some() && port_responds {
             // The port responds, but it might be a stale-version
@@ -387,36 +441,67 @@ pub async fn start(app: &AppHandle) -> Result<String> {
             // on next start). Verify the version matches the
             // shell's expectation; if not, kill it and respawn
             // from the bundled bytes.
-            if engine_version_matches(DEFAULT_ENGINE_URL, &client).await {
-                return Ok(DEFAULT_ENGINE_URL.to_string());
+            if engine_version_matches(&preferred_url, &client).await {
+                return Ok(preferred_url);
             }
             eprintln!(
-                "[engine] stale-version sibling engine detected on {DEFAULT_ENGINE_URL} — killing and respawning",
+                "[engine] stale-version sibling engine detected on {preferred_url} — killing and respawning",
             );
         }
 
         // Kill our child handle if we have one. take() empties the
-        // slot so the spawn path below can overwrite cleanly.
+        // slot so the spawn path below can overwrite cleanly. Clear the
+        // running flag too, so the set_url() that picks this launch's
+        // (possibly fallback) port below isn't rejected by its own
+        // "don't relocate a running sidecar" guard.
         if let Some(mut child) = guard.take() {
             let _ = child.kill().await;
             let _ = child.wait().await;
+            LOCAL_CHILD_RUNNING.store(false, Ordering::SeqCst);
         }
 
         // Belt-and-braces: even if our child handle was empty (no
         // record of spawning) or already-killed, the port may still be
         // held by an orphan from a previous crashed launch — and the
         // 2.2.22 stdin-EOF watcher only protects against future
-        // crashes, not retroactively. If we still see a listener on
-        // 19113 here, it's not ours; reap it so the bind below
+        // crashes, not retroactively. If we still see a listener on the
+        // preferred port here, it's not ours; reap it so the bind below
         // succeeds. No-op when the port is free.
         if port_responds {
             // Re-probe to confirm it's still listening (we might have
             // just killed our own child above, freeing the port).
-            if probe(DEFAULT_ENGINE_URL, &client).await {
-                reap_orphan_listener_on(19113).await;
+            if probe(&preferred_url, &client).await {
+                reap_orphan_listener_on(preferred_port).await;
             }
         }
     }
+
+    // Decide where our engine will actually live. Normally the preferred
+    // port is now free (it always was, or we just reaped whatever was on
+    // it). If it's STILL held — a squatter we couldn't kill (another
+    // app, a permissions/AV block, or a standalone ps5upload-engine the
+    // user launched by mistake) — fall back to an OS-assigned free port
+    // so the desktop can ALWAYS bring up its own engine instead of being
+    // wedged on launch forever. Without this, anything camping on 19113
+    // permanently breaks "open the app".
+    let (engine_url, engine_port) = if loopback_port_free(preferred_port) {
+        (preferred_url, preferred_port)
+    } else if let Some(free) = pick_free_loopback_port() {
+        eprintln!(
+            "[engine] preferred port {preferred_port} still occupied after reap attempt; \
+             falling back to free port {free} so the app can start",
+        );
+        (format!("http://127.0.0.1:{free}"), free)
+    } else {
+        // Couldn't even secure a free port; try the preferred one anyway
+        // and let the readiness path surface a clear error.
+        (preferred_url, preferred_port)
+    };
+    // Point the whole app at wherever the engine actually landed. The
+    // renderer's command proxies read engine::url() fresh on every call,
+    // so this reroutes them with no renderer-side change. In-memory only
+    // — next launch re-tries the preferred port first.
+    set_url(engine_url.clone());
 
     let binary = find_engine_binary(app).context("locating ps5upload-engine binary")?;
     // Log alongside the extracted binary so the user can reach it via
@@ -458,6 +543,11 @@ pub async fn start(app: &AppHandle) -> Result<String> {
         // doesn't auto-exit when the dev pipes a file in or
         // backgrounds it).
         .env("PS5UPLOAD_PARENT_WATCH", "1")
+        // Tell the engine which port to bind. Normally 19113, but may be
+        // an OS-assigned fallback when 19113 was occupied — the engine
+        // reads PS5UPLOAD_ENGINE_PORT and binds it (default 19113 if
+        // unset, which keeps a standalone `cargo run` on the usual port).
+        .env("PS5UPLOAD_ENGINE_PORT", engine_port.to_string())
         // Make engine panics include a backtrace in the captured stderr /
         // engine.log + the panic hook's ring entry (see run_cli's
         // install_panic_logger). Without this a panic is just a one-line
@@ -494,6 +584,7 @@ pub async fn start(app: &AppHandle) -> Result<String> {
     // Store the child immediately so shutdown can reach it even if
     // readiness never arrives.
     *child_lock().await.lock().await = Some(child);
+    LOCAL_CHILD_RUNNING.store(true, Ordering::SeqCst);
 
     // Pipe engine stdout/stderr to our stderr with a tag AND tee to
     // the persistent log file. `take()` grabs the handles out of the
@@ -523,6 +614,7 @@ pub async fn start(app: &AppHandle) -> Result<String> {
                     } else {
                         None
                     };
+                    LOCAL_CHILD_RUNNING.store(false, Ordering::SeqCst);
                     eprintln!("[engine-watch] engine process exited (code {code:?})");
                     let _ = app_exit.emit("ps5upload-engine-exit", code);
                 });
@@ -534,8 +626,8 @@ pub async fn start(app: &AppHandle) -> Result<String> {
     let deadline = Instant::now() + READINESS_TIMEOUT;
     let client = reqwest::Client::new();
     while Instant::now() < deadline {
-        if probe(DEFAULT_ENGINE_URL, &client).await {
-            return Ok(DEFAULT_ENGINE_URL.to_string());
+        if probe(&engine_url, &client).await {
+            return Ok(engine_url.clone());
         }
         // Detect early exit so we surface crashes rather than waiting out
         // the full 30s deadline.
@@ -565,9 +657,10 @@ pub async fn start(app: &AppHandle) -> Result<String> {
             let _ = child.kill().await;
             let _ = child.wait().await;
         }
+        LOCAL_CHILD_RUNNING.store(false, Ordering::SeqCst);
     }
     Err(anyhow!(
-        "engine did not become ready at {DEFAULT_ENGINE_URL}{READINESS_PROBE} within {:?}.\n  log: {}\n  Common causes on Windows: SmartScreen / antivirus blocked the freshly-extracted .exe; another process is bound to {DEFAULT_ENGINE_URL}; loopback firewall rule.",
+        "engine did not become ready at {engine_url}{READINESS_PROBE} within {:?}.\n  log: {}\n  Common causes on Windows: SmartScreen / antivirus blocked the freshly-extracted .exe; a loopback firewall rule; or no loopback port was bindable at all.",
         READINESS_TIMEOUT,
         log_path.display()
     ))
@@ -594,6 +687,7 @@ pub async fn stop() {
     let Some(mut child) = guard.take() else {
         return;
     };
+    LOCAL_CHILD_RUNNING.store(false, Ordering::SeqCst);
 
     // Best-effort graceful shutdown. On UNIX we could SIGTERM; tokio's
     // Child::kill() maps to SIGKILL on unix and TerminateProcess on Windows.
@@ -688,9 +782,27 @@ pub fn set_url(url: String) {
     } else {
         url.to_string()
     };
-    *engine_url_cell()
-        .write()
-        .unwrap_or_else(|e| e.into_inner()) = next;
+    // Guard against a settings-sync relocating a RUNNING local sidecar.
+    // The renderer mirrors its preferred URL to us on hydrate (e.g. the
+    // default 127.0.0.1:19113); if our sidecar fell back to a different
+    // loopback port because 19113 was occupied, honoring that push would
+    // point the command proxies at the wrong (empty) port. A running
+    // sidecar lives where it bound and can only move on restart — so
+    // ignore a *loopback* rewrite while it's up. Remote (non-loopback)
+    // URLs still switch the target, and start()'s own set_url runs before
+    // the child is marked running, so the fallback URL still takes hold.
+    // `self::url()` — the local `url` param shadows the module fn by bare name.
+    let current = self::url();
+    if LOCAL_CHILD_RUNNING.load(Ordering::SeqCst)
+        && is_loopback_url(&next)
+        && next != current
+    {
+        eprintln!(
+            "[engine] ignoring engine-URL change to {next} — a local sidecar is running on {current} (moving it needs a restart)",
+        );
+        return;
+    }
+    *engine_url_cell().write().unwrap_or_else(|e| e.into_inner()) = next;
 }
 
 /// True when `url` points at loopback — i.e. we should spawn the bundled

@@ -41,10 +41,35 @@ export const useEngineStore = create<EngineState>((set) => ({
     const engineUrl = normalizeEngineUrl(url);
     window.localStorage.setItem(KEY_ENGINE_URL, engineUrl);
     set({ engineUrl });
+    // A deliberate user/settings change of the engine URL supersedes any
+    // transient sidecar-fallback override (see setLiveEngineUrl).
+    liveEngineUrl = null;
   },
 }));
 
-/** Non-hook accessor for module-scope callers (api/engine.ts, api/ps5.ts). */
+/**
+ * Transient, NON-persisted override for the live engine location.
+ *
+ * The store's `engineUrl` is the user's *preference* (default 19113 or a
+ * remote engine), persisted to localStorage and mirrored to settings.json.
+ * But on desktop the sidecar can land on a *different* loopback port when
+ * 19113 is occupied — the Rust shell reports where it actually bound via
+ * the `ps5upload-engine-ready` event / `engine_url_get`. We stash that
+ * here so the renderer's DIRECT fetches (job polling, cover-art img-src,
+ * streaming) hit the real port, WITHOUT touching the persisted preference
+ * (so the next launch still re-tries 19113 first) and WITHOUT the
+ * settings-mirror clobbering it. Cleared when the user changes the URL.
+ */
+let liveEngineUrl: string | null = null;
+
+/** Follow the sidecar to wherever it actually bound (fallback port). */
+export function setLiveEngineUrl(url: string): void {
+  liveEngineUrl = normalizeEngineUrl(url);
+}
+
+/** Non-hook accessor for module-scope callers (api/engine.ts, api/ps5.ts).
+ *  The live override wins when present so direct fetches follow a
+ *  fallback port; otherwise the persisted preference is used. */
 export function getEngineUrl(): string {
-  return useEngineStore.getState().engineUrl;
+  return liveEngineUrl ?? useEngineStore.getState().engineUrl;
 }

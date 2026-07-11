@@ -218,8 +218,10 @@ void runtime_apply_ucred_jailbreak(void) {
         0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
     };
     rc |= kernel_set_ucred_caps(-1, k_full_caps);
-    /* sceAttr: byte 3 = 0x80 of the 8-byte attrs field. */
-    rc |= kernel_set_ucred_attrs(-1, 0x80000000ull);
+    /* sceAttr: byte 3 = 0x80 of the 8-byte attrs field (now a 32-byte
+     * array in SDK v0.41+; zero the rest). */
+    static const uint8_t k_attrs[32] = { 0x00, 0x00, 0x00, 0x80 };
+    rc |= kernel_set_ucred_attrs(-1, k_attrs);
     /* sceAuthID — last so if earlier writes fail we at least
      * leave authid in a known state. */
     /* 2.2.54-fix-round-12: REVERTED permanent ShellCore authid.

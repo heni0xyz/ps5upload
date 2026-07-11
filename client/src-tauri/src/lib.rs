@@ -153,7 +153,16 @@ pub fn run() {
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 match engine::start(&handle).await {
-                    Ok(url) => eprintln!("[tauri] engine ready at {url}"),
+                    Ok(url) => {
+                        eprintln!("[tauri] engine ready at {url}");
+                        // Tell the renderer where the engine actually
+                        // landed, so its DIRECT fetches (job polling,
+                        // cover-art img-src, streaming) target the right
+                        // port even when we fell back off 19113 because
+                        // something was squatting it.
+                        use tauri::Emitter;
+                        let _ = handle.emit("ps5upload-engine-ready", &url);
+                    }
                     Err(e) => {
                         let message = format!("engine failed to start: {e}");
                         {
@@ -172,6 +181,7 @@ pub fn run() {
             // (localhost:19113). Used by the Upload/Library/Volumes/
             // FileSystem/Hardware surfaces.
             commands::engine_url_set,
+            commands::engine_url_get,
             commands::ps5_volumes,
             commands::pkg_scan_external,
             commands::pkg_metadata_console,
@@ -195,6 +205,15 @@ pub fn run() {
             commands::profile_clear_slot,
             commands::user_create,
             commands::user_delete,
+            commands::backup_snapshot,
+            commands::backup_list,
+            commands::backup_restore,
+            commands::backup_delete,
+            commands::remoteplay_request,
+            commands::remoteplay_status,
+            commands::remoteplay_cancel,
+            commands::fan_curve_set,
+            commands::notif_list,
             commands::profile_avatar_preview,
             commands::profile_avatar_current,
             commands::profile_apply_avatar,

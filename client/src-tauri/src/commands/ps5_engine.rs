@@ -12,7 +12,7 @@
 use std::sync::OnceLock;
 use std::time::Duration;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::engine;
 
@@ -152,6 +152,18 @@ pub async fn engine_url_set(url: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Return the engine base URL the command proxies currently hit. The
+/// renderer calls this on startup (and on the `ps5upload-engine-ready`
+/// event) to learn where the sidecar actually landed — normally
+/// 127.0.0.1:19113, but possibly an OS-assigned fallback port when 19113
+/// was occupied by another process. Without this the renderer's DIRECT
+/// fetches (job polling, cover-art `img-src`, streaming) would keep
+/// hitting the wrong port and silently fail.
+#[tauri::command]
+pub async fn engine_url_get() -> Result<String, String> {
+    Ok(engine::url().to_string())
+}
+
 #[tauri::command]
 pub async fn ps5_volumes(addr: Option<String>) -> Result<JsonValue, String> {
     let base = engine::url();
@@ -179,14 +191,15 @@ pub async fn pkg_scan_external(addr: Option<String>) -> Result<JsonValue, String
 /// APP_VER) via ranged reads. Lazily enriches the External Packages listing
 /// (the bulk scan stays filename-fast). Proxies GET /api/ps5/pkg/metadata.
 #[tauri::command]
-pub async fn pkg_metadata_console(
-    addr: Option<String>,
-    path: String,
-) -> Result<JsonValue, String> {
+pub async fn pkg_metadata_console(addr: Option<String>, path: String) -> Result<JsonValue, String> {
     let base = engine::url();
     let p = urlencoding(&path);
     let url = match addr {
-        Some(a) => format!("{base}/api/ps5/pkg/metadata?addr={}&path={}", urlencoding(&a), p),
+        Some(a) => format!(
+            "{base}/api/ps5/pkg/metadata?addr={}&path={}",
+            urlencoding(&a),
+            p
+        ),
         None => format!("{base}/api/ps5/pkg/metadata?path={}", p),
     };
     get_json(&url).await
@@ -576,6 +589,70 @@ pub struct UserDeleteReq {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct BackupSnapshotReq {
+    #[serde(default)]
+    pub addr: Option<String>,
+    pub tag: String,
+    pub path: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BackupListReq {
+    #[serde(default)]
+    pub addr: Option<String>,
+    #[serde(default)]
+    pub tag: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BackupRestoreReq {
+    #[serde(default)]
+    pub addr: Option<String>,
+    pub tag: String,
+    pub timestamp: i64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BackupDeleteReq {
+    #[serde(default)]
+    pub addr: Option<String>,
+    pub tag: String,
+    pub timestamp: i64,
+}
+
+// ── Remote Play ───────────────────────────────────────────────────────
+#[derive(Debug, Deserialize)]
+pub struct RemotePlayReq {
+    #[serde(default)]
+    pub addr: Option<String>,
+    #[serde(default)]
+    pub manual_account_id: Option<String>,
+}
+
+// ── Fan curve ─────────────────────────────────────────────────────────
+#[derive(Debug, Deserialize)]
+pub struct FanCurveSetReq {
+    #[serde(default)]
+    pub addr: Option<String>,
+    pub points: Vec<FanCurvePoint>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FanCurvePoint {
+    pub temp_c: i32,
+    pub duty_pct: i32,
+}
+
+// ── Notifications ─────────────────────────────────────────────────────
+#[derive(Debug, Deserialize)]
+pub struct NotifListReq {
+    #[serde(default)]
+    pub addr: Option<String>,
+    #[serde(default)]
+    pub since_seq: u64,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct ProfileAvatarReq {
     #[serde(default)]
     pub addr: Option<String>,
@@ -677,8 +754,116 @@ pub async fn user_create(req: UserCreateReq) -> Result<JsonValue, String> {
 pub async fn user_delete(req: UserDeleteReq) -> Result<JsonValue, String> {
     let base = engine::url();
     let url = format!("{base}/api/ps5/users/delete");
-    let body = serde_json::json!({ "addr": req.addr, "uid": req.uid, "wipe_saves": req.wipe_saves });
+    let body =
+        serde_json::json!({ "addr": req.addr, "uid": req.uid, "wipe_saves": req.wipe_saves });
     post_json(&url, &body).await
+}
+
+/// Snapshot a file or directory tree under a backup tag.
+/// Proxies `/api/ps5/backup/snapshot`.
+#[tauri::command]
+pub async fn backup_snapshot(req: BackupSnapshotReq) -> Result<JsonValue, String> {
+    let base = engine::url();
+    let url = format!("{base}/api/ps5/backup/snapshot");
+    let body = serde_json::json!({ "addr": req.addr, "tag": req.tag, "path": req.path });
+    post_json_long(&url, &body).await
+}
+
+/// List snapshots (optionally filtered by tag).
+/// Proxies `/api/ps5/backup/list`.
+#[tauri::command]
+pub async fn backup_list(req: BackupListReq) -> Result<JsonValue, String> {
+    let base = engine::url();
+    let mut url = format!("{base}/api/ps5/backup/list");
+    let mut params = Vec::new();
+    if let Some(ref addr) = req.addr {
+        params.push(format!("addr={}", urlencoding(addr)));
+    }
+    if let Some(ref tag) = req.tag {
+        if !tag.is_empty() {
+            params.push(format!("tag={}", urlencoding(tag)));
+        }
+    }
+    if !params.is_empty() {
+        url.push('?');
+        url.push_str(&params.join("&"));
+    }
+    get_json(&url).await
+}
+
+/// Restore a snapshot by tag + timestamp.
+/// Proxies `/api/ps5/backup/restore`.
+#[tauri::command]
+pub async fn backup_restore(req: BackupRestoreReq) -> Result<JsonValue, String> {
+    let base = engine::url();
+    let url = format!("{base}/api/ps5/backup/restore");
+    let body = serde_json::json!({ "addr": req.addr, "tag": req.tag, "timestamp": req.timestamp });
+    post_json_long(&url, &body).await
+}
+
+/// Delete a snapshot by tag + timestamp.
+/// Proxies `/api/ps5/backup/delete`.
+#[tauri::command]
+pub async fn backup_delete(req: BackupDeleteReq) -> Result<JsonValue, String> {
+    let base = engine::url();
+    let url = format!("{base}/api/ps5/backup/delete");
+    let body = serde_json::json!({ "addr": req.addr, "tag": req.tag, "timestamp": req.timestamp });
+    post_json_long(&url, &body).await
+}
+
+// ── Remote Play ───────────────────────────────────────────────────────
+#[tauri::command]
+pub async fn remoteplay_request(req: RemotePlayReq) -> Result<JsonValue, String> {
+    let base = engine::url();
+    let url = format!("{base}/api/ps5/remoteplay/request");
+    let body = serde_json::json!({ "addr": req.addr, "manual_account_id": req.manual_account_id });
+    post_json(&url, &body).await
+}
+
+#[tauri::command]
+pub async fn remoteplay_status(addr: Option<String>) -> Result<JsonValue, String> {
+    let base = engine::url();
+    let mut url = format!("{base}/api/ps5/remoteplay/status");
+    if let Some(a) = addr {
+        url.push_str(&format!("?addr={}", urlencoding(&a)));
+    }
+    get_json(&url).await
+}
+
+#[tauri::command]
+pub async fn remoteplay_cancel(addr: Option<String>) -> Result<JsonValue, String> {
+    let base = engine::url();
+    let mut url = format!("{base}/api/ps5/remoteplay/cancel");
+    if let Some(a) = addr {
+        url.push_str(&format!("?addr={}", urlencoding(&a)));
+    }
+    post_json(&url, &serde_json::json!({})).await
+}
+
+// ── Fan curve ─────────────────────────────────────────────────────────
+#[tauri::command]
+pub async fn fan_curve_set(req: FanCurveSetReq) -> Result<JsonValue, String> {
+    let base = engine::url();
+    let url = format!("{base}/api/ps5/hw/fan-curve");
+    let body = serde_json::json!({ "addr": req.addr, "points": req.points });
+    post_json(&url, &body).await
+}
+
+// ── Notifications ─────────────────────────────────────────────────────
+#[tauri::command]
+pub async fn notif_list(req: NotifListReq) -> Result<JsonValue, String> {
+    let base = engine::url();
+    let mut url = format!("{base}/api/ps5/notif/list");
+    let mut params = Vec::new();
+    if let Some(ref addr) = req.addr {
+        params.push(format!("addr={}", urlencoding(addr)));
+    }
+    params.push(format!("since_seq={}", req.since_seq));
+    if !params.is_empty() {
+        url.push('?');
+        url.push_str(&params.join("&"));
+    }
+    get_json(&url).await
 }
 
 /// Render a 440² crop/fit preview (returns `{ "data_url": "data:image/png;..." }`).

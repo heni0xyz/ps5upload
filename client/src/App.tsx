@@ -35,6 +35,10 @@ const VolumesScreen = lazy(() => import("./screens/Volumes"));
 const FileSystemScreen = lazy(() => import("./screens/FileSystem"));
 const HardwareScreen = lazy(() => import("./screens/Hardware"));
 const ProfileScreen = lazy(() => import("./screens/Profile"));
+const BackupScreen = lazy(() => import("./screens/Backup"));
+const RemotePlayScreen = lazy(() => import("./screens/RemotePlay"));
+const FanCurveScreen = lazy(() => import("./screens/FanCurve"));
+const NotificationsScreen = lazy(() => import("./screens/Notifications"));
 const PayloadsScreen = lazy(() => import("./screens/Payloads"));
 const NanoDnsScreen = lazy(() => import("./screens/NanoDns"));
 const FirstRunScreen = lazy(() => import("./screens/FirstRun"));
@@ -170,6 +174,38 @@ export default function App() {
             </Suspense>
           }
         />
+        <Route
+          path="/backup"
+          element={
+            <Suspense fallback={<ScreenLoader />}>
+              <BackupScreen />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/remote-play"
+          element={
+            <Suspense fallback={<ScreenLoader />}>
+              <RemotePlayScreen />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/fan-curve"
+          element={
+            <Suspense fallback={<ScreenLoader />}>
+              <FanCurveScreen />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/notifications"
+          element={
+            <Suspense fallback={<ScreenLoader />}>
+              <NotificationsScreen />
+            </Suspense>
+          }
+        />
         {/* Legacy deep link / bookmark support for pre-2.12 installs.
             The Payloads tab now owns send functionality under ?tab=send.
             Keep the redirect indefinitely for any external bookmarks. */}
@@ -236,6 +272,14 @@ export default function App() {
           }
         />
         <Route
+          path="/activity"
+          element={
+            <Suspense fallback={<ScreenLoader />}>
+              <ActivityScreen />
+            </Suspense>
+          }
+        />
+        <Route
           path="/stats"
           element={
             <Suspense fallback={<ScreenLoader />}>
@@ -295,14 +339,6 @@ export default function App() {
           element={
             <Suspense fallback={<ScreenLoader />}>
               <AuditLogScreen />
-            </Suspense>
-          }
-        />
-        <Route
-          path="/activity"
-          element={
-            <Suspense fallback={<ScreenLoader />}>
-              <ActivityScreen />
             </Suspense>
           }
         />

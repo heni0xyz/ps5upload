@@ -5,11 +5,11 @@
 #
 # Installs:
 #   - Xcode Command Line Tools (system WebKit framework + clang)
-#   - Homebrew (if missing) → node, llvm@18, openssl@3, pkg-config, cmake, file
-#     (llvm@18 is the only Homebrew llvm shipped with `ld.lld`, which prospero-clang needs;
-#      the root Makefile pins LLVM_CONFIG to llvm@18 on macOS — keep them aligned)
+#   - Homebrew (if missing) → node, llvm@22, openssl@3, pkg-config, cmake, file
+#     (SDK v0.41+ ships its own ld.lld and supports llvm 16–22; we pin llvm@22
+#      to match the Makefile's LLVM_CONFIG)
 #   - Rust toolchain (rustup, stable, default profile)
-#   - PS5 Payload SDK v0.40 → $PS5_PAYLOAD_SDK (default $HOME/ps5-payload-sdk)
+#   - PS5 Payload SDK v0.41 → $PS5_PAYLOAD_SDK (default $HOME/ps5-payload-sdk)
 #
 # After it finishes the script prints the env exports you need to add to ~/.zshrc
 # (or ~/.bash_profile) so `make build` and `make run-client` work in any new shell.
@@ -23,12 +23,12 @@ set -euo pipefail
 # it to /opt/ps5-payload-sdk (root-only). Override the install location with
 # PS5_SDK_INSTALL_DIR if you want somewhere else.
 SDK_DIR="${PS5_SDK_INSTALL_DIR:-$HOME/ps5-payload-sdk}"
-SDK_TAG="v0.40"
+SDK_TAG="v0.41"
 SDK_URL="https://github.com/ps5-payload-dev/sdk/releases/download/${SDK_TAG}/ps5-payload-sdk.zip"
 
 BREW_DEPS=(
   node
-  llvm@18
+  llvm@22
   openssl@3
   pkg-config
   cmake
@@ -77,12 +77,12 @@ log "Installing brew packages: ${BREW_DEPS[*]}"
 brew install "${BREW_DEPS[@]}"
 ok "brew packages installed"
 
-# Verify llvm@18 has ld.lld (the reason the Makefile pins this version)
-LLVM18_PREFIX="$(brew --prefix llvm@18 2>/dev/null || true)"
-if [ -n "$LLVM18_PREFIX" ] && [ -x "$LLVM18_PREFIX/bin/ld.lld" ]; then
-  ok "llvm@18 with ld.lld at $LLVM18_PREFIX"
+# Verify llvm@22 is installed
+LLVM22_PREFIX="$(brew --prefix llvm@22 2>/dev/null || true)"
+if [ -n "$LLVM22_PREFIX" ] && [ -x "$LLVM22_PREFIX/bin/llvm-config" ]; then
+  ok "llvm@22 at $LLVM22_PREFIX"
 else
-  warn "llvm@18 installed but ld.lld not found — payload build will likely fail"
+  warn "llvm@22 not found — payload build will fail"
 fi
 
 # ─── 4. Rust toolchain ─────────────────────────────────────────────────────────

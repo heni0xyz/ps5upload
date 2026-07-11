@@ -26,14 +26,12 @@ PS5_LOADER_PORT ?= 9021
 PS5_PAYLOAD_SDK ?= /opt/ps5-payload-sdk
 export PS5_PAYLOAD_SDK
 
-# On macOS the payload SDK's `prospero-clang` wrapper resolves `ld.lld` and
-# `clang` through `prospero-llvm-config`. Homebrew keeps llvm keg-only (no
-# PATH-exposed `llvm-config-NN`), AND llvm@21 ships without `ld.lld`, so we
-# hard-code llvm@18 — the only Homebrew llvm known to include the full
-# toolchain on this platform. Linux/WSL picks up `llvm-config-<N>` from apt
-# naturally and doesn't need this override.
+# On macOS the payload SDK's `prospero-clang` wrapper resolves `ld.lld`
+# and `clang` through `prospero-llvm-config`. SDK v0.41+ ships its own
+# ld.lld and supports llvm 16–22; we pin to Homebrew's llvm@22.
+# Linux/WSL picks up `llvm-config-<N>` from apt naturally.
 ifeq ($(shell uname -s),Darwin)
-  LLVM_CONFIG ?= /opt/homebrew/opt/llvm@18/bin/llvm-config
+  LLVM_CONFIG ?= /opt/homebrew/opt/llvm@22/bin/llvm-config
   export LLVM_CONFIG
 endif
 

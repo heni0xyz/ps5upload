@@ -4024,6 +4024,59 @@ struct UserDeleteReq {
     wipe_saves: bool,
 }
 
+// ─── Backup & restore ───────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct BackupSnapshotReq {
+    addr: Option<String>,
+    tag: String,
+    path: String,
+}
+
+#[derive(Deserialize)]
+struct BackupListReq {
+    addr: Option<String>,
+    #[serde(default)]
+    tag: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct BackupRestoreReq {
+    addr: Option<String>,
+    tag: String,
+    timestamp: i64,
+}
+
+#[derive(Deserialize)]
+struct BackupDeleteReq {
+    addr: Option<String>,
+    tag: String,
+    timestamp: i64,
+}
+
+// ── v4.1: Remote Play ─────────────────────────────────────────────────
+#[derive(Deserialize)]
+struct RemotePlayReq {
+    addr: Option<String>,
+    #[serde(default)]
+    manual_account_id: Option<String>,
+}
+
+// ── v4.1: Fan curve ───────────────────────────────────────────────────
+#[derive(Deserialize)]
+struct FanCurveSetReq {
+    addr: Option<String>,
+    points: Vec<ps5upload_core::fan_curve::FanCurvePoint>,
+}
+
+// ── v4.1: Notifications ───────────────────────────────────────────────
+#[derive(Deserialize)]
+struct NotifListReq {
+    addr: Option<String>,
+    #[serde(default)]
+    since_seq: u64,
+}
+
 async fn profile_info_handler(
     State(state): State<AppState>,
     Query(q): Query<AddrQuery>,
@@ -4170,6 +4223,221 @@ async fn user_delete_handler(
             })),
         )
             .into_response(),
+        Err(e) => json_err(StatusCode::BAD_GATEWAY, format!("{e:#}")).into_response(),
+    }
+}
+
+/// POST /api/ps5/backup/snapshot — snapshot a file or directory tree.
+async fn backup_snapshot_handler(
+    State(state): State<AppState>,
+    Json(req): Json<BackupSnapshotReq>,
+) -> impl IntoResponse {
+    let addr = mgmt_addr_or_default(req.addr, &state.default_ps5_addr);
+    let tag = req.tag;
+    let path = req.path;
+    crate::log_info!("backup_snapshot: addr={addr} tag={tag} path={path}");
+    let r = tokio::task::spawn_blocking(move || {
+        ps5upload_core::backup::backup_snapshot(&addr, &tag, &path)
+    })
+    .await
+    .map_err(anyhow::Error::from)
+    .and_then(|r| r);
+    match r {
+        Ok(result) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "ok": true,
+                "tag": result.tag,
+                "timestamp": result.timestamp,
+                "files": result.files,
+                "bytes": result.bytes,
+            })),
+        )
+            .into_response(),
+        Err(e) => json_err(StatusCode::BAD_GATEWAY, format!("{e:#}")).into_response(),
+    }
+}
+
+/// GET /api/ps5/backup/list — list snapshots (optionally filtered by tag).
+async fn backup_list_handler(
+    State(state): State<AppState>,
+    Query(req): Query<BackupListReq>,
+) -> impl IntoResponse {
+    let addr = mgmt_addr_or_default(req.addr, &state.default_ps5_addr);
+    let tag = req.tag.unwrap_or_default();
+    let r = tokio::task::spawn_blocking(move || ps5upload_core::backup::backup_list(&addr, &tag))
+        .await
+        .map_err(anyhow::Error::from)
+        .and_then(|r| r);
+    match r {
+        Ok(list) => (StatusCode::OK, Json(list)).into_response(),
+        Err(e) => json_err(StatusCode::BAD_GATEWAY, format!("{e:#}")).into_response(),
+    }
+}
+
+/// POST /api/ps5/backup/restore — restore a snapshot.
+async fn backup_restore_handler(
+    State(state): State<AppState>,
+    Json(req): Json<BackupRestoreReq>,
+) -> impl IntoResponse {
+    let addr = mgmt_addr_or_default(req.addr, &state.default_ps5_addr);
+    let tag = req.tag;
+    let ts = req.timestamp;
+    crate::log_info!("backup_restore: addr={addr} tag={tag} ts={ts}");
+    let r = tokio::task::spawn_blocking(move || {
+        ps5upload_core::backup::backup_restore(&addr, &tag, ts)
+    })
+    .await
+    .map_err(anyhow::Error::from)
+    .and_then(|r| r);
+    match r {
+        Ok(result) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "ok": true,
+                "tag": result.tag,
+                "restored": result.restored,
+            })),
+        )
+            .into_response(),
+        Err(e) => json_err(StatusCode::BAD_GATEWAY, format!("{e:#}")).into_response(),
+    }
+}
+
+/// POST /api/ps5/backup/delete — delete a snapshot.
+async fn backup_delete_handler(
+    State(state): State<AppState>,
+    Json(req): Json<BackupDeleteReq>,
+) -> impl IntoResponse {
+    let addr = mgmt_addr_or_default(req.addr, &state.default_ps5_addr);
+    let tag = req.tag;
+    let ts = req.timestamp;
+    let tag_clone = tag.clone();
+    crate::log_info!("backup_delete: addr={addr} tag={tag} ts={ts}");
+    let r =
+        tokio::task::spawn_blocking(move || ps5upload_core::backup::backup_delete(&addr, &tag, ts))
+            .await
+            .map_err(anyhow::Error::from)
+            .and_then(|r| r);
+    match r {
+        Ok(()) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "ok": true,
+                "tag": tag_clone,
+                "timestamp": ts,
+            })),
+        )
+            .into_response(),
+        Err(e) => json_err(StatusCode::BAD_GATEWAY, format!("{e:#}")).into_response(),
+    }
+}
+
+// ── v4.1: Remote Play handlers ────────────────────────────────────────
+async fn remoteplay_request_handler(
+    State(state): State<AppState>,
+    Json(req): Json<RemotePlayReq>,
+) -> impl IntoResponse {
+    let addr = mgmt_addr_or_default(req.addr, &state.default_ps5_addr);
+    let acct = req.manual_account_id;
+    crate::log_info!("remoteplay_request: addr={addr}");
+    let r = tokio::task::spawn_blocking(move || {
+        ps5upload_core::remoteplay::remoteplay_request(&addr, acct.as_deref())
+    })
+    .await
+    .map_err(anyhow::Error::from)
+    .and_then(|r| r);
+    match r {
+        Ok(()) => (StatusCode::OK, Json(serde_json::json!({"ok": true}))).into_response(),
+        Err(e) => json_err(StatusCode::BAD_GATEWAY, format!("{e:#}")).into_response(),
+    }
+}
+
+async fn remoteplay_status_handler(
+    State(state): State<AppState>,
+    Query(q): Query<AddrQuery>,
+) -> impl IntoResponse {
+    let addr = mgmt_addr_or_default(q.addr, &state.default_ps5_addr);
+    let r =
+        tokio::task::spawn_blocking(move || ps5upload_core::remoteplay::remoteplay_status(&addr))
+            .await
+            .map_err(anyhow::Error::from)
+            .and_then(|r| r);
+    match r {
+        Ok(result) => (StatusCode::OK, Json(result)).into_response(),
+        Err(e) => json_err(StatusCode::BAD_GATEWAY, format!("{e:#}")).into_response(),
+    }
+}
+
+async fn remoteplay_cancel_handler(
+    State(state): State<AppState>,
+    Query(q): Query<AddrQuery>,
+) -> impl IntoResponse {
+    let addr = mgmt_addr_or_default(q.addr, &state.default_ps5_addr);
+    let r =
+        tokio::task::spawn_blocking(move || ps5upload_core::remoteplay::remoteplay_cancel(&addr))
+            .await
+            .map_err(anyhow::Error::from)
+            .and_then(|r| r);
+    match r {
+        Ok(()) => (StatusCode::OK, Json(serde_json::json!({"ok": true}))).into_response(),
+        Err(e) => json_err(StatusCode::BAD_GATEWAY, format!("{e:#}")).into_response(),
+    }
+}
+
+// ── v4.1: Fan curve handler ───────────────────────────────────────────
+async fn fan_curve_set_handler(
+    State(state): State<AppState>,
+    Json(req): Json<FanCurveSetReq>,
+) -> impl IntoResponse {
+    let addr = mgmt_addr_or_default(req.addr, &state.default_ps5_addr);
+    let points = req.points;
+    crate::log_info!("fan_curve_set: addr={addr} points={}", points.len());
+    let r = tokio::task::spawn_blocking(move || {
+        ps5upload_core::fan_curve::fan_curve_set(&addr, &points)
+    })
+    .await
+    .map_err(anyhow::Error::from)
+    .and_then(|r| r);
+    match r {
+        Ok(()) => (StatusCode::OK, Json(serde_json::json!({"ok": true}))).into_response(),
+        Err(e) => json_err(StatusCode::BAD_GATEWAY, format!("{e:#}")).into_response(),
+    }
+}
+
+// ── v5.1: Fan curve get handler ───────────────────────────────────────
+async fn fan_curve_get_handler(
+    State(state): State<AppState>,
+    Query(q): Query<AddrQuery>,
+) -> impl IntoResponse {
+    let addr = mgmt_addr_or_default(q.addr, &state.default_ps5_addr);
+    let r = tokio::task::spawn_blocking(move || {
+        ps5upload_core::fan_curve::fan_curve_get(&addr)
+    })
+    .await
+    .map_err(anyhow::Error::from)
+    .and_then(|r| r);
+    match r {
+        Ok(points) => {
+            (StatusCode::OK, Json(serde_json::json!({"points": points}))).into_response()
+        }
+        Err(e) => json_err(StatusCode::BAD_GATEWAY, format!("{e:#}")).into_response(),
+    }
+}
+
+// ── v4.1: Notifications handler ───────────────────────────────────────
+async fn notif_list_handler(
+    State(state): State<AppState>,
+    Query(req): Query<NotifListReq>,
+) -> impl IntoResponse {
+    let addr = mgmt_addr_or_default(req.addr, &state.default_ps5_addr);
+    let since = req.since_seq;
+    let r = tokio::task::spawn_blocking(move || ps5upload_core::notif::notif_list(&addr, since))
+        .await
+        .map_err(anyhow::Error::from)
+        .and_then(|r| r);
+    match r {
+        Ok(result) => (StatusCode::OK, Json(result)).into_response(),
         Err(e) => json_err(StatusCode::BAD_GATEWAY, format!("{e:#}")).into_response(),
     }
 }
@@ -6147,6 +6415,22 @@ async fn run(cfg: EngineConfig) -> anyhow::Result<()> {
         .route("/api/ps5/users/list", get(ps5_users_list))
         .route("/api/ps5/users/create", post(user_create_handler))
         .route("/api/ps5/users/delete", post(user_delete_handler))
+        .route("/api/ps5/backup/snapshot", post(backup_snapshot_handler))
+        .route("/api/ps5/backup/list", get(backup_list_handler))
+        .route("/api/ps5/backup/restore", post(backup_restore_handler))
+        .route("/api/ps5/backup/delete", post(backup_delete_handler))
+        .route(
+            "/api/ps5/remoteplay/request",
+            post(remoteplay_request_handler),
+        )
+        .route("/api/ps5/remoteplay/status", get(remoteplay_status_handler))
+        .route(
+            "/api/ps5/remoteplay/cancel",
+            post(remoteplay_cancel_handler),
+        )
+        .route("/api/ps5/hw/fan-curve", post(fan_curve_set_handler))
+        .route("/api/ps5/hw/fan-curve/get", get(fan_curve_get_handler))
+        .route("/api/ps5/notif/list", get(notif_list_handler))
         .route("/api/ps5/saves/list", get(ps5_saves_list))
         .route("/api/ps5/screenshots/list", get(ps5_screenshots_list))
         .route("/api/ps5/videos/list", get(ps5_videos_list))

@@ -351,16 +351,18 @@ jobs:
       - name: Install payload toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang lld unzip
+          # Add LLVM apt repo for llvm-22 (not in Ubuntu 24.04 default repos)
+          curl -fsSL https://apt.llvm.org/llvm.sh | sudo bash -s -- 22
+          sudo apt-get install -y clang-22 llvm-22-dev lld-22 unzip
 
-      # Pin SDK tag — keep in sync with publish.yml. v0.40 ships
-      # getloadavg() (which hw_info.c::hw_power_get_text calls) and the
-      # newest 11.xx/12.xx kernel offsets; the payload builds clean
-      # against it (verified locally). Bumping below v0.39 would fail
-      # with `undefined symbol: getloadavg` at link time.
+      # Pin SDK tag — keep in sync with publish.yml. v0.41 changes
+      # kernel_set_ucred_attrs to take a 32-byte array (was uint64_t);
+      # the payload builds clean against it (verified locally). Bumping
+      # below v0.41 would fail with `undefined symbol: getloadavg`
+      # at link time.
       - name: Download PS5 Payload SDK
         env:
-          PS5_SDK_TAG: v0.40
+          PS5_SDK_TAG: v0.41
         run: |
           curl -L -o /tmp/ps5-payload-sdk.zip \
             "https://github.com/ps5-payload-dev/sdk/releases/download/${PS5_SDK_TAG}/ps5-payload-sdk.zip"
@@ -369,6 +371,9 @@ jobs:
       - name: Build payload
         env:
           PS5_PAYLOAD_SDK: /opt/ps5-payload-sdk
+          # SDK's prospero-llvm-config doesn't list llvm-config-22 in its
+          # candidate search (maxes at 21), so point it there explicitly.
+          LLVM_CONFIG: /usr/bin/llvm-config-22
         run: make payload
 
       - name: Verify ELF

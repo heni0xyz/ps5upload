@@ -8,7 +8,7 @@
 #     libxdo, libssl, build-essential, file, curl, wget, unzip, pkg-config, python3)
 #   - Rust toolchain (rustup, stable, default profile)
 #   - Node.js 22 LTS via NodeSource (only if `node` is missing — keeps existing installs)
-#   - PS5 Payload SDK v0.40 → $PS5_PAYLOAD_SDK (default $HOME/ps5-payload-sdk)
+#   - PS5 Payload SDK v0.41 → $PS5_PAYLOAD_SDK (default $HOME/ps5-payload-sdk)
 #
 # After it finishes, the script prints the env exports you need to add to ~/.bashrc
 # (or ~/.zshrc) so `make build` and `make run-client` work in any new shell.
@@ -22,7 +22,7 @@ set -euo pipefail
 # it to /opt/ps5-payload-sdk (root-only). Override the install location with
 # PS5_SDK_INSTALL_DIR if you want somewhere else.
 SDK_DIR="${PS5_SDK_INSTALL_DIR:-$HOME/ps5-payload-sdk}"
-SDK_TAG="v0.40"
+SDK_TAG="v0.41"
 SDK_URL="https://github.com/ps5-payload-dev/sdk/releases/download/${SDK_TAG}/ps5-payload-sdk.zip"
 NODE_MAJOR="22"
 
@@ -41,14 +41,15 @@ APT_DEPS=(
   unzip
   pkg-config
   python3
-  # LLVM 18 toolchain — required by the PS5 SDK's `prospero-clang` wrapper, which
-  # walks PATH for `llvm-config-21..15` and dispatches into `${llvm-bindir}/clang`
-  # + `${llvm-bindir}/ld.lld`. We pin to 18 to match the Makefile's macOS
-  # `LLVM_CONFIG ?= /opt/homebrew/opt/llvm@18/bin/llvm-config` so both platforms
-  # use the same major and the SDK's ABI expectations stay predictable.
-  clang-18
-  llvm-18-dev
-  lld-18
+  # LLVM 22 toolchain — required by the PS5 SDK's `prospero-clang` wrapper,
+  # which dispatches into `${llvm-bindir}/clang` + `${llvm-bindir}/ld.lld`.
+  # SDK v0.41+ supports llvm 16–22; we pin to 22 to match the Makefile's
+  # macOS `LLVM_CONFIG` so both platforms use the same major. Ubuntu 24.04
+  # doesn't ship llvm-22 in its own repos, so we add apt.llvm.org below
+  # before installing these.
+  clang-22
+  llvm-22-dev
+  lld-22
 )
 
 # ─── helpers ───────────────────────────────────────────────────────────────────
@@ -74,6 +75,15 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 # ─── 1. apt deps ───────────────────────────────────────────────────────────────
+# Add the LLVM apt repo (Ubuntu 24.04 doesn't ship llvm-22 natively).
+# The automatic installer script from apt.llvm.org handles GPG key + sources.list.
+log "Adding LLVM apt repository for llvm-22"
+if ! apt-cache show clang-22 >/dev/null 2>&1; then
+  curl -fsSL https://apt.llvm.org/llvm.sh | $SUDO bash -s -- 22
+else
+  ok "llvm-22 already available in apt"
+fi
+
 log "Installing apt deps for Tauri (you may be prompted for your sudo password)"
 $SUDO apt-get update
 $SUDO apt-get install -y "${APT_DEPS[@]}"

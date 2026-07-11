@@ -1,5 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
+import { invoke } from "@tauri-apps/api/core";
 import { useConnectionStore } from "./connection";
+import { setLiveEngineUrl } from "./engine";
 import { log } from "./logs";
 
 let installed = false;
@@ -7,6 +9,30 @@ let installed = false;
 export function installEngineStartupEvents(): void {
   if (installed) return;
   installed = true;
+
+  // Follow the sidecar to wherever it actually bound. Normally that's the
+  // default 127.0.0.1:19113, but the Rust shell falls back to a free port
+  // when 19113 is occupied (e.g. a standalone ps5upload-engine the user
+  // launched by mistake) — and the renderer's DIRECT fetches (job polling,
+  // cover-art img-src, streaming) must hit the real port. Two paths, so we
+  // catch it regardless of ordering: the event (fired when start()
+  // finishes) AND a one-shot pull (covers the event firing before this
+  // listener attached, when the engine came up faster than the UI).
+  void listen<string>("ps5upload-engine-ready", (event) => {
+    if (typeof event.payload === "string" && event.payload) {
+      setLiveEngineUrl(event.payload);
+    }
+  }).catch(() => {
+    /* best-effort subscription */
+  });
+  void invoke<string>("engine_url_get")
+    .then((url) => {
+      if (typeof url === "string" && url) setLiveEngineUrl(url);
+    })
+    .catch(() => {
+      /* command unavailable (mobile / older shell) — the event path
+         and the default URL still apply */
+    });
   void listen<string>("ps5upload-engine-startup-error", (event) => {
     const message =
       typeof event.payload === "string"

@@ -35,6 +35,10 @@ import {
   LayoutDashboard,
   ShieldCheck,
   Bug,
+  Archive,
+  MonitorPlay,
+  Fan,
+  Bell,
 } from "lucide-react";
 import clsx from "clsx";
 import { useThemeStore } from "../state/theme";
@@ -87,22 +91,11 @@ interface NavItem {
   hideInBrowser?: boolean;
 }
 
-// 2.12.0 sidebar regroup. Previously: 3 sections (Overview / Workflow /
-// Help), with Workflow being 13 flat items — a "every feature gets a
-// top-level slot" anti-pattern that hid the app's story behind a wall
-// of equal-weight options. Now: 5 verb-driven sections that tell a
-// progression — Setup → Files → Browse → System → Diagnostics — plus
-// a clear distinction between primary navigation and utility entries.
-// Dashboard moved from "Overview" (it's neither setup nor first-thing)
-// to System. Activity + Stats grouped under Diagnostics. Payloads sits
-// in Setup next to Connection — sending the helper is a beginning-phase
-// step (Connection's own step 2), so it belongs with "get started",
-// not buried under System.
-//
-// Total nav items unchanged (no screen removed); only the grouping +
-// "Payload library → Homebrew catalog" rename. The screen merges
-// (Payloads + SendPayload into one tabbed screen, Volumes split, etc.)
-// are separate commits that don't touch the sidebar shape.
+// v4.0.0 sidebar regroup. Consolidated from 6 sections with a duplicate
+// "System" header into clean sections: Setup → Files → Browse → System →
+// Diagnostics → Help. The old sidebar had two separate "System" blocks
+// which was confusing — all system-management items now live under a
+// single System heading.
 const items: NavItem[] = [
   // ─ Setup: orient, connect, get started ─
   {
@@ -113,26 +106,13 @@ const items: NavItem[] = [
     section: { key: "nav_section_setup", fallback: "Setup" },
   },
   { to: "/connection", key: "connect", fallback: "Connection", icon: Cable },
-  // Payloads sits right after Connection: sending the helper (and other
-  // homebrew payloads) is a beginning-phase step — it's literally step 2
-  // of the Connection screen's own flow. Grouping it here matches how
-  // people actually work (orient → connect → send payload → check
-  // status) instead of burying it under System as a "manage what's
-  // running" tool.
   {
     to: "/payloads",
     key: "payloads",
     fallback: "Payloads",
     icon: Boxes,
-    // Both tabs (Catalog, Send) download/read a payload file on the HOST
-    // filesystem before pushing it to the PS5's loader port — no browser
-    // equivalent. Distinct from Connection's own "send the ps5upload
-    // helper" step (already gated separately), which stays available.
     hideInBrowser: true,
   },
-  // Dashboard lives with Setup, not System: it's the "am I connected,
-  // what's running?" morning check — the thing you look at right after
-  // (or instead of) the Connection screen, not a hardware tool.
   {
     to: "/dashboard",
     key: "dashboard",
@@ -140,7 +120,7 @@ const items: NavItem[] = [
     icon: LayoutDashboard,
   },
 
-  // ─ Files: the "send things and install things" verbs ─
+  // ─ Files: upload, install, manage saves & captures ─
   {
     to: "/upload",
     key: "upload",
@@ -213,6 +193,20 @@ const items: NavItem[] = [
     fallback: "Profile",
     icon: CircleUserRound,
   },
+  { to: "/fan-curve", key: "fan_curve", fallback: "Fan Curve", icon: Fan },
+  {
+    to: "/remote-play",
+    key: "remote_play",
+    fallback: "Remote Play",
+    icon: MonitorPlay,
+  },
+  {
+    to: "/notifications",
+    key: "notifications_screen",
+    fallback: "Notifications",
+    icon: Bell,
+  },
+  { to: "/backup", key: "backup", fallback: "Backup", icon: Archive },
   { to: "/nanodns", key: "nanodns", fallback: "nanoDNS", icon: Globe },
   { to: "/shell", key: "shell", fallback: "Shell", icon: TerminalSquare },
 

@@ -64,6 +64,7 @@ SRCS := src/main.c src/runtime.c src/takeover.c src/register.c src/hw_info.c \
         src/proc_list.c src/ptrace_remote.c src/shellui_rpc.c src/bgft.c \
         src/sony_api_lock.c src/kernel_rw_lock.c src/sys_time.c \
         src/sys_registry.c src/smp_meta.c src/profile.c \
+        src/backup.c src/remoteplay.c src/fan_curve.c src/notif.c \
         $(BLAKE3_SRCS)
 
 # Headers as Make prerequisites so editing a .h triggers a rebuild. This

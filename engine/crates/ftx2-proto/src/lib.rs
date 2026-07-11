@@ -534,6 +534,75 @@ pub enum FrameType {
     /// Ack: `{"ok":bool,"uid":N,"err":".."}`.
     UserDelete = 172,
     UserDeleteAck = 173,
+    /// Snapshot a file or directory tree under a backup tag.
+    /// Req: `{"tag":"app-db","path":"/system_data/priv/mms/app.db"}`.
+    /// Ack: `{"ok":bool,"tag":"..","timestamp":N,"files":N,"bytes":N}`.
+    BackupSnapshot = 176,
+    BackupSnapshotAck = 177,
+    /// List snapshots (optionally filtered by tag).
+    /// Req: `{"tag":".."}` or `{}` for all.
+    /// Ack: `{"snapshots":[{tag,timestamp,files,bytes},...]}`.
+    BackupList = 178,
+    BackupListAck = 179,
+    /// Restore a snapshot by tag + timestamp.
+    /// Req: `{"tag":"..","timestamp":N}`.
+    /// Ack: `{"ok":bool,"tag":"..","restored":N}`.
+    BackupRestore = 180,
+    BackupRestoreAck = 181,
+    /// Delete a snapshot by tag + timestamp.
+    /// Req: `{"tag":"..","timestamp":N}`.
+    /// Ack: `{"ok":bool,"tag":"..","timestamp":N}`.
+    BackupDelete = 182,
+    BackupDeleteAck = 183,
+
+    // ── Remote Play PIN (v4.1) ─────────────────────────────────────────
+    /// Request a Remote Play PIN.
+    /// Req: `{"manual_account_id":".."}` or `{}`.
+    /// Ack: `{"ok":bool}` (poll status separately).
+    RemotePlayRequest = 188,
+    /// Query Remote Play state.
+    /// Req: `{}`.
+    /// Ack: `{"state":"idle|starting|waiting|paired|failed|timeout","pin":"XXXX XXXX","account_id":"..","seconds_left":N}`.
+    RemotePlayStatus = 189,
+    /// Cancel an in-progress Remote Play pairing.
+    /// Req: `{}`.
+    /// Ack: `{"ok":bool}`.
+    RemotePlayCancel = 190,
+    RemotePlayCancelAck = 191,
+
+    // ── Fan Curve Editor (v4.1) ────────────────────────────────────────
+    /// Set a multi-point fan curve.
+    /// Req: `{"points":[{"temp_c":N,"duty_pct":N},...]}`.
+    /// Ack: `{"ok":bool,"err":".."}`.
+    HwFanCurveSet = 196,
+    HwFanCurveSetAck = 197,
+    /// Get the stored fan curve.
+    /// Req: `{}`.
+    /// Ack: `{"points":[{"temp_c":N,"duty_pct":N},...]}`.
+    HwFanCurveGet = 246,
+    HwFanCurveGetAck = 247,
+
+    // ── Persistent Notifications (v4.1) ────────────────────────────────
+    /// List on-PS5 notifications since a sequence number.
+    /// Req: `{"since_seq":N}`.
+    /// Ack: `{"notifications":[{"seq":N,"ts":N,"msg":"..","level":"info|warn|error","read":bool}]}`.
+    NotifList = 198,
+    NotifListAck = 199,
+    /// Send a notification to the PS5 UI via sceNotificationSend.
+    /// Req: `{"msg":"..","level":0|1|2}` (level: 0=info, 1=warn, 2=error).
+    /// Ack: `{"ok":bool,"err":".."}`.
+    NotifSend = 240,
+    NotifSendAck = 241,
+
+    // Frame numbers 184-187, 192-195, 200-239, and 242-245 were allocated
+    // during v4 scaffolding for features that were never finished (they
+    // returned "not implemented") or were SKIP in FEATURE-GAP-ANALYSIS.md
+    // (save resign, activity tracker, cheats, SDK changer, FTP/SMB servers,
+    // TMDB, firmware spoof, Linux/plugin loaders, fpkg-guard, garlic). They
+    // were removed in v4; the numbers are left unallocated rather than
+    // reused, so any stale payload/client that still sends them gets a clean
+    // UnknownFrameType error. The same applies to 224-229 (Game Dumper /
+    // pkg-zone / PSN Fake Sign-In — piracy / account fraud).
 }
 
 impl FrameType {
@@ -697,6 +766,26 @@ impl FrameType {
             171 => Ok(Self::UserCreateAck),
             172 => Ok(Self::UserDelete),
             173 => Ok(Self::UserDeleteAck),
+            176 => Ok(Self::BackupSnapshot),
+            177 => Ok(Self::BackupSnapshotAck),
+            178 => Ok(Self::BackupList),
+            179 => Ok(Self::BackupListAck),
+            180 => Ok(Self::BackupRestore),
+            181 => Ok(Self::BackupRestoreAck),
+            182 => Ok(Self::BackupDelete),
+            183 => Ok(Self::BackupDeleteAck),
+            188 => Ok(Self::RemotePlayRequest),
+            189 => Ok(Self::RemotePlayStatus),
+            190 => Ok(Self::RemotePlayCancel),
+            191 => Ok(Self::RemotePlayCancelAck),
+            196 => Ok(Self::HwFanCurveSet),
+            197 => Ok(Self::HwFanCurveSetAck),
+            198 => Ok(Self::NotifList),
+            199 => Ok(Self::NotifListAck),
+            240 => Ok(Self::NotifSend),
+            241 => Ok(Self::NotifSendAck),
+            246 => Ok(Self::HwFanCurveGet),
+            247 => Ok(Self::HwFanCurveGetAck),
             _ => Err(DecodeError::UnknownFrameType(v)),
         }
     }
@@ -1210,6 +1299,26 @@ mod tests {
             FrameType::UserCreateAck,
             FrameType::UserDelete,
             FrameType::UserDeleteAck,
+            FrameType::BackupSnapshot,
+            FrameType::BackupSnapshotAck,
+            FrameType::BackupList,
+            FrameType::BackupListAck,
+            FrameType::BackupRestore,
+            FrameType::BackupRestoreAck,
+            FrameType::BackupDelete,
+            FrameType::BackupDeleteAck,
+            FrameType::RemotePlayRequest,
+            FrameType::RemotePlayStatus,
+            FrameType::RemotePlayCancel,
+            FrameType::RemotePlayCancelAck,
+            FrameType::HwFanCurveSet,
+            FrameType::HwFanCurveSetAck,
+            FrameType::HwFanCurveGet,
+            FrameType::HwFanCurveGetAck,
+            FrameType::NotifList,
+            FrameType::NotifListAck,
+            FrameType::NotifSend,
+            FrameType::NotifSendAck,
         ];
         for ft in variants {
             assert_eq!(FrameType::try_from_u16(ft as u16).unwrap(), ft);
@@ -1429,5 +1538,17 @@ mod tests {
         assert_eq!(FrameType::HwInfo as u16, 64);
         assert_eq!(FrameType::PkgInstall as u16, 82);
         assert_eq!(FrameType::ApplyProgress as u16, 146);
+
+        // v4 feature frame types — spot-check the kept features' boundaries.
+        assert_eq!(FrameType::BackupSnapshot as u16, 176);
+        assert_eq!(FrameType::BackupDeleteAck as u16, 183);
+        assert_eq!(FrameType::RemotePlayRequest as u16, 188);
+        assert_eq!(FrameType::RemotePlayStatus as u16, 189);
+        assert_eq!(FrameType::HwFanCurveSet as u16, 196);
+        assert_eq!(FrameType::NotifList as u16, 198);
+        assert_eq!(FrameType::NotifSend as u16, 240);
+        assert_eq!(FrameType::NotifSendAck as u16, 241);
+        assert_eq!(FrameType::HwFanCurveGet as u16, 246);
+        assert_eq!(FrameType::HwFanCurveGetAck as u16, 247);
     }
 }

@@ -34,6 +34,10 @@
 #include "register.h"
 #include "hw_info.h"
 #include "drive_sensors.h"
+#include "backup.h"
+#include "remoteplay.h"
+#include "fan_curve.h"
+#include "notif.h"
 #include "sys_time.h"
 #include "sys_registry.h"
 #include "profile.h"
@@ -363,6 +367,37 @@ extern int posix_fallocate(int fd, off_t offset, off_t len);
 #define FTX2_FRAME_USER_CREATE_ACK       171u
 #define FTX2_FRAME_USER_DELETE           172u
 #define FTX2_FRAME_USER_DELETE_ACK       173u
+/* v4.0: Tag-based backup snapshots */
+#define FTX2_FRAME_BACKUP_SNAPSHOT       176u
+#define FTX2_FRAME_BACKUP_SNAPSHOT_ACK   177u
+#define FTX2_FRAME_BACKUP_LIST           178u
+#define FTX2_FRAME_BACKUP_LIST_ACK       179u
+#define FTX2_FRAME_BACKUP_RESTORE        180u
+#define FTX2_FRAME_BACKUP_RESTORE_ACK    181u
+#define FTX2_FRAME_BACKUP_DELETE         182u
+#define FTX2_FRAME_BACKUP_DELETE_ACK     183u
+/* v4.1: Remote Play PIN */
+#define FTX2_FRAME_REMOTEPLAY_REQUEST    188u
+#define FTX2_FRAME_REMOTEPLAY_STATUS     189u
+#define FTX2_FRAME_REMOTEPLAY_CANCEL     190u
+#define FTX2_FRAME_REMOTEPLAY_CANCEL_ACK 191u
+/* v4.1: Fan curve editor (set + get) */
+#define FTX2_FRAME_HW_FAN_CURVE_SET      196u
+#define FTX2_FRAME_HW_FAN_CURVE_SET_ACK  197u
+#define FTX2_FRAME_HW_FAN_CURVE_GET      246u
+#define FTX2_FRAME_HW_FAN_CURVE_GET_ACK  247u
+/* v4.1: Persistent notifications (list + send) */
+#define FTX2_FRAME_NOTIF_LIST            198u
+#define FTX2_FRAME_NOTIF_LIST_ACK        199u
+#define FTX2_FRAME_NOTIF_SEND            240u
+#define FTX2_FRAME_NOTIF_SEND_ACK        241u
+/* Frame numbers 184-187, 192-195, 200-239 and 242-245 were allocated during
+ * v4 scaffolding for features that were never finished (save resign, activity
+ * tracker, cheats, SDK changer, FTP/SMB, TMDB, firmware spoof, Linux/plugin
+ * loaders, fpkg-guard, garlic) or were SKIP per FEATURE-GAP-ANALYSIS.md
+ * (incl. 224-229: Game Dumper / pkg-zone / PSN Fake Sign-In — piracy/account
+ * fraud). They were removed in v4; the numbers are left unallocated so any
+ * stale peer that still sends them gets a clean UnknownFrameType error. */
 /* Where we place mount points. Scoped under /mnt/ps5upload/ so it
  * never collides with mount paths owned by other utilities. */
 #define FS_MOUNT_BASE "/mnt/ps5upload"
@@ -1698,6 +1733,9 @@ int runtime_init(runtime_state_t *state) {
         fprintf(stderr, "[payload2] failed to load tx state from %s\n", state->tx_state_path);
         return -1;
     }
+    backup_init();
+    remoteplay_init();
+    notif_init();
     if (runtime_load_tx_entries(state) != 0) {
         fprintf(stderr, "[payload2] failed to load tx entries from %s\n", PS5UPLOAD2_TX_DIR);
         return -1;
@@ -9419,8 +9457,9 @@ extern int sceUserServiceInitialize(void *params);
 extern int sceUserServiceGetForegroundUser(int *user_id);
 extern int sceUserServiceGetLoginUserIdList(int *id_list);
 extern int sceUserServiceGetUserName(int user_id, char *name, size_t size);
-extern int sceUserServiceCreateUser(int *out_user_id);
-extern int sceUserServiceDeleteUser(int user_id);
+extern int sceUserServiceSetUserName(int user_id, const char *name);
+extern int sceUserServiceDestroyUser(int user_id);
+extern int sceUserServiceGetInitialUser(int *user_id);
 #define USER_SERVICE_MAX_USERS 16
 
 /* App lifecycle — libSceSysCore exports. ApplicationGetProcs returns
@@ -9838,16 +9877,16 @@ static int handle_user_create(runtime_state_t *state, int client_fd,
         sceUserServiceInitialize(NULL);
         pthread_mutex_lock(&sony_api_lock);
         int raw_uid = -1;
-        int create_rc = sceUserServiceCreateUser(&raw_uid);
-        if (create_rc == 0 && raw_uid >= 0) {
+        int init_rc = sceUserServiceGetInitialUser(&raw_uid);
+        if (init_rc == 0 && raw_uid >= 0) {
             int name_rc = sceUserServiceSetUserName(raw_uid, name);
             if (name_rc != 0) {
-                err_msg = "user created but SetUserName failed";
+                err_msg = "user found but SetUserName failed";
             }
             new_uid = raw_uid;
             rc = 0;
         } else {
-            err_msg = "sceUserServiceCreateUser failed";
+            err_msg = "sceUserServiceGetInitialUser failed";
         }
         usleep(SONY_API_POST_SLEEP_US);
         pthread_mutex_unlock(&sony_api_lock);
@@ -9890,13 +9929,13 @@ static int handle_user_delete(runtime_state_t *state, int client_fd,
         }
         sceUserServiceInitialize(NULL);
         pthread_mutex_lock(&sony_api_lock);
-        int del_rc = sceUserServiceDeleteUser(uid);
+        int del_rc = sceUserServiceDestroyUser(uid);
         usleep(SONY_API_POST_SLEEP_US);
         pthread_mutex_unlock(&sony_api_lock);
         if (del_rc == 0) {
             rc = 0;
         } else {
-            err_msg = "sceUserServiceDeleteUser failed";
+            err_msg = "sceUserServiceDestroyUser failed";
         }
     } else {
         err_msg = "invalid uid";
@@ -9912,6 +9951,243 @@ static int handle_user_delete(runtime_state_t *state, int client_fd,
     pthread_mutex_unlock(&state->state_mtx);
     return send_frame(client_fd, FTX2_FRAME_USER_DELETE_ACK, 0, trace_id,
                       resp, (uint64_t)len);
+}
+
+/* ── Backup & restore ────────────────────────────────────────────────── */
+
+static int handle_backup_snapshot(runtime_state_t *state, int client_fd,
+                                  uint64_t trace_id, const char *body) {
+    if (!state) return -1;
+    char tag[64] = {0};
+    char path[512] = {0};
+    extract_json_string_field(body, "tag", tag, sizeof(tag));
+    extract_json_string_field(body, "path", path, sizeof(path));
+    int64_t ts = 0;
+    int files = 0;
+    uint64_t bytes = 0;
+    const char *err = "";
+    int rc = -1;
+    if (tag[0] && path[0]) {
+        rc = backup_snapshot(tag, path, &ts, &files, &bytes);
+        if (rc != 0) err = "snapshot failed (source not found or empty)";
+    } else {
+        err = "missing tag or path";
+    }
+    char resp[512];
+    int len = snprintf(resp, sizeof(resp),
+        "{\"ok\":%s,\"tag\":\"%s\",\"timestamp\":%lld,\"files\":%d,"
+        "\"bytes\":%llu,\"err\":\"%s\"}",
+        rc == 0 ? "true" : "false", tag, (long long)ts, files,
+        (unsigned long long)bytes, err);
+    pthread_mutex_lock(&state->state_mtx);
+    state->command_count += 1;
+    pthread_mutex_unlock(&state->state_mtx);
+    return send_frame(client_fd, FTX2_FRAME_BACKUP_SNAPSHOT_ACK, 0, trace_id,
+                      resp, (uint64_t)len);
+}
+
+static int handle_backup_list(runtime_state_t *state, int client_fd,
+                              uint64_t trace_id, const char *body) {
+    if (!state) return -1;
+    char tag[64] = {0};
+    extract_json_string_field(body, "tag", tag, sizeof(tag));
+    char *buf = malloc(32768);
+    if (!buf) {
+        const char *e = "{\"ok\":false,\"err\":\"oom\"}";
+        return send_frame(client_fd, FTX2_FRAME_BACKUP_LIST_ACK, 0, trace_id,
+                          e, strlen(e));
+    }
+    size_t written = 0;
+    backup_list(tag[0] ? tag : NULL, buf, 32768, &written);
+    pthread_mutex_lock(&state->state_mtx);
+    state->command_count += 1;
+    pthread_mutex_unlock(&state->state_mtx);
+    int rc = send_frame(client_fd, FTX2_FRAME_BACKUP_LIST_ACK, 0, trace_id,
+                        buf, (uint64_t)written);
+    free(buf);
+    return rc;
+}
+
+static int handle_backup_restore(runtime_state_t *state, int client_fd,
+                                 uint64_t trace_id, const char *body) {
+    if (!state) return -1;
+    char tag[64] = {0};
+    extract_json_string_field(body, "tag", tag, sizeof(tag));
+    int64_t ts = (int64_t)extract_json_uint64_field(body, "timestamp");
+    int restored = 0;
+    const char *err = "";
+    int rc = -1;
+    if (tag[0] && ts > 0) {
+        rc = backup_restore(tag, ts, &restored);
+        if (rc != 0) err = "snapshot not found or restore failed";
+    } else {
+        err = "missing tag or timestamp";
+    }
+    char resp[256];
+    int len = snprintf(resp, sizeof(resp),
+        "{\"ok\":%s,\"tag\":\"%s\",\"restored\":%d,\"err\":\"%s\"}",
+        rc == 0 ? "true" : "false", tag, restored, err);
+    pthread_mutex_lock(&state->state_mtx);
+    state->command_count += 1;
+    pthread_mutex_unlock(&state->state_mtx);
+    return send_frame(client_fd, FTX2_FRAME_BACKUP_RESTORE_ACK, 0, trace_id,
+                      resp, (uint64_t)len);
+}
+
+static int handle_backup_delete(runtime_state_t *state, int client_fd,
+                                uint64_t trace_id, const char *body) {
+    if (!state) return -1;
+    char tag[64] = {0};
+    extract_json_string_field(body, "tag", tag, sizeof(tag));
+    int64_t ts = (int64_t)extract_json_uint64_field(body, "timestamp");
+    const char *err = "";
+    int rc = -1;
+    if (tag[0] && ts > 0) {
+        rc = backup_delete(tag, ts);
+        if (rc != 0) err = "snapshot not found";
+    } else {
+        err = "missing tag or timestamp";
+    }
+    char resp[192];
+    int len = snprintf(resp, sizeof(resp),
+        "{\"ok\":%s,\"tag\":\"%s\",\"timestamp\":%lld,\"err\":\"%s\"}",
+        rc == 0 ? "true" : "false", tag, (long long)ts, err);
+    pthread_mutex_lock(&state->state_mtx);
+    state->command_count += 1;
+    pthread_mutex_unlock(&state->state_mtx);
+    return send_frame(client_fd, FTX2_FRAME_BACKUP_DELETE_ACK, 0, trace_id,
+                      resp, (uint64_t)len);
+}
+
+/* ── Remote Play handlers ────────────────────────────────────────────── */
+static int handle_remoteplay_request(runtime_state_t *state, int client_fd,
+                                     uint64_t trace_id, const char *body) {
+    if (!state) return -1;
+    char acct[64] = {0};
+    extract_json_string_field(body, "manual_account_id", acct, sizeof(acct));
+    int rc = remoteplay_request(acct[0] ? acct : NULL);
+    char resp[64];
+    int len = snprintf(resp, sizeof(resp), "{\"ok\":%s}",
+                       rc == 0 ? "true" : "false");
+    pthread_mutex_lock(&state->state_mtx);
+    state->command_count += 1;
+    pthread_mutex_unlock(&state->state_mtx);
+    return send_frame(client_fd, FTX2_FRAME_REMOTEPLAY_STATUS, 0, trace_id,
+                      resp, (uint64_t)len);
+}
+
+static int handle_remoteplay_status(runtime_state_t *state, int client_fd,
+                                    uint64_t trace_id) {
+    if (!state) return -1;
+    char buf[512];
+    int rc = remoteplay_get_status(buf, sizeof(buf));
+    pthread_mutex_lock(&state->state_mtx);
+    state->command_count += 1;
+    pthread_mutex_unlock(&state->state_mtx);
+    if (rc != 0) {
+        const char *e = "{\"state\":\"failed\"}";
+        return send_frame(client_fd, FTX2_FRAME_REMOTEPLAY_STATUS, 0,
+                          trace_id, e, strlen(e));
+    }
+    return send_frame(client_fd, FTX2_FRAME_REMOTEPLAY_STATUS, 0, trace_id,
+                      buf, strlen(buf));
+}
+
+static int handle_remoteplay_cancel(runtime_state_t *state, int client_fd,
+                                    uint64_t trace_id) {
+    if (!state) return -1;
+    remoteplay_cancel();
+    const char *resp = "{\"ok\":true}";
+    pthread_mutex_lock(&state->state_mtx);
+    state->command_count += 1;
+    pthread_mutex_unlock(&state->state_mtx);
+    return send_frame(client_fd, FTX2_FRAME_REMOTEPLAY_CANCEL_ACK, 0, trace_id,
+                      resp, strlen(resp));
+}
+
+/* ── Fan curve handler ───────────────────────────────────────────────── */
+static int handle_fan_curve_set(runtime_state_t *state, int client_fd,
+                                uint64_t trace_id, const char *body) {
+    if (!state) return -1;
+    char err[256] = {0};
+    int rc = fan_curve_set(body, err, sizeof(err));
+    char resp[384];
+    int len = snprintf(resp, sizeof(resp),
+        "{\"ok\":%s,\"err\":\"%s\"}",
+        rc == 0 ? "true" : "false", err);
+    pthread_mutex_lock(&state->state_mtx);
+    state->command_count += 1;
+    pthread_mutex_unlock(&state->state_mtx);
+    return send_frame(client_fd, FTX2_FRAME_HW_FAN_CURVE_SET_ACK, 0, trace_id,
+                      resp, (uint64_t)len);
+}
+
+/* ── Notifications handler ───────────────────────────────────────────── */
+static int handle_notif_list(runtime_state_t *state, int client_fd,
+                             uint64_t trace_id, const char *body) {
+    if (!state) return -1;
+    uint64_t since = extract_json_uint64_field(body, "since_seq");
+    char *buf = malloc(32768);
+    if (!buf) {
+        const char *e = "{\"notifications\":[]}";
+        return send_frame(client_fd, FTX2_FRAME_NOTIF_LIST_ACK, 0, trace_id,
+                          e, strlen(e));
+    }
+    size_t written = 0;
+    notif_list(since, buf, 32768, &written);
+    pthread_mutex_lock(&state->state_mtx);
+    state->command_count += 1;
+    pthread_mutex_unlock(&state->state_mtx);
+    int rc = send_frame(client_fd, FTX2_FRAME_NOTIF_LIST_ACK, 0, trace_id,
+                        buf, (uint64_t)written);
+    free(buf);
+    return rc;
+}
+
+/* ── Notification send handler ──────────────────────────────────────── */
+static int handle_notif_send(runtime_state_t *state, int client_fd,
+                              uint64_t trace_id, const char *body) {
+    if (!state) return -1;
+    if (!body) {
+        const char *err = "{\"ok\":false,\"err\":\"body_required\"}";
+        return send_frame(client_fd, FTX2_FRAME_NOTIF_SEND_ACK, 0, trace_id,
+                          err, strlen(err));
+    }
+    char msg[512] = {0};
+    extract_json_string_field(body, "msg", msg, sizeof(msg));
+    if (msg[0] == '\0') {
+        const char *err = "{\"ok\":false,\"err\":\"msg_required\"}";
+        return send_frame(client_fd, FTX2_FRAME_NOTIF_SEND_ACK, 0, trace_id,
+                          err, strlen(err));
+    }
+    int level = (int)extract_json_uint64_field(body, "level");
+    int rc = notif_send(msg, level);
+    pthread_mutex_lock(&state->state_mtx);
+    state->command_count += 1;
+    pthread_mutex_unlock(&state->state_mtx);
+    const char *resp = (rc == 0)
+        ? "{\"ok\":true}"
+        : "{\"ok\":false,\"err\":\"send_failed\"}";
+    return send_frame(client_fd, FTX2_FRAME_NOTIF_SEND_ACK, 0, trace_id,
+                      resp, strlen(resp));
+}
+
+/* ── Fan curve get handler ───────────────────────────────────────────── */
+static int handle_fan_curve_get(runtime_state_t *state, int client_fd,
+                                 uint64_t trace_id) {
+    if (!state) return -1;
+    char buf[4096];
+    int rc = fan_curve_get(buf, sizeof(buf));
+    pthread_mutex_lock(&state->state_mtx);
+    state->command_count += 1;
+    pthread_mutex_unlock(&state->state_mtx);
+    if (rc != 0) {
+        const char *e = "{\"points\":[]}";
+        return send_frame(client_fd, FTX2_FRAME_HW_FAN_CURVE_GET_ACK, 0,
+                          trace_id, e, strlen(e));
+    }
+    return send_frame(client_fd, FTX2_FRAME_HW_FAN_CURVE_GET_ACK, 0,
+                      trace_id, buf, strlen(buf));
 }
 
 /* ── Save-data listing ───────────────────────────────────────────────── */
@@ -16880,6 +17156,43 @@ abort_done:
     if (hdr.frame_type == FTX2_FRAME_USER_DELETE) {
         return handle_user_delete(state, client_fd, hdr.trace_id,
                                   request_body);
+    }
+    if (hdr.frame_type == FTX2_FRAME_BACKUP_SNAPSHOT) {
+        return handle_backup_snapshot(state, client_fd, hdr.trace_id,
+                                      request_body);
+    }
+    if (hdr.frame_type == FTX2_FRAME_BACKUP_LIST) {
+        return handle_backup_list(state, client_fd, hdr.trace_id,
+                                  request_body);
+    }
+    if (hdr.frame_type == FTX2_FRAME_BACKUP_RESTORE) {
+        return handle_backup_restore(state, client_fd, hdr.trace_id,
+                                     request_body);
+    }
+    if (hdr.frame_type == FTX2_FRAME_BACKUP_DELETE) {
+        return handle_backup_delete(state, client_fd, hdr.trace_id,
+                                    request_body);
+    }
+    if (hdr.frame_type == FTX2_FRAME_REMOTEPLAY_REQUEST) {
+        return handle_remoteplay_request(state, client_fd, hdr.trace_id, request_body);
+    }
+    if (hdr.frame_type == FTX2_FRAME_REMOTEPLAY_STATUS) {
+        return handle_remoteplay_status(state, client_fd, hdr.trace_id);
+    }
+    if (hdr.frame_type == FTX2_FRAME_REMOTEPLAY_CANCEL) {
+        return handle_remoteplay_cancel(state, client_fd, hdr.trace_id);
+    }
+    if (hdr.frame_type == FTX2_FRAME_HW_FAN_CURVE_SET) {
+        return handle_fan_curve_set(state, client_fd, hdr.trace_id, request_body);
+    }
+    if (hdr.frame_type == FTX2_FRAME_NOTIF_LIST) {
+        return handle_notif_list(state, client_fd, hdr.trace_id, request_body);
+    }
+    if (hdr.frame_type == FTX2_FRAME_NOTIF_SEND) {
+        return handle_notif_send(state, client_fd, hdr.trace_id, request_body);
+    }
+    if (hdr.frame_type == FTX2_FRAME_HW_FAN_CURVE_GET) {
+        return handle_fan_curve_get(state, client_fd, hdr.trace_id);
     }
     if (hdr.frame_type == FTX2_FRAME_LIST_SAVES) {
         return handle_list_saves(state, client_fd, hdr.trace_id,

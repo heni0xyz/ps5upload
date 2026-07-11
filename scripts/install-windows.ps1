@@ -8,7 +8,7 @@
 #   - Visual Studio 2022 Build Tools w/ C++ workload (MSVC + Windows SDK)
 #   - 7zip (used to extract the PS5 SDK zip in CI-clean way)
 #   - Microsoft Edge WebView2 Runtime (preinstalled on Win11; verified)
-#   - PS5 Payload SDK v0.40 → $env:USERPROFILE\ps5-payload-sdk
+#   - PS5 Payload SDK v0.41 → $env:USERPROFILE\ps5-payload-sdk
 #
 # Run from an elevated PowerShell:
 #   PS> Set-ExecutionPolicy -Scope Process Bypass -Force
@@ -27,7 +27,7 @@ param(
   # *build-time* SDK path and may point at somewhere the current user can't
   # write to. Pass -SdkDir or set $env:PS5_SDK_INSTALL_DIR to change.
   [string]$SdkDir = $(if ($env:PS5_SDK_INSTALL_DIR) { $env:PS5_SDK_INSTALL_DIR } else { Join-Path $env:USERPROFILE 'ps5-payload-sdk' }),
-  [string]$SdkTag = 'v0.40'
+  [string]$SdkTag = 'v0.41'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -115,11 +115,11 @@ if (-not (Has-Cmd 7z)) {
   Winget-Install -Id '7zip.7zip' -Name '7-Zip'
 }
 
-# ─── 5b. LLVM 18 (prospero-clang dependency) ──────────────────────────────────
-# The PS5 payload toolchain (prospero-clang + ld.lld) needs LLVM 18 with
+# ─── 5b. LLVM (prospero-clang dependency) ────────────────────────────────────
+# The PS5 payload toolchain (prospero-clang + ld.lld) needs LLVM with
 # lld included. Without this `make payload` fails on a fresh Windows
 # checkout — the SDK ships its own clang shim but expects host lld to be
-# discoverable. macOS pins llvm@18 via brew, Ubuntu via apt; do the
+# discoverable. macOS pins llvm@22 via brew, Ubuntu via apt; do the
 # equivalent here. winget's LLVM.LLVM tracks latest, which is fine —
 # prospero-clang is forward-compatible with newer host LLVM.
 if (Has-Cmd clang) {

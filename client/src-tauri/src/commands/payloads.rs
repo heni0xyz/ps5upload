@@ -702,7 +702,9 @@ fn is_valid_custom_id(id: &str) -> bool {
     };
     !rest.is_empty()
         && rest.len() <= 32
-        && rest.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+        && rest
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
 }
 
 fn custom_repos_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -793,8 +795,7 @@ fn is_valid_repo_segment(s: &str) -> bool {
         && s.len() <= 100
         && s != "."
         && s != ".."
-        && s
-            .chars()
+        && s.chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-')
 }
 
@@ -829,7 +830,10 @@ pub async fn payloads_add_custom_repo(
     display_name: Option<String>,
     asset_hint: Option<String>,
 ) -> Result<PayloadInfo, String> {
-    let host = host.trim().trim_start_matches("https://").trim_end_matches('/');
+    let host = host
+        .trim()
+        .trim_start_matches("https://")
+        .trim_end_matches('/');
     // Accept a pasted "github.com/owner/repo" or full URL in the owner field
     // by NOT parsing it here — the UI splits before calling. We only validate.
     let host = host.to_ascii_lowercase();
@@ -2005,9 +2009,7 @@ mod tests {
     fn release_to_info_carries_tag_and_prerelease() {
         // The version picker relies on `tag` + `prerelease` flowing through
         // release_to_info untouched (a stable build vs a fast-moving rc).
-        let entry: ResolvedEntry = find_entry("shadowmountplus")
-            .expect("catalog entry")
-            .into();
+        let entry: ResolvedEntry = find_entry("shadowmountplus").expect("catalog entry").into();
         let mk = |tag: &str, pre: bool| GithubRelease {
             tag_name: tag.into(),
             name: "".into(),

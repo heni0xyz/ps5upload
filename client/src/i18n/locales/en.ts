@@ -2220,6 +2220,170 @@ shortcuts_activate: "Open / activate",
     "Uploads will fail until the helper is running. Head back to Connection, press Send, and wait for the third step to turn green.",
   upload_helper_unknown_detail:
     "We haven't confirmed your PS5 is running the helper yet. Set your IP and send the helper on the Connection screen first.",
+
+  // Backup & Restore
+  backup: "Backup",
+  backup_title: "Backup & Restore",
+  backup_subtitle: "Snapshot files on the PS5 and restore them later",
+  backup_new_snapshot: "New snapshot",
+  backup_tag_label: "Tag (alphanumeric, dash, underscore)",
+  backup_tag_placeholder: "app-db",
+  backup_path_label: "PS5 path (file or directory)",
+  backup_create: "Create snapshot",
+  backup_snapshots: "Snapshots",
+  backup_empty: "No snapshots yet",
+  backup_empty_hint: "Create a snapshot above to get started",
+  backup_files_unit: "files",
+  backup_restore: "Restore",
+  backup_delete: "Delete",
+  backup_working: "Working...",
+  backup_snapshot_ok: "Snapshotted {files} files ({bytes})",
+  backup_restore_ok: "Restored {count} files",
+  backup_delete_ok: "Snapshot deleted",
+  backup_restore_confirm_title: "Restore snapshot?",
+  backup_restore_confirm_msg:
+    "Restore {tag} @ {ts}? This will overwrite current files.",
+  backup_delete_confirm_title: "Delete snapshot?",
+  backup_delete_confirm_msg:
+    "Delete {tag} @ {ts}? This cannot be undone.",
+  backup_warning:
+    "Snapshots are stored on the PS5 at /data/ps5upload/backups/. Restore overwrites existing files at their original paths.",
+
+  // ── Save Resign ───────────────────────────────────────────────────
+
+  // ── Remote Play ───────────────────────────────────────────────────
+  remotePlay: "Remote Play",
+  remotePlay_title: "Remote Play PIN",
+  remotePlay_description: "Generate a PIN for PS5 Remote Play pairing",
+  remotePlay_account_id: "Account ID (optional)",
+  remotePlay_request: "Generate PIN",
+  remotePlay_cancel: "Cancel",
+  remotePlay_state: "State",
+  remotePlay_pin: "PIN",
+  remotePlay_seconds_left: "Seconds remaining",
+  remotePlay_state_idle: "Idle",
+  remotePlay_state_starting: "Starting...",
+  remotePlay_state_waiting: "Waiting for pairing",
+  remotePlay_state_paired: "Paired",
+  remotePlay_state_failed: "Failed",
+  remotePlay_state_timeout: "Timed out",
+
+  // ── Fan Curve ─────────────────────────────────────────────────────
+  fanCurve: "Fan Curve",
+  fanCurve_title: "Fan Curve Editor",
+  fanCurve_description: "Set a custom multi-point fan curve",
+  fanCurve_temp: "Temperature (°C)",
+  fanCurve_duty: "Duty (%)",
+  fanCurve_add_point: "Add point",
+  fanCurve_apply: "Apply fan curve",
+  fanCurve_remove: "Remove",
+  fanCurve_applied: "Fan curve applied",
+  fanCurve_hint: "Define temperature-to-duty points. The PS5 interpolates between them.",
+
+  // ── Notifications ─────────────────────────────────────────────────
+  notifications_screen: "Notifications",
+  ps5notif_title: "PS5 Notifications",
+  ps5notif_description: "Browse notifications generated on the PS5",
+  ps5notif_empty: "No notifications",
+  ps5notif_empty_hint: "Notifications from the PS5 will appear here",
+  ps5notif_refresh: "Refresh",
+  ps5notif_seq: "Seq",
+  ps5notif_time: "Time",
+  ps5notif_message: "Message",
+  ps5notif_level: "Level",
+
+  // ── Cheats ────────────────────────────────────────────────────────
+
+  // ── SDK Changer ───────────────────────────────────────────────────
+
+  // ── FTP Server ────────────────────────────────────────────────────
+
+  // ── TMDB ──────────────────────────────────────────────────────────
+
+  // ── Cheats ────────────────────────────────────────────────────────
+
+  // ── SMB Browser ───────────────────────────────────────────────────
+
+  // ── FW Spoof ──────────────────────────────────────────────────────
+
+
+  // ── Linux Loader ──────────────────────────────────────────────────
+
+  // ── Plugin Loader ─────────────────────────────────────────────────
+
+  // ── System Tools ──────────────────────────────────────────────────
+  systemTools: "System Tools",
+
+  // ── Nav sections ──────────────────────────────────────────────────
+
+  // ── Sidebar snake_case nav labels for new features ────────────────
+  remote_play: "Remote Play",
+  fan_curve: "Fan Curve",
+  system_tools: "System Tools",
+
+  // ── Additional screen keys (matching actual tr() calls) ───────────
+  // SaveResign extras
+
+  // RemotePlay extras
+  remotePlay_status: "Status",
+  remotePlay_field_state: "State",
+  remotePlay_field_pin: "PIN",
+
+  // FanCurve extras
+  fanCurve_confirm_title: "Apply fan curve?",
+  fanCurve_preview: "Preview",
+  fanCurve_points: "Points",
+  fanCurve_add: "Add point",
+
+  // Cheats extras
+
+  // SdkChanger extras
+
+  // FtpServer extras
+
+  // Tmdb extras
+
+  // SmbBrowser extras
+
+  // FwSpoof extras
+
+  // LinuxLoader extras
+
+  // SystemTools extras
+
+  // ── Remaining tr() keys used in new screens ──────────────────────
+  // Subtitles / descriptions
+
+  remotePlay_subtitle: "Generate a PIN for PS5 Remote Play pairing",
+  remotePlay_account_id_label: "Account ID (optional)",
+  remotePlay_account_id_placeholder: "0000000000000000",
+  remotePlay_field_account_id: "Account ID",
+  remotePlay_field_seconds_left: "Seconds remaining",
+
+  fanCurve_subtitle: "Set a custom multi-point fan curve",
+  fanCurve_confirm_msg: "Apply this fan curve? Incorrect values may damage hardware.",
+
+
+
+
+
+
+
+
+
+
+  // ── Pre-existing tr() keys that were missing ─────────────────────
+  bug_report_browser_unsupported:
+    "Building a bug report zip requires the desktop app — it saves to your computer's filesystem.",
+  connection_step2_browser_unsupported:
+    "The browser can't read a local helper file to send. Load the helper from the desktop app or a USB autoloader first, then this page will detect it automatically.",
+  notifications_unread: "{count} unread",
+  "profile.username.cancel": "Cancel",
+  "profile.username.createBtn": "Create",
+  "profile.username.createUser": "Create User",
+  "profile.username.deleteConfirm": "Delete this user profile?",
+  "profile.username.deleteTitle": "Delete User",
+  "profile.username.newPlaceholder": "New username",
 };
 
 export default en;
