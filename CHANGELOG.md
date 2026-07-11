@@ -4,6 +4,46 @@ What's new in ps5upload, written for humans.
 
 ---
 
+## 4.0.0
+
+A major release. Four new PS5 features, a self-hosted browser web UI, and a
+big reliability fix so the desktop app always opens.
+
+- **New: Remote Play PIN generator.** Generate a Remote Play PIN and see the
+  account ID needed to pair Chiaki / pxplay — right from ps5upload, without
+  digging through the PS5's hidden Remote Play settings. Shows the PIN, a
+  countdown timer, and pairing status; account ID is auto-detected from the
+  console.
+- **New: Fan Curve editor.** Beyond the single-threshold fan pinning, you can
+  now define a multi-point temperature → duty-cycle curve for smoother fan
+  behavior. The curve is pinned through the same hardware path as the fixed
+  threshold, so it survives game launches and is re-applied automatically.
+- **New: Persistent on-PS5 notifications.** Payload-side events (backups, fan
+  actions, errors) are now written to a store on the console that survives
+  payload restarts, so the next time you connect you see everything that
+  happened while you weren't looking.
+- **New: Backup & restore snapshots.** Tag-based snapshots of files or
+  directory trees on the PS5 (e.g. the app database), with list, restore, and
+  delete — a safety net before risky operations.
+- **New: self-hosted browser web UI.** The engine can now serve the full UI in
+  a browser, published as a Docker image
+  (`ghcr.io/phantomptr/ps5upload-engine-webui`). Native-only features (host
+  file/folder pickers, etc.) are gracefully gated out in the browser client.
+- **New: drive sensors + permanent fan speed status.** Per-drive SMART/temp
+  readings and a persistent fan-speed indicator on the Hardware screen.
+- **New: user ID management.** Create and delete local PS5 user accounts from
+  the Profile screen.
+- **Fixed: the desktop app now always opens.** If the engine's default port
+  (19113) is held by something the app can't reclaim — e.g. a standalone
+  `ps5upload-engine` a user launched by mistake — the app now falls back to a
+  free port instead of failing to start, and the UI follows the engine to
+  wherever it actually bound.
+- **Changed: cleaner sidebar.** The navigation was consolidated to remove a
+  duplicate "System" heading and group everything under clear sections.
+- Plus dependency updates and a round of v4.0.0 audit fixes.
+
+---
+
 ## 3.4.0
 
 A reliability and feature release. The big themes: transfer and install
