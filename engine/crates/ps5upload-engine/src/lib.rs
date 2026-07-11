@@ -4411,16 +4411,12 @@ async fn fan_curve_get_handler(
     Query(q): Query<AddrQuery>,
 ) -> impl IntoResponse {
     let addr = mgmt_addr_or_default(q.addr, &state.default_ps5_addr);
-    let r = tokio::task::spawn_blocking(move || {
-        ps5upload_core::fan_curve::fan_curve_get(&addr)
-    })
-    .await
-    .map_err(anyhow::Error::from)
-    .and_then(|r| r);
+    let r = tokio::task::spawn_blocking(move || ps5upload_core::fan_curve::fan_curve_get(&addr))
+        .await
+        .map_err(anyhow::Error::from)
+        .and_then(|r| r);
     match r {
-        Ok(points) => {
-            (StatusCode::OK, Json(serde_json::json!({"points": points}))).into_response()
-        }
+        Ok(points) => (StatusCode::OK, Json(serde_json::json!({"points": points}))).into_response(),
         Err(e) => json_err(StatusCode::BAD_GATEWAY, format!("{e:#}")).into_response(),
     }
 }

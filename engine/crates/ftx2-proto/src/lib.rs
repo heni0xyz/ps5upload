@@ -593,7 +593,6 @@ pub enum FrameType {
     /// Ack: `{"ok":bool,"err":".."}`.
     NotifSend = 240,
     NotifSendAck = 241,
-
     // Frame numbers 184-187, 192-195, 200-239, and 242-245 were allocated
     // during v4 scaffolding for features that were never finished (they
     // returned "not implemented") or were SKIP in FEATURE-GAP-ANALYSIS.md
