@@ -23,6 +23,7 @@ export const LANGUAGES: { code: LanguageCode; label: string }[] = [
   { code: "es", label: "Español" },
   { code: "ar", label: "العربية" },
   { code: "bn", label: "বাংলা" },
+  { code: "pl", label: "Polski" },
   { code: "pt-BR", label: "Português (Brasil)" },
   { code: "ru", label: "Русский" },
   { code: "ja", label: "日本語" },
